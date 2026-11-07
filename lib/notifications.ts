@@ -339,6 +339,12 @@ export type UnifiedNotification = {
   replyTarget: NotificationReplyTarget | null
   replyDisabledReason: string | null
   replyPreview: string | null
+  /** 通知来源标签（复用真实 replyTarget.kind，不靠文案猜测）：帖子回复 / 评论回复 / 留言墙。 */
+  replySourceKind: 'post' | 'daily-message' | 'profile-wall' | 'feedback' | null
+  /** 评论回复快捷点赞目标：被对方回复的那条评论（focus 评论的 parentId）。不可访问时为 null。 */
+  replyLikeTargetId: string | null
+  /** 上述点赞目标的实时点赞状态（服务端权威值）。 */
+  replyLikeState: { liked: boolean; likeCount: number } | null
 }
 
 export type UnreadSummary = {
@@ -375,6 +381,7 @@ export type UnreadPersonalCounts = {
 type DailyCommentNotificationRow = {
   id: string
   messageId: string
+  parentId: string | null
   content: string
   moderationStatus: string
   isDeleted: boolean
@@ -406,6 +413,7 @@ async function loadDailyNotificationComments(
       select: {
         id: true,
         messageId: true,
+        parentId: true,
         content: true,
         moderationStatus: true,
         isDeleted: true,
@@ -1158,6 +1166,9 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         }),
         replyDisabledReason: null,
         replyPreview: null,
+        replySourceKind: null,
+        replyLikeTargetId: null,
+        replyLikeState: null,
       } satisfies UnifiedNotification]
     }
     const item = systemById.get(row.id)
@@ -1194,6 +1205,9 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       replyTarget: null,
       replyDisabledReason: null,
       replyPreview: null,
+      replySourceKind: null,
+      replyLikeTargetId: null,
+      replyLikeState: null,
     } satisfies UnifiedNotification]
   }).sort(compareNotificationOrder)
 
@@ -1269,6 +1283,59 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const dailyComments = dailyCommentLookup.rows
   const postReplyById = new Map(postReplies.map((reply) => [reply.id, reply]))
   const feedbackReplyById = new Map(feedbackReplies.map((reply) => [reply.id, reply]))
+
+  // 评论回复快捷点赞：点赞目标必须是对方回复的那条评论（focus 评论本身，即 User A 的新回复），
+  // 而不是其 parentId（被回复的原评论 / 接收者自己的评论）。dailyComments 中的每条记录即 focus 评论，
+  // 因此按评论自身 id 水合可见性与当前用户的点赞状态。点赞按钮仅在目标可访问时呈现。
+  const dailyLikeFocusIds = Array.from(
+    new Set(
+      dailyComments
+        .map((comment) => comment.id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  )
+  const focusComments = dailyLikeFocusIds.length
+    ? await prisma.dailyMessageComment.findMany({
+        where: { id: { in: dailyLikeFocusIds }, isDeleted: false },
+        select: {
+          id: true,
+          DailyMessage: {
+            select: { isDeleted: true, moderationStatus: true, User: { select: { status: true, isDeleted: true } } },
+          },
+        },
+      })
+    : []
+  // 可见性标准与 canViewDailyNotificationMessage 对齐：focus 评论未删除、所属每日留言已通过审核、作者账号正常。
+  // 注意：这里是 focus 评论自己的可见性，而不是其 parentId（被回复的原评论）的可见性。
+  const visibleFocusCommentIds = new Set(
+    focusComments
+      .filter((focus) => {
+        const message = focus.DailyMessage
+        return (
+          Boolean(message)
+          && !message.isDeleted
+          && !message.User.isDeleted
+          && message.User.status === 'ACTIVE'
+          && (message.moderationStatus === 'APPROVED' || message.moderationStatus === 'VIOLATION')
+        )
+      })
+      .map((focus) => focus.id),
+  )
+  const likedFocusCommentRows = dailyLikeFocusIds.length
+    ? await prisma.dailyMessageCommentLike.findMany({
+        where: { commentId: { in: dailyLikeFocusIds }, userId },
+        select: { commentId: true },
+      })
+    : []
+  const likedFocusCommentIds = new Set(likedFocusCommentRows.map((row) => row.commentId))
+  const focusCommentLikeCountsRows = dailyLikeFocusIds.length
+    ? await prisma.dailyMessageCommentLike.groupBy({
+        by: ['commentId'],
+        where: { commentId: { in: dailyLikeFocusIds } },
+        _count: true,
+      })
+    : []
+  const focusCommentLikeCounts = new Map(focusCommentLikeCountsRows.map((row) => [row.commentId, row._count]))
 
   // 逐条占位容错：当某条通知关联的内容（帖子/评论/回复/反馈/留言墙）缺失或被删除时，
   // 保留通知记录并以占位文案展示，而不是让单条异常拖垮整页。同时收集这些通知的 ID，
@@ -1360,6 +1427,26 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       }
     }
     return item
+  }).map((item) => {
+    // 叠加通知来源标签与评论回复快捷点赞目标（基于真实 replyTarget.kind，不靠文案猜测）。
+    const target = item.replyTarget
+    if (!target) return item
+    const replySourceKind = target.kind
+    let replyLikeTargetId: string | null = null
+    let replyLikeState: { liked: boolean; likeCount: number } | null = null
+    if (target.kind === 'daily-message') {
+      // 点赞目标 = focus 评论本身（用户 A 新创建的回复评论），即 notification 的 `focus` / target.parentId。
+      // 严禁误用 focusComment.parentId（那是被回复的原评论 / 接收者自己的评论）。
+      const focusCommentId = target.parentId
+      if (focusCommentId && visibleFocusCommentIds.has(focusCommentId)) {
+        replyLikeTargetId = focusCommentId
+        replyLikeState = {
+          liked: likedFocusCommentIds.has(focusCommentId),
+          likeCount: focusCommentLikeCounts.get(focusCommentId) || 0,
+        }
+      }
+    }
+    return { ...item, replySourceKind, replyLikeTargetId, replyLikeState }
   })
 
   // 服务端诊断日志：记录导致占位（内容缺失/无权限/查询失败）的具体通知 ID，
@@ -1458,6 +1545,9 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       replyTarget: null,
       replyDisabledReason: null,
       replyPreview: null,
+      replySourceKind: null,
+      replyLikeTargetId: null,
+      replyLikeState: null,
     } satisfies UnifiedNotification
   })
 }

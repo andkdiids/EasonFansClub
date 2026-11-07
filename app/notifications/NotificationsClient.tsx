@@ -135,6 +135,20 @@ function getInitial(uid?: number | null) {
   return uid ? String(uid).padStart(5, '0').slice(0, 1) : 'E'
 }
 
+// 通知来源标签：基于真实 replyTarget.kind（由 lib/notifications 根据通知数据推导），
+// 不依赖文案猜测。需求要求展示的范围为「帖子回复 / 评论回复 / 留言墙」，
+// 反馈回复不在范围内，按"不影响其他通知类型"处理为不展示来源标签。
+const REPLY_SOURCE_LABELS: Partial<Record<NonNullable<UnifiedNotification['replySourceKind']>, string>> = {
+  post: '帖子回复',
+  'daily-message': '评论回复',
+  'profile-wall': '留言墙',
+}
+
+function getReplySourceLabel(kind: UnifiedNotification['replySourceKind']): string | null {
+  if (!kind) return null
+  return REPLY_SOURCE_LABELS[kind] ?? null
+}
+
 function replaceNotificationActorPrefix(value: string | null, previousName: string | null, nextName: string) {
   if (!value || !previousName || previousName === nextName || !value.startsWith(previousName)) return value
   return `${nextName}${value.slice(previousName.length)}`
@@ -327,6 +341,9 @@ export function NotificationsClient({
   const notificationListRequestSequenceRef = useRef(0)
   // 进行中的已读请求（按 source:id 去重），避免同一条通知连点导致重复请求 / 未读数重复扣减。
   const markingReadRef = useRef<Set<string>>(new Set())
+  // 进行中的评论快捷点赞请求（按 source:id 去重），防止重复点击导致点赞状态抖动 / 重复写库。
+  const commentLikePendingRef = useRef<Set<string>>(new Set())
+  const [commentLikePending, setCommentLikePending] = useState<Set<string>>(new Set())
   // 清除二次确认：第一次点击只打开确认框，确认后才真正调用删除接口。
   const [clearConfirm, setClearConfirm] = useState<{ title: string; description: string; items: UnifiedNotification[]; all?: boolean } | null>(null)
   const [isClearing, setIsClearing] = useState(false)
@@ -671,6 +688,55 @@ export function NotificationsClient({
     }
   }
 
+  // 评论回复通知的快捷点赞：点赞目标为 replyLikeTargetId（被对方回复的那条评论）。
+  // 乐观切换状态、失败回滚、按 source:id 防重复点击；onClick 已 stopPropagation，不会触发整卡已读/跳转。
+  async function toggleCommentLike(item: UnifiedNotification): Promise<void> {
+    const targetId = item.replyLikeTargetId
+    const currentState = item.replyLikeState
+    if (!targetId || !currentState) return
+    const itemKey = notificationKey(item)
+    if (commentLikePendingRef.current.has(itemKey)) return
+    commentLikePendingRef.current.add(itemKey)
+    setCommentLikePending((current) => {
+      const next = new Set(current)
+      next.add(itemKey)
+      return next
+    })
+
+    const nextLiked = !currentState.liked
+    const nextLikeCount = Math.max(0, currentState.likeCount + (nextLiked ? 1 : -1))
+    const optimisticState = { liked: nextLiked, likeCount: nextLikeCount }
+    setNotifications((current) => current.map((row) => (
+      notificationKey(row) === itemKey ? { ...row, replyLikeState: optimisticState } : row
+    )))
+    try {
+      const response = await fetch(`/api/daily-message-comments/${encodeURIComponent(targetId)}/like`, {
+        method: nextLiked ? 'POST' : 'DELETE',
+      })
+      if (!response.ok) throw new Error('评论点赞请求失败')
+      const data = await response.json().catch(() => null) as { isLiked?: boolean; likeCount?: number } | null
+      if (typeof data?.isLiked === 'boolean' && typeof data?.likeCount === 'number') {
+        setNotifications((current) => current.map((row) => (
+          notificationKey(row) === itemKey
+            ? { ...row, replyLikeState: { liked: data.isLiked as boolean, likeCount: data.likeCount as number } }
+            : row
+        )))
+      }
+    } catch {
+      // 失败回滚到操作前的点赞状态。
+      setNotifications((current) => current.map((row) => (
+        notificationKey(row) === itemKey ? { ...row, replyLikeState: currentState } : row
+      )))
+    } finally {
+      commentLikePendingRef.current.delete(itemKey)
+      setCommentLikePending((current) => {
+        const next = new Set(current)
+        next.delete(itemKey)
+        return next
+      })
+    }
+  }
+
   // 进入通知目标页：标记已读 + 记录返回状态 + 跳转。返回 false 表示该通知无跳转目标（仅标记已读）。
   async function navigateToNotification(item: UnifiedNotification): Promise<boolean> {
     const target = getNotificationTarget(item)
@@ -954,6 +1020,14 @@ export function NotificationsClient({
     const hasDisplayLabel = Boolean(displayLabel?.trim())
     const unreadLabel = isNotificationRead(item) ? null : '未读'
     const displayActorName = item.actorName?.trim() || null
+    // 来源标签：基于真实 replySourceKind（不靠文案猜测），与「未读」并列但视觉独立。
+    const sourceLabel = getReplySourceLabel(item.replySourceKind)
+    // 回复通知标题优化：移除固定标题（如「你的帖子有新回复」），直接用「用户名：回复内容」作为主标题，
+    // 复用原通知标题的字号/字重/视觉位置，回复内容最多两行、超出省略。
+    const isReplyTitleOptimization = item.type === 'REPLY' && Boolean(displayReplyPreview)
+    const titleContent = isReplyTitleOptimization
+      ? `${displayActorName ? `${displayActorName}：` : ''}${displayReplyPreview}`
+      : item.title
 
     // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
     function handleCardActivate() {
@@ -1032,11 +1106,13 @@ export function NotificationsClient({
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex flex-wrap items-center gap-1.5">
               {hasDisplayLabel ? <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span> : null}
+              {/* 来源标签：与「未读」并列展示，但用中性描边样式与阅读状态（实心天蓝）明确区分，避免混淆通知来源与已读状态。 */}
+              {sourceLabel ? <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-500 ring-1 ring-slate-200">{sourceLabel}</span> : null}
               {unreadLabel ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">{unreadLabel}</span> : null}
             </div>
             {item.actorRole ? <p className="flex items-center gap-2 text-xs text-slate-500"><strong>{item.actorName || '私家E院'}</strong><span>{item.actorRole}</span></p> : null}
-            <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
-            {isReplyNotification && displayReplyPreview ? (
+            <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass} ${isReplyTitleOptimization ? 'line-clamp-2' : ''}`}>{titleContent}</h2>
+            {isReplyNotification && displayReplyPreview && !isReplyTitleOptimization ? (
               <p className="notification-reply-preview mt-0.5 break-words text-xs font-bold leading-4 text-slate-600">
                 {replyPreview && displayActorName ? <span className="font-black text-slate-700">{displayActorName}：</span> : null}
                 {displayReplyPreview}
@@ -1077,6 +1153,30 @@ export function NotificationsClient({
             <div className="mt-1 flex flex-wrap items-center justify-between gap-1.5 pt-1">
               <time className="text-[11px] font-bold text-slate-400">{formatTime(item.createdAt)}</time>
               <div className="flex flex-wrap items-center gap-1">
+                {/* 评论回复通知的快捷点赞：仅当点赞目标（被对方回复的那条评论）真实可访问时才展示。
+                    点赞目标无效/已删除/不可访问时 replyLikeTargetId 为 null，按钮自动隐藏（需求三⑥）。 */}
+                {item.replySourceKind === 'daily-message' && item.replyLikeTargetId ? (
+                  <button
+                    type="button"
+                    disabled={commentLikePending.has(itemKey)}
+                    aria-pressed={item.replyLikeState?.liked ?? false}
+                    aria-label={item.replyLikeState?.liked ? '取消点赞' : '点赞'}
+                    onClick={(event) => {
+                      // 点赞不跳转帖子详情，也不触发整卡已读/跳转。
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void toggleCommentLike(item)
+                    }}
+                    className={`inline-flex min-h-8 items-center gap-1 rounded-sm border px-2.5 py-1 text-[11px] font-black ${
+                      item.replyLikeState?.liked
+                        ? 'border-rose-200 bg-rose-50 text-rose-600'
+                        : 'border-sky-100 bg-white text-brand-700 hover:bg-sky-50'
+                    } ${commentLikePending.has(itemKey) ? 'cursor-not-allowed opacity-60' : ''}`}
+                  >
+                    <span aria-hidden>♥</span>
+                    <span>{item.replyLikeState?.likeCount ?? 0}</span>
+                  </button>
+                ) : null}
                 {canDirectReply ? (
                   <button
                     type="button"
