@@ -6,6 +6,7 @@ import { splitContentImages } from '@/lib/content-images'
 import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
 import { Prisma, type NotificationType, type SystemNotificationType } from '@prisma/client'
 import { getReviewNotificationTarget, parseNotificationReplyTarget, type NotificationReplyTarget } from '@/lib/notification-target'
+import { resolveReplyLikeTargetId } from '@/lib/reply-like'
 import { compareNotificationOrder } from '@/lib/notification-order'
 import { clampPaginationPage } from '@/lib/pagination'
 import { formatLikeNotificationText, loadLikeNotificationStats, parseLikeNotificationTarget, reconcileLikeNotifications, type LikeNotificationTargetKind } from '@/lib/like-notifications'
@@ -1337,6 +1338,63 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     : []
   const focusCommentLikeCounts = new Map(focusCommentLikeCountsRows.map((row) => [row.commentId, row._count]))
 
+  // 帖子回复快捷点赞：复用既有 ReplyLike 模型与 /api/replies/[replyId]/like。
+  // 点赞目标必须是通知 focus 指向的「对方新回复」（target.parentId = reply id），
+  // 绝不是帖子本身或接收者自己的原评论。仅当回复真实存在、归属正确帖子且未删除时才下发点赞目标。
+  const validPostReplyIdSet = new Set(
+    postTargets
+      .map((target) => {
+        const reply = postReplyById.get(target.parentId)
+        return reply && reply.postId === target.resourceId && !reply.isDeleted ? target.parentId : null
+      })
+      .filter((id): id is string => Boolean(id)),
+  )
+  const likedPostReplyRows = validPostReplyIdSet.size
+    ? await prisma.replyLike.findMany({
+      where: { replyId: { in: Array.from(validPostReplyIdSet) }, userId },
+      select: { replyId: true },
+    })
+    : []
+  const likedPostReplyIds = new Set(likedPostReplyRows.map((row) => row.replyId))
+  const postReplyLikeCountsRows = validPostReplyIdSet.size
+    ? await prisma.replyLike.groupBy({
+      by: ['replyId'],
+      where: { replyId: { in: Array.from(validPostReplyIdSet) } },
+      _count: true,
+    })
+    : []
+  const postReplyLikeCounts = new Map(postReplyLikeCountsRows.map((row) => [row.replyId, row._count]))
+
+  // 留言墙快捷点赞：复用既有 ProfileWallLike 模型与 /api/profile-wall/[messageId]/like。
+  // 点赞目标必须是通知 focus 指向的「对方新留言」（target.parentId = wall message id），
+  // 仅当留言真实存在、未删除且确属接收者自己的留言墙时才下发点赞目标。
+  const validWallMessageIdSet = new Set(
+    wallTargets
+      .map((target) => {
+        const message = wallMessages.find(
+          (row) => row.id === target.parentId
+            && String(row.User_ProfileWallMessage_receiverIdToUser.uid) === String(Number(target.resourceId)),
+        )
+        return message ? target.parentId : null
+      })
+      .filter((id): id is string => Boolean(id)),
+  )
+  const likedWallMessageRows = validWallMessageIdSet.size
+    ? await prisma.profileWallLike.findMany({
+      where: { messageId: { in: Array.from(validWallMessageIdSet) }, userId },
+      select: { messageId: true },
+    })
+    : []
+  const likedWallMessageIds = new Set(likedWallMessageRows.map((row) => row.messageId))
+  const wallMessageLikeCountsRows = validWallMessageIdSet.size
+    ? await prisma.profileWallLike.groupBy({
+      by: ['messageId'],
+      where: { messageId: { in: Array.from(validWallMessageIdSet) } },
+      _count: true,
+    })
+    : []
+  const wallMessageLikeCounts = new Map(wallMessageLikeCountsRows.map((row) => [row.messageId, row._count]))
+
   // 逐条占位容错：当某条通知关联的内容（帖子/评论/回复/反馈/留言墙）缺失或被删除时，
   // 保留通知记录并以占位文案展示，而不是让单条异常拖垮整页。同时收集这些通知的 ID，
   // 便于服务端定位「是哪一条通知导致加载异常」。
@@ -1428,21 +1486,35 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     }
     return item
   }).map((item) => {
-    // 叠加通知来源标签与评论回复快捷点赞目标（基于真实 replyTarget.kind，不靠文案猜测）。
+    // 叠加通知来源标签与快捷点赞目标（基于真实 replyTarget.kind，不靠文案猜测）。
+    // 点赞目标 ID 由纯函数统一裁定：恒为 focus（对方新回复），feedback 等无点赞能力类型返回 null。
     const target = item.replyTarget
     if (!target) return item
     const replySourceKind = target.kind
     let replyLikeTargetId: string | null = null
     let replyLikeState: { liked: boolean; likeCount: number } | null = null
-    if (target.kind === 'daily-message') {
-      // 点赞目标 = focus 评论本身（用户 A 新创建的回复评论），即 notification 的 `focus` / target.parentId。
-      // 严禁误用 focusComment.parentId（那是被回复的原评论 / 接收者自己的评论）。
-      const focusCommentId = target.parentId
-      if (focusCommentId && visibleFocusCommentIds.has(focusCommentId)) {
-        replyLikeTargetId = focusCommentId
+    const focusId = resolveReplyLikeTargetId(target)
+    if (focusId) {
+      if (target.kind === 'post' && validPostReplyIdSet.has(focusId)) {
+        // 帖子回复：点赞目标 = 对方新回复的 reply id，复用 ReplyLike /api/replies/[replyId]/like。
+        replyLikeTargetId = focusId
         replyLikeState = {
-          liked: likedFocusCommentIds.has(focusCommentId),
-          likeCount: focusCommentLikeCounts.get(focusCommentId) || 0,
+          liked: likedPostReplyIds.has(focusId),
+          likeCount: postReplyLikeCounts.get(focusId) || 0,
+        }
+      } else if (target.kind === 'daily-message' && visibleFocusCommentIds.has(focusId)) {
+        // 评论回复：点赞目标 = 对方新回复的 focus 评论 id，复用 DailyMessageCommentLike。
+        replyLikeState = {
+          liked: likedFocusCommentIds.has(focusId),
+          likeCount: focusCommentLikeCounts.get(focusId) || 0,
+        }
+        replyLikeTargetId = focusId
+      } else if (target.kind === 'profile-wall' && validWallMessageIdSet.has(focusId)) {
+        // 留言墙：点赞目标 = 对方新留言的 message id，复用 ProfileWallLike /api/profile-wall/[messageId]/like。
+        replyLikeTargetId = focusId
+        replyLikeState = {
+          liked: likedWallMessageIds.has(focusId),
+          likeCount: wallMessageLikeCounts.get(focusId) || 0,
         }
       }
     }

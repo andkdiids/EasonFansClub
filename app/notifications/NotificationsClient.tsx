@@ -11,6 +11,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
+import { isReplyLikeSupported, normalizeReplyLikeResponse, resolveReplyLikeEndpoint } from '@/lib/reply-like'
 import { ImageViewer } from '@/components/ImageViewer'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -341,7 +342,7 @@ export function NotificationsClient({
   const notificationListRequestSequenceRef = useRef(0)
   // 进行中的已读请求（按 source:id 去重），避免同一条通知连点导致重复请求 / 未读数重复扣减。
   const markingReadRef = useRef<Set<string>>(new Set())
-  // 进行中的评论快捷点赞请求（按 source:id 去重），防止重复点击导致点赞状态抖动 / 重复写库。
+  // 进行中的回复类快捷点赞请求（按 source:id 去重），防止重复点击导致点赞状态抖动 / 重复写库。
   const commentLikePendingRef = useRef<Set<string>>(new Set())
   const [commentLikePending, setCommentLikePending] = useState<Set<string>>(new Set())
   // 清除二次确认：第一次点击只打开确认框，确认后才真正调用删除接口。
@@ -688,12 +689,17 @@ export function NotificationsClient({
     }
   }
 
-  // 评论回复通知的快捷点赞：点赞目标为 replyLikeTargetId（被对方回复的那条评论）。
-  // 乐观切换状态、失败回滚、按 source:id 防重复点击；onClick 已 stopPropagation，不会触发整卡已读/跳转。
-  async function toggleCommentLike(item: UnifiedNotification): Promise<void> {
+  // 回复类通知的快捷点赞：点赞目标为 replyLikeTargetId（被对方回复的那条内容本身——
+  // 帖子回复=对方新回复的 reply id、评论回复=对方的每日留言评论 id、留言墙=对方新留言的 message id）。
+  // 按 replySourceKind 路由到对应既有点赞 API：帖子回复→/api/replies、留言墙→/api/profile-wall、
+  // 评论回复→/api/daily-message-comments。乐观切换状态、失败回滚、按 source:id 防重复点击；
+  // onClick 已 stopPropagation，不会触发整卡已读/跳转。状态与详情页保持一致（复用同一端点）。
+  async function toggleReplyLike(item: UnifiedNotification): Promise<void> {
     const targetId = item.replyLikeTargetId
     const currentState = item.replyLikeState
-    if (!targetId || !currentState) return
+    const sourceKind = item.replySourceKind
+    // 仅当存在合法点赞目标且来源支持快捷点赞时才继续（feedback 等不支持类型不会走到这里）。
+    if (!targetId || !currentState || !isReplyLikeSupported(sourceKind)) return
     const itemKey = notificationKey(item)
     if (commentLikePendingRef.current.has(itemKey)) return
     commentLikePendingRef.current.add(itemKey)
@@ -710,15 +716,19 @@ export function NotificationsClient({
       notificationKey(row) === itemKey ? { ...row, replyLikeState: optimisticState } : row
     )))
     try {
-      const response = await fetch(`/api/daily-message-comments/${encodeURIComponent(targetId)}/like`, {
-        method: nextLiked ? 'POST' : 'DELETE',
-      })
-      if (!response.ok) throw new Error('评论点赞请求失败')
-      const data = await response.json().catch(() => null) as { isLiked?: boolean; likeCount?: number } | null
-      if (typeof data?.isLiked === 'boolean' && typeof data?.likeCount === 'number') {
+      // 端点 / 方法由纯函数按来源路由（不新增模型 / 端点）：
+      // 帖子回复 → /api/replies/[replyId]/like；留言墙 → /api/profile-wall/[messageId]/like；
+      // 评论回复 → /api/daily-message-comments/[commentId]/like。
+      const endpoint = resolveReplyLikeEndpoint(sourceKind, targetId, nextLiked)
+      const response = await fetch(endpoint.url, { method: endpoint.method })
+      if (!response.ok) throw new Error('点赞请求失败')
+      const data = await response.json().catch(() => null)
+      // 不同端点返回字段名不同（isLiked / liked），统一由纯函数归一化。
+      const resolved = normalizeReplyLikeResponse(sourceKind, data)
+      if (resolved) {
         setNotifications((current) => current.map((row) => (
           notificationKey(row) === itemKey
-            ? { ...row, replyLikeState: { liked: data.isLiked as boolean, likeCount: data.likeCount as number } }
+            ? { ...row, replyLikeState: resolved }
             : row
         )))
       }
@@ -1153,19 +1163,20 @@ export function NotificationsClient({
             <div className="mt-1 flex flex-wrap items-center justify-between gap-1.5 pt-1">
               <time className="text-[11px] font-bold text-slate-400">{formatTime(item.createdAt)}</time>
               <div className="flex flex-wrap items-center gap-1">
-                {/* 评论回复通知的快捷点赞：仅当点赞目标（被对方回复的那条评论）真实可访问时才展示。
-                    点赞目标无效/已删除/不可访问时 replyLikeTargetId 为 null，按钮自动隐藏（需求三⑥）。 */}
-                {item.replySourceKind === 'daily-message' && item.replyLikeTargetId ? (
+                {/* 回复类通知的快捷点赞：仅当 replyLikeTargetId 真实可访问时才展示按钮。
+                    后端只会对可访问的点赞目标下发该字段，无效/已删除/不可访问时其为 null，按钮自动隐藏（需求三⑥）。
+                    覆盖帖子回复、评论回复、留言墙三类，由 toggleReplyLike 按 replySourceKind 路由到各自端点。 */}
+                {item.replyLikeTargetId ? (
                   <button
                     type="button"
                     disabled={commentLikePending.has(itemKey)}
                     aria-pressed={item.replyLikeState?.liked ?? false}
                     aria-label={item.replyLikeState?.liked ? '取消点赞' : '点赞'}
                     onClick={(event) => {
-                      // 点赞不跳转帖子详情，也不触发整卡已读/跳转。
+                      // 点赞不跳转详情，也不触发整卡已读/跳转。
                       event.preventDefault()
                       event.stopPropagation()
-                      void toggleCommentLike(item)
+                      void toggleReplyLike(item)
                     }}
                     className={`inline-flex min-h-8 items-center gap-1 rounded-sm border px-2.5 py-1 text-[11px] font-black ${
                       item.replyLikeState?.liked
