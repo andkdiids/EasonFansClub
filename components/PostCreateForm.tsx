@@ -12,6 +12,7 @@ import { postDetailHref } from '@/lib/post-navigation'
 import {
   createStoredPostDraft,
   hasMeaningfulPostDraftContent,
+  mergeRestoredPostDraft,
   normalizeServerPostDraft,
   parseStoredPostDraft,
   postDraftConflictStorageKey,
@@ -67,6 +68,7 @@ export function PostCreateForm({
   const [draftReady, setDraftReady] = useState(false)
   const [draftStatus, setDraftStatus] = useState('')
   const [draftConflict, setDraftConflict] = useState<DraftConflict | null>(null)
+  const [draftExpiryNotice, setDraftExpiryNotice] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [imagesUploading, setImagesUploading] = useState(false)
@@ -84,6 +86,9 @@ export function PostCreateForm({
     topicNames: [],
     expiryType: null,
   })
+  // Immutable mount-time snapshot. A re-run of the restore effect must not
+  // treat already-edited state as the untouched baseline.
+  const draftBaselineRef = useRef<PostDraftPayload | null>(null)
   const queuedSaveRef = useRef<PostDraftPayload | null>(null)
   const saveInFlightRef = useRef<Promise<void> | null>(null)
   const draftConflictRef = useRef<DraftConflict | null>(null)
@@ -252,6 +257,21 @@ export function PostCreateForm({
     async function restoreDraft() {
       setDraftReady(false)
       setConflict(null)
+      setDraftExpiryNotice(null)
+      // The GET below is asynchronous while the form is already rendered. Any
+      // field the user changes before it resolves (especially 限时发布 /
+      // expiryType) belongs to this editing session and must win over an older
+      // server draft. Snapshot the untouched state to detect those edits.
+      if (!draftBaselineRef.current) draftBaselineRef.current = { ...currentPayloadRef.current }
+      const baselineAtMount: PostDraftPayload = draftBaselineRef.current
+      const applyRestoredDraft = (restored: PostDraftPayload): PostDraftPayload => {
+        const effective = mergeRestoredPostDraft(restored, currentPayloadRef.current, baselineAtMount)
+        applyDraftPayload(effective)
+        if (restored.expiryType && restored.expiryType !== effective.expiryType) {
+          setDraftExpiryNotice('草稿中保存了限时发布设置，本次未沿用；如需限时请重新选择。')
+        }
+        return effective
+      }
       let scopedLocal: ReturnType<typeof parseStoredPostDraft> = null
       let legacyLocal: ReturnType<typeof parseStoredPostDraft> = null
       try {
@@ -276,11 +296,14 @@ export function PostCreateForm({
             persistLocal(local, local.serverVersion, conflictStorageKey)
             setConflict({ latest: server, local })
           }
-          applyDraftPayload(serverPayload)
+          const effectiveDraft = applyRestoredDraft(serverPayload)
           draftVersionRef.current = server.version
           lastServerUpdatedAtRef.current = server.updatedAt
+          // Keep the SERVER payload key: if a user choice was preserved above,
+          // autosave will see the difference and persist the user's version
+          // instead of silently leaving a stale TODAY draft on the server.
           lastSyncedPayloadKeyRef.current = postDraftPayloadKey(serverPayload)
-          persistLocal(serverPayload, server.version)
+          persistLocal(effectiveDraft, server.version)
           try {
             // A server record is already authoritative, so an unscoped legacy
             // cache no longer needs to participate in future restores. A
@@ -291,7 +314,7 @@ export function PostCreateForm({
           }
           setDraftStatus(localDiffers ? '已恢复云端草稿；本机未同步内容已保留备份' : '已恢复云端草稿')
         } else if (local) {
-          applyDraftPayload(local)
+          applyRestoredDraft(local)
           draftVersionRef.current = local.serverVersion
           lastServerUpdatedAtRef.current = null
           lastSyncedPayloadKeyRef.current = null
@@ -304,7 +327,7 @@ export function PostCreateForm({
         // unavailable; the legacy record remains for a successful migration
         // after the server confirms that this account has no draft.
         if (scopedLocal) {
-          applyDraftPayload(scopedLocal)
+          applyRestoredDraft(scopedLocal)
           draftVersionRef.current = scopedLocal.serverVersion
           setDraftStatus('本地已保存，云端暂时无法读取')
         } else {
@@ -552,21 +575,28 @@ export function PostCreateForm({
       <PostTopicPicker value={topicNames} onChange={setTopicNames} error={errors.topicNames} />
       <label className="block">
         <span className="text-sm font-black text-slate-700">限时发布</span>
-        <select value={expiryType} onChange={(event) => setExpiryType(event.target.value as PostExpiryType | '')} className="mt-2 w-full border border-sky-100 px-4 py-2">
+        <select
+          value={expiryType}
+          onChange={(event) => { setDraftExpiryNotice(null); setExpiryType(event.target.value as PostExpiryType | '') }}
+          disabled={!draftReady}
+          className="mt-2 w-full border border-sky-100 px-4 py-2 disabled:opacity-60"
+        >
           <option value="">普通帖子（永久）</option>
           {POST_EXPIRY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
+        {!draftReady ? <span className="mt-1 block text-xs font-bold text-amber-600" role="status">正在恢复草稿，恢复完成后才能选择限时发布；草稿不会覆盖你已做的选择。</span> : null}
+        {draftExpiryNotice ? <span className="mt-1 block text-xs font-bold text-amber-600" role="status">{draftExpiryNotice}</span> : null}
         <span className="mt-1 block text-xs font-bold text-slate-400">普通用户帖子从审核通过公开时开始计算；编辑不能延长时限。</span>
       </label>
       <fieldset className="space-y-3 border border-sky-100 p-4">
         <legend className="px-1 text-sm font-black text-slate-700">发布时间</legend>
         <div className="flex flex-wrap gap-5">
           <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
-            <input type="radio" name="publishMode" value="IMMEDIATE" checked={publishMode === 'IMMEDIATE'} onChange={() => setPublishMode('IMMEDIATE')} />
+            <input type="radio" name="publishMode" value="IMMEDIATE" checked={publishMode === 'IMMEDIATE'} onChange={() => setPublishMode('IMMEDIATE')} disabled={!draftReady} />
             立即发布
           </label>
           <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
-            <input type="radio" name="publishMode" value="SCHEDULED" checked={publishMode === 'SCHEDULED'} onChange={() => setPublishMode('SCHEDULED')} />
+            <input type="radio" name="publishMode" value="SCHEDULED" checked={publishMode === 'SCHEDULED'} onChange={() => setPublishMode('SCHEDULED')} disabled={!draftReady} />
             定时发布
           </label>
         </div>
@@ -588,7 +618,7 @@ export function PostCreateForm({
                 })
               }}
               className="mt-2 w-full border border-sky-100 px-3 py-2"
-              disabled={!scheduleWindowAvailable}
+              disabled={!scheduleWindowAvailable || !draftReady}
               required
             />
             <span className="mt-1 block text-xs font-bold text-slate-400">
@@ -624,7 +654,7 @@ export function PostCreateForm({
             😊 表情
           </button>
         </div>
-        <button disabled={isSubmitting || imagesUploading} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
+        <button disabled={isSubmitting || imagesUploading || !draftReady} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '提交中...' : imagesUploading ? '图片处理中...' : publishMode === 'SCHEDULED' ? '提交定时发布' : '发布帖子'}
         </button>
         <StickerPicker
