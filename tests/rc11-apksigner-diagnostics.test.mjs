@@ -95,3 +95,10 @@ test('apksigner verifier separates parse, signer count, mismatch, signature and 
   assert.throws(() => verifyApksignerResult({ status: null, stdout: '', stderr: '', error: new Error('spawn failed') }, expectedSigner), /APKSIGNER_EXECUTION_FAILED/)
 })
 
+
+test('code31 rollback uses the strict signer verifier for runner output', () => {
+  const workflow = read('.github/workflows/rollback-android-version-to-code31.yml')
+  assert.match(workflow, /node scripts\/verify-android-apk-signature\.mjs "\$\{apksigner\}" "\$\{rollback_apk\}"/)
+  assert.equal(assertApksignerOutputMatches(runnerApksignerOutput, expectedSigner).sha256, expectedSigner)
+  assert.throws(() => assertApksignerOutputMatches(runnerApksignerOutput, 'A'.repeat(64)), /SIGNER_MISMATCH/)
+})
