@@ -295,8 +295,13 @@ export async function drawTopicLottery(input: { activityId: string; actorId?: st
       await audit(tx, lottery, 'DRAW_COMPLETED', input.actorId || null, { winnerCount: plan.length, candidateCount: batch.candidateCount, allocationHash: batch.allocationHash }, batch.id)
       return { changed: true, drawId: batch.id, winnerCount: plan.length }
     })
-  } catch {
+  } catch (error) {
     // A committed allocation survives failure. No raw SQL/error text or PII.
+    console.error('[topic-v2-lottery.draw.finalization-failed]', {
+      activityId: input.activityId,
+      code: 'DRAW_FINALIZATION_FAILED',
+      error: error instanceof Error ? error.name : 'unknown',
+    })
     await withTopicV2Transaction(async (tx) => {
       const { lottery } = await lockTopicLottery(tx, input.activityId)
       const batch = await tx.topicActivityLotteryDraw.findUnique({ where: { activityId: input.activityId } })
@@ -330,7 +335,14 @@ function shippingState(shipping: { shippingStatus: string; addressDeadline: Date
 export async function getTopicLotteryView(activityId: string, viewerId?: string | null, now = new Date()) {
   const value = await viewData(activityId, now)
   if (!['PUBLISHED', 'CANCELLED'].includes(value.activity.status)) fail('LOTTERY_ACTIVITY_NOT_FOUND', '活动不存在', 404)
-  if (!value.lottery?.enabled) return { enabled: false, config: value.config, state: 'DISABLED', candidateCount: 0, myStatus: 'NOT_ENABLED', myEligibility: null, myWinner: null, winners: [] }
+  // Public draw records are exposed only after the draw has completed, so an
+  // unopened activity can never leak the result. Internal snapshots, hashes,
+  // allocations and config ids are deliberately excluded.
+  const drawRecord = value.batch && value.state === 'DRAWN'
+    ? { id: value.batch.id, state: value.batch.state, frozenAt: value.batch.frozenAt, drawnAt: value.batch.drawnAt,
+        candidateCount: value.batch.candidateCount, winnerCount: value.batch.winnerCount, errorCode: value.batch.errorCode }
+    : null
+  if (!value.lottery?.enabled) return { enabled: false, config: value.config, state: 'DISABLED', candidateCount: 0, myStatus: 'NOT_ENABLED', myEligibility: null, myWinner: null, winners: [], draw: null }
   const ownWinner = viewerId ? await prisma.lotteryEntry.findUnique({ where: { lotteryId_userId: { lotteryId: value.lottery.lotteryId, userId: viewerId } }, include: { LotteryPrize: true, TopicShipping: true } }) : null
   const ownSources = value.rows.filter((row) => row.userId === viewerId)
   const frozen = value.batch?.candidateSnapshot as unknown as FrozenCandidate[] | undefined
@@ -343,7 +355,8 @@ export async function getTopicLotteryView(activityId: string, viewerId?: string 
     myEligibility: eligible ? { count: 1 } : null, myWinner: ownWinner ? { id: ownWinner.id, prize: { name: ownWinner.LotteryPrize?.name || '活动奖品', imageUrl: topicLotteryPrizeImageReferenceForRead(ownWinner.LotteryPrize?.imageUrl), description: ownWinner.LotteryPrize?.description },
       wonAt: ownWinner.wonAt, addressDeadline: ownWinner.TopicShipping?.addressDeadline, shippingStatus: shippingState(ownWinner.TopicShipping, now), addressSaved: Boolean(ownWinner.TopicShipping?.addressCiphertext),
       claimUrl: '/activities/' + encodeURIComponent(activityId) + '/lottery/claims/' + encodeURIComponent(ownWinner.id) } : null,
-    winners: publicWinners.map((winner) => ({ nickname: winner.User.nickname, uid: winner.User.uid, prizeName: winner.LotteryPrize?.name || '活动奖品' })) }
+    winners: publicWinners.map((winner) => ({ nickname: winner.User.nickname, uid: winner.User.uid, prizeName: winner.LotteryPrize?.name || '活动奖品' })),
+    draw: drawRecord }
 }
 export async function getAdminTopicLotteryView(activityId: string, now = new Date()) {
   const value = await viewData(activityId, now)
@@ -355,7 +368,8 @@ export async function getAdminTopicLotteryView(activityId: string, now = new Dat
   ]) : [[], 0, 0]
   return { config: value.config, addressEncryptionReady: getTopicLotteryPiiConfigStatus().usable, configLocked: Boolean(value.lottery?.fairnessLockedAt || value.rows.length || eligibilityCount || entryCount || value.batch), state: value.state,
     candidateCount: value.candidateCount, pendingSubmissionCount: value.pendingSubmissionCount,
-    draw: value.batch ? { id: value.batch.id, frozenAt: value.batch.frozenAt, candidateCount: value.batch.candidateCount, winnerCount: value.batch.winnerCount, failedReason: value.batch.errorCode } : null,
+    draw: value.batch ? { id: value.batch.id, state: value.batch.state, frozenAt: value.batch.frozenAt, startedAt: value.batch.startedAt, drawnAt: value.batch.drawnAt,
+      candidateCount: value.batch.candidateCount, winnerCount: value.batch.winnerCount, errorCode: value.batch.errorCode, failedReason: value.batch.errorCode } : null,
     winners: winners.map((winner) => ({ id: winner.id, nickname: winner.User.nickname, uid: winner.User.uid, prizeName: winner.LotteryPrize?.name || '活动奖品', wonAt: winner.wonAt,
       addressDeadline: winner.TopicShipping?.addressDeadline, addressSaved: Boolean(winner.TopicShipping?.addressCiphertext), shippingStatus: shippingState(winner.TopicShipping, now), shippedAt: winner.TopicShipping?.shippedAt })) }
 }
@@ -367,7 +381,17 @@ export async function drawDueTopicLotteries(options: { activityId?: string; batc
   for (const row of dueRows) {
     if (normalizeTopicLotteryConfigForRead(row.config).mode !== 'AUTO') continue
     try { const result = await drawTopicLottery({ activityId: row.activityId, trigger: 'AUTO', now }); if (result.changed) drawn++ }
-    catch (error) { if (error instanceof TopicLotteryError && error.code === 'LOTTERY_PENDING_SUBMISSIONS') blocked++; else failed++ }
+    catch (error) {
+      if (error instanceof TopicLotteryError && error.code === 'LOTTERY_PENDING_SUBMISSIONS') blocked++
+      else {
+        failed++
+        console.error('[topic-v2-lottery.draw.auto-failed]', {
+          activityId: row.activityId,
+          code: error instanceof TopicLotteryError ? error.code : 'UNKNOWN',
+          error: error instanceof Error ? error.name : 'unknown',
+        })
+      }
+    }
   }
   return { scanned: dueRows.length, drawn, blocked, failed }
 }

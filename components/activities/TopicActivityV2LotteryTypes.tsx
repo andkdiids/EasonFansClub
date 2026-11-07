@@ -58,6 +58,18 @@ export type TopicLotteryPublicPayload = {
     claimUrl: string | null
   } | null
   winners: TopicLotteryPublicWinner[]
+  draw: TopicLotteryPublicDraw | null
+}
+
+/** Public, redacted summary of a completed draw. Never present before DRAWN. */
+export type TopicLotteryPublicDraw = {
+  id: string
+  state: string
+  frozenAt: string | null
+  drawnAt: string | null
+  candidateCount: number
+  winnerCount: number
+  errorCode: string | null
 }
 
 export type TopicLotteryAddress = {

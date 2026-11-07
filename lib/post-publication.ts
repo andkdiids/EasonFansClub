@@ -8,7 +8,7 @@ import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { upsertNotification } from '@/lib/notification-write'
 import { prisma } from '@/lib/prisma'
-import { calculatePostExpiresAt } from '@/lib/post-lifecycle'
+import { resolvePostExpiry } from '@/lib/post-lifecycle'
 import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
 import { isApprovedScheduledPostDue } from '@/lib/post-scheduling'
 
@@ -54,9 +54,21 @@ async function promoteOneDuePost(postId: string, now: Date) {
         publicationStatus: true,
         scheduledPublishAt: true,
         expiryType: true,
+        expiresAt: true,
       },
     })
     if (!current || !isApprovedScheduledPostDue(current, now)) return false
+
+    // The author's expiry choice is authoritative. The publication job only
+    // resolves the deadline relative to the actual publication time; it must
+    // never invent or clear the expiryType itself.
+    const expiry = resolvePostExpiry(current.expiryType, now)
+    console.info('[post-publication.expiry]', {
+      postId,
+      expiryType: expiry.expiryType,
+      expiresAt: expiry.expiresAt ? expiry.expiresAt.toISOString() : null,
+      hadStaleExpiresAt: current.expiryType === null && current.expiresAt !== null,
+    })
 
     const updated = await tx.post.updateMany({
       where: {
@@ -71,7 +83,7 @@ async function promoteOneDuePost(postId: string, now: Date) {
         status: 'PUBLISHED',
         publicationStatus: 'PUBLISHED',
         publishedAt: now,
-        expiresAt: calculatePostExpiresAt(current.expiryType, now),
+        ...expiry,
       },
     })
     if (updated.count !== 1) return false

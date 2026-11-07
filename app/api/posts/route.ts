@@ -33,7 +33,7 @@ import {
   validateAndNormalizeRichTextReferences,
 } from '@/lib/rich-text-references'
 import { summarizePlainText } from '@/lib/share-metadata'
-import { calculatePostExpiresAt, parsePostExpiryType } from '@/lib/post-lifecycle'
+import { parsePostExpiryType, resolvePostExpiry } from '@/lib/post-lifecycle'
 import { collectPostTopicNames, PostTopicInputError, syncPostTopics } from '@/lib/post-topics'
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { expireTopicActivityPins } from '@/lib/topic-activity'
@@ -482,8 +482,12 @@ export async function POST(request: Request) {
           richContent: input.richContent ? input.richContent as Prisma.InputJsonValue : Prisma.DbNull,
           ipRegion,
           summary: createSummary(input.content),
-          expiryType,
-          expiresAt: canPublishImmediately && !isScheduled ? calculatePostExpiresAt(expiryType, createdAt) : null,
+          // Preserve the author's expiryType verbatim. A scheduled post keeps
+          // expiresAt NULL until the publication job resolves the deadline at
+          // the real publication time; an immediate post resolves it now.
+          ...(canPublishImmediately && !isScheduled
+            ? resolvePostExpiry(expiryType, createdAt)
+            : { expiryType: parsePostExpiryType(expiryType), expiresAt: null }),
           status: isScheduled ? 'DRAFT' : 'PUBLISHED',
           moderationStatus,
           publicationStatus: isScheduled ? 'SCHEDULED' : canPublishImmediately ? 'PUBLISHED' : 'WAITING_REVIEW',
