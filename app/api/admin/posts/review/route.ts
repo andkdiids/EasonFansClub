@@ -13,7 +13,7 @@ import { requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
 import { createNotification } from '@/lib/notification-write'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 import { reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
-import { calculatePostExpiresAt } from '@/lib/post-lifecycle'
+import { resolvePostExpiry } from '@/lib/post-lifecycle'
 import { formatScheduledPostTime, shouldPublishPostOnApproval } from '@/lib/post-scheduling'
 import { processPostPublicationEventForPost } from '@/lib/post-publication'
 
@@ -429,7 +429,7 @@ export async function PATCH(request: Request) {
           status: 'PUBLISHED',
           publicationStatus: 'PUBLISHED',
           publishedAt: reviewedAt,
-          expiresAt: calculatePostExpiresAt(current.expiryType, reviewedAt),
+          ...resolvePostExpiry(current.expiryType, reviewedAt),
         } : waitingForSchedule ? {
           status: 'DRAFT',
           publicationStatus: 'SCHEDULED',

@@ -29,6 +29,22 @@ export function calculatePostExpiresAt(expiryType: PostExpiryType | null, starts
   return new Date(startsAt.getTime() + days * 24 * 60 * 60 * 1000)
 }
 
+/**
+ * Single authority for the (expiryType, expiresAt) pair.
+ *
+ * A post is time-limited if and only if the author chose an expiryType. No
+ * caller may invent a different expiryType, and no scheduled/approval job may
+ * replace the author's choice: both publication paths must go through this
+ * helper so the type and the expiry time can never diverge.
+ */
+export function resolvePostExpiry(expiryType: PostExpiryType | null | undefined, startsAt: Date) {
+  const normalized = parsePostExpiryType(expiryType)
+  return {
+    expiryType: normalized,
+    expiresAt: calculatePostExpiresAt(normalized, startsAt),
+  }
+}
+
 export function isPostExpired(expiresAt: Date | string | null | undefined, now = new Date()) {
   if (!expiresAt) return false
   const value = expiresAt instanceof Date ? expiresAt : new Date(expiresAt)

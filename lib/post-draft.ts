@@ -185,6 +185,58 @@ export function hasMeaningfulPostDraftContent(payload: PostDraftPayload) {
   )
 }
 
+export const POST_DRAFT_FIELDS: readonly (keyof PostDraftPayload)[] = [
+  'boardId', 'title', 'content', 'richContent', 'imageUrls',
+  'pendingSticker', 'topicNames', 'expiryType',
+]
+
+function postDraftFieldKey(value: unknown) {
+  return JSON.stringify(value ?? null)
+}
+
+/**
+ * Precedence for an ASYNCHRONOUS draft restore.
+ *
+ * `restoreDraft()` awaits GET /api/posts/draft while the form is already
+ * rendered. Any choice the user makes before that request resolves (notably the
+ * 限时发布 / expiryType selection, which decides whether a scheduled post is a
+ * 限时今日帖子) belongs to the current editing session and must win over the
+ * older server draft. Fields the user has not touched may still be restored.
+ *
+ * `publishMode` and `scheduledPublishLocal` are deliberately not part of
+ * PostDraftPayload: they are session-level UI state, never persisted, so a
+ * restore can never overwrite them either.
+ *
+ * `expiryType` is ALWAYS session-owned. It is a per-post, per-publication
+ * decision (the limit starts counting when the post becomes public), so a
+ * stale saved draft - server-side or browser-local - must never silently turn
+ * an ordinary scheduled post into a 限时今日帖子. Only an explicit
+ * conflict-resolution action may apply the persisted choice.
+ */
+export function mergeRestoredPostDraft(
+  restored: PostDraftPayload,
+  current: PostDraftPayload,
+  baseline: PostDraftPayload,
+): PostDraftPayload {
+  const r = serializePostDraftPayload(restored)
+  const c = serializePostDraftPayload(current)
+  const b = serializePostDraftPayload(baseline)
+  const resolveField = <K extends keyof PostDraftPayload>(field: K): PostDraftPayload[K] =>
+    postDraftFieldKey(c[field]) === postDraftFieldKey(b[field]) ? r[field] : c[field]
+  return {
+    boardId: resolveField('boardId'),
+    title: resolveField('title'),
+    content: resolveField('content'),
+    richContent: resolveField('richContent'),
+    imageUrls: resolveField('imageUrls'),
+    pendingSticker: resolveField('pendingSticker'),
+    topicNames: resolveField('topicNames'),
+    // Never resurrect a limited-time choice from a saved draft. The value in
+    // `current` is whatever the user chose in this session (null by default).
+    expiryType: c.expiryType,
+  }
+}
+
 export function normalizeServerPostDraft(
   value: unknown,
   validBoardIds?: readonly string[],

@@ -207,6 +207,39 @@ export async function getTopicLotteryAddress(activityId: string, winnerId: strin
   })
 }
 
+/**
+ * Reuse the existing ADMIN notification mechanism (same pattern as
+ * post-publication failure alerts). The Notification (recipientId, key)
+ * unique constraint makes repeated address submissions idempotent; an update
+ * resets the unread flag so an edited address is surfaced again. The payload
+ * deliberately contains no recipient name, phone number or address.
+ */
+async function notifyAdminsOfAddressSubmission(tx: Prisma.TransactionClient, context: TopicLotteryContext, winnerId: string, now: Date) {
+  const admins = await tx.user.findMany({
+    where: {
+      role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+      status: 'ACTIVE',
+      isDeleted: false,
+      OR: [
+        { role: 'SUPER_ADMIN' },
+        { AdminPermission: { some: { permissionKey: { in: ['activity_manage', 'activity_lottery_shipping'] }, enabled: true } } },
+      ],
+    },
+    select: { id: true },
+  })
+  const key = `topic-v2-lottery-address:${winnerId}`
+  const activityTitle = context.activity.title
+  const prizeName = context.winner.LotteryPrize?.name || '活动奖品'
+  const title = '活动抽奖收货信息待处理'
+  const content = `话题活动「${activityTitle}」的中奖记录（奖品：${prizeName}）已于 ${formatBeijingDateTimeMinute(now)} 提交收货信息。收货地址与联系电话仅可在后台经权限校验后查看，本通知不包含任何敏感信息。`
+  const link = `/admin/activities/lottery-records?activityId=${encodeURIComponent(context.activity.id)}`
+  await Promise.all(admins.map((admin) => upsertNotificationWithDb(tx, {
+    where: { recipientId_key: { recipientId: admin.id, key } },
+    create: { recipientId: admin.id, type: 'ADMIN', key, title, content, link, activityId: context.activity.id },
+    update: { title, content, link, isRead: false, readAt: null },
+  }, { operation: 'topic-v2-lottery-address-alert', userId: admin.id })))
+}
+
 export async function saveTopicLotteryAddress(input: { activityId: string; winnerId: string; userId: string; address: unknown; consent: boolean; now?: Date }): Promise<TopicLotteryAddressPayload> {
   const now = asDate(input.now)
   if (!input.consent) fail('TOPIC_LOTTERY_ADDRESS_CONSENT_REQUIRED', '保存收件信息前必须同意隐私使用说明', 400)
@@ -231,6 +264,20 @@ export async function saveTopicLotteryAddress(input: { activityId: string; winne
       fields: Object.keys(address),
       addressHash: topicLotteryPiiSummaryHash(address),
     } })
+    // Notify administrators inside the same transaction. A failure is logged
+    // with a stable code and propagated so the write is never silently lost;
+    // the client can retry the submission safely.
+    try {
+      await notifyAdminsOfAddressSubmission(tx, context, input.winnerId, now)
+    } catch (error) {
+      console.error('[topic-v2-lottery.admin-notification.failed]', {
+        activityId: input.activityId,
+        winnerId: input.winnerId,
+        code: 'ADDRESS_ADMIN_NOTIFICATION_FAILED',
+        error: error instanceof Error ? error.name : 'unknown',
+      })
+      throw error
+    }
     return output(context, address, readShipment(context.shipping, input.activityId))
   })
 }
@@ -339,7 +386,13 @@ async function deliverOneNotice(candidate: NoticeCandidate) {
       await tx.topicActivityLotteryNotice.update({ where: { winnerId: candidate.winnerId }, data: { state: 'SENT', sentAt: new Date(), errorCode: null, attempts: { increment: 1 } } })
       await writeAudit(tx, { activityId: candidate.activityId, configId: context.config.id, actorId: null, action: 'NOTICE_SENT', entityId: candidate.winnerId, detail: { state: 'SENT' } })
       return 'SENT' as const
-    } catch {
+    } catch (error) {
+      console.error('[topic-v2-lottery.winner-notification.failed]', {
+        activityId: candidate.activityId,
+        winnerId: candidate.winnerId,
+        code: 'NOTIFICATION_WRITE_FAILED',
+        error: error instanceof Error ? error.name : 'unknown',
+      })
       await tx.topicActivityLotteryNotice.update({ where: { winnerId: candidate.winnerId }, data: { state: 'FAILED', errorCode: 'NOTIFICATION_WRITE_FAILED', attempts: { increment: 1 } } })
       await writeAudit(tx, { activityId: candidate.activityId, configId: context.config.id, actorId: null, action: 'NOTICE_FAILED', entityId: candidate.winnerId, detail: { state: 'FAILED' } })
       return 'FAILED' as const
