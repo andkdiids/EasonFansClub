@@ -578,7 +578,7 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
           fulfilledAt: true,
           Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
           LotteryPrize: { select: { id: true, tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true, Badge: { select: { id: true, name: true, iconUrl: true, visibility: true } } } },
-          User: { select: { id: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
+          User: { select: { id: true, uid: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
         },
       })
     : []
@@ -649,6 +649,7 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       return [{
         prizeId: entry.prizeId,
         nickname: getPublicUserDisplayName(entry.User),
+        uid: entry.User.uid || null,
         avatarUrl: publicImageVariantUrl(profileImageUrl(entry.User.Profile?.avatarUrl || entry.User.avatarUrl), 'avatar-sm'),
         tierName: prize.tierName || '中奖奖项',
         prizeName: prize.prizeType === 'VIRTUAL' && badge && !badgeVisible ? '神秘勋章' : prize.name,

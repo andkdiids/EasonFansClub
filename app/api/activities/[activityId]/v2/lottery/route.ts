@@ -7,7 +7,11 @@ export const dynamic = 'force-dynamic'
 
 const publicViewFields = ['enabled', 'config', 'state', 'candidateCount', 'myStatus', 'myEligibility', 'myWinner', 'winners', 'draw'] as const
 const publicDrawFields = ['id', 'state', 'frozenAt', 'drawnAt', 'candidateCount', 'winnerCount', 'errorCode'] as const
-const publicWinnerFields = ['nickname', 'uid', 'prizeName'] as const
+// Public winner rows are projected through an explicit allow-list. Anything not
+// named here (real name, phone, address, e-mail, ID card, claim tokens, internal
+// ids) is dropped before the response leaves the server, so privacy isolation
+// never depends on the browser hiding fields.
+const publicWinnerFields = ['nickname', 'uid', 'avatarUrl', 'prizeName', 'wonAt'] as const
 const publicWinnerSummaryFields = ['id', 'prize', 'wonAt', 'addressDeadline', 'shippingStatus', 'addressSaved', 'claimUrl'] as const
 const publicPrizeFields = ['name', 'imageUrl', 'description'] as const
 const configFields = ['version', 'enabled', 'title', 'description', 'mode', 'drawAt', 'eligibilityDeadline', 'addressDeadline', 'publishWinners', 'retentionDays', 'sourceEntryIds', 'prizes'] as const

@@ -13,6 +13,8 @@ import {
 } from '@/components/activities/TopicActivityV2LotteryTypes'
 
 const buttonClass = 'min-h-10 rounded-sm border border-[var(--border)] px-3 text-sm font-bold disabled:opacity-40'
+/** Winners are paginated in the browser so long lists stay readable. */
+const WINNERS_PER_PAGE = 20
 
 function readConfig(value: unknown): TopicLotteryConfig {
   try {
@@ -29,7 +31,13 @@ function readPayload(value: unknown): TopicLotteryPublicPayload | null {
   const winners = Array.isArray(value.winners)
     ? value.winners.flatMap((item) => {
       if (!isRecord(item)) return []
-      return [{ nickname: stringOr(item.nickname, '匿名用户'), uid: stringOr(item.uid, '—'), prizeName: stringOr(item.prizeName, '中奖奖品') }]
+      return [{
+        nickname: stringOr(item.nickname, '匿名用户'),
+        uid: stringOr(item.uid),
+        avatarUrl: typeof item.avatarUrl === 'string' ? item.avatarUrl : null,
+        prizeName: stringOr(item.prizeName, '中奖奖品'),
+        wonAt: typeof item.wonAt === 'string' ? item.wonAt : null,
+      }]
     })
     : []
   const drawValue = isRecord(value.draw) ? value.draw : null
@@ -120,6 +128,7 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
   const [payload, setPayload] = useState<TopicLotteryPublicPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [winnerPage, setWinnerPage] = useState(1)
   const requestBusy = useRef(false)
   const load = useCallback(async () => {
     if (requestBusy.current) return
@@ -151,7 +160,12 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
   if (!config.enabled) return null
   const winner = payload.myWinner
   const winnerClaimUrl = safeClaimUrl(winner?.claimUrl || null)
-  const showWinners = config.publishWinners && payload.winners.length > 0
+  // Winner lists are always public once the draw completed (platform policy).
+  // The server never returns winners before DRAWN, so no early leak is possible.
+  const showWinners = payload.state === 'DRAWN' && payload.winners.length > 0
+  const winnerPageCount = Math.max(1, Math.ceil(payload.winners.length / WINNERS_PER_PAGE))
+  const currentWinnerPage = Math.min(Math.max(1, winnerPage), winnerPageCount)
+  const visibleWinners = payload.winners.slice((currentWinnerPage - 1) * WINNERS_PER_PAGE, currentWinnerPage * WINNERS_PER_PAGE)
 
   return <section aria-label="活动实物抽奖" className="space-y-5 border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -170,8 +184,8 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
         {winner ? <div className="mt-3 border border-[color-mix(in_srgb,var(--success)_40%,var(--border))] bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] p-3"><div className="flex min-w-0 items-start gap-3">{winner.prize.imageUrl ? <img src={winner.prize.imageUrl} alt="" className="size-16 shrink-0 object-cover" /> : null}<div className="min-w-0"><p className="font-black">恭喜中奖：{winner.prize.name}</p><p className="mt-1 text-xs">中奖时间：{dateLabel(winner.wonAt)}</p>{winner.prize.description ? <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5">{winner.prize.description}</p> : null}</div></div>{winnerClaimUrl && !['SHIPPED', 'COMPLETED', 'DELIVERED'].includes(winner.shippingStatus) ? <Link href={winnerClaimUrl} className="mt-3 inline-flex min-h-10 items-center border border-[var(--border)] px-3 text-sm font-bold">{winner.addressSaved ? '查看 / 修改收货信息' : '提交收货信息'}</Link> : ['SHIPPED', 'COMPLETED', 'DELIVERED'].includes(winner.shippingStatus) ? <p className="mt-3 text-sm font-bold">奖品已完成配送或发货，收货信息已锁定。</p> : null}</div> : null}
       </>}
     </div>
-    {payload.draw ? <div className="border-t border-[var(--border)] pt-4"><h3 className="font-bold">开奖记录</h3><dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-xs text-[var(--foreground-muted)]">开奖时间</dt><dd>{dateLabel(payload.draw.drawnAt || payload.draw.frozenAt)}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">开奖批次</dt><dd className="break-all">{payload.draw.id}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">候选 / 中奖人数</dt><dd>{payload.draw.candidateCount} 人 / {payload.draw.winnerCount} 人</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">名单公开</dt><dd>{config.publishWinners ? '已公开（仅昵称、E院ID与奖品）' : '未公开，中奖结果仅本人可见'}</dd></div></dl><p className="mt-2 text-xs text-[var(--foreground-muted)]">领取状态仅展示允许公开的信息；收货信息不会在此公开。</p></div> : null}
-    {showWinners ? <div className="border-t border-[var(--border)] pt-4"><h3 className="font-bold">中奖名单</h3><ul className="mt-2 grid gap-2 text-sm sm:grid-cols-2">{payload.winners.map((item, index) => <li key={`${item.uid}-${item.prizeName}-${index}`} className="min-w-0 border border-[var(--border)] px-3 py-2"><span className="break-words">{item.nickname}（{item.uid}）</span><span className="ml-2 text-[var(--foreground-muted)]">{item.prizeName}</span></li>)}</ul></div> : null}
+    {payload.draw ? <div className="border-t border-[var(--border)] pt-4"><h3 className="font-bold">开奖记录</h3><dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-xs text-[var(--foreground-muted)]">开奖时间</dt><dd>{dateLabel(payload.draw.drawnAt || payload.draw.frozenAt)}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">开奖批次</dt><dd className="break-all">{payload.draw.id}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">候选 / 中奖人数</dt><dd>{payload.draw.candidateCount} 人 / {payload.draw.winnerCount} 人</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">名单公开</dt><dd>已公开</dd></div></dl><p className="mt-2 text-xs text-[var(--foreground-muted)]">开奖成功后中奖名单自动公开，仅展示昵称、头像、E院ID与奖品；领取状态与收货信息不会在此公开。</p></div> : null}
+    {showWinners ? <div className="border-t border-[var(--border)] pt-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-bold">中奖名单</h3><p className="text-xs text-[var(--foreground-muted)]">共 {payload.winners.length} 人 · 对所有人公开</p></div><ul className="mt-3 grid gap-2 sm:grid-cols-2">{visibleWinners.map((item, index) => { const href = item.uid ? '/user/' + encodeURIComponent(item.uid) : null; const identity = <>{item.avatarUrl ? <img src={item.avatarUrl} alt="" className="size-10 shrink-0 rounded-full border border-[var(--border)] object-cover" loading="lazy" /> : <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full border border-[var(--border)] text-xs font-black text-[var(--foreground-muted)]">{item.nickname.slice(0, 1)}</span>}<span className="min-w-0"><span className="block break-words text-sm font-black">{item.nickname}</span>{item.uid ? <span className="block break-words text-xs text-[var(--foreground-muted)]">E院ID：{item.uid}</span> : null}</span></>; return <li key={`${item.uid}-${item.prizeName}-${index}`} className="min-w-0 border border-[var(--border)] px-3 py-2">{href ? <Link href={href} className="flex min-w-0 items-center gap-3 underline-offset-4 hover:underline" aria-label={`查看 ${item.nickname} 的个人主页`}>{identity}</Link> : <div className="flex min-w-0 items-center gap-3">{identity}</div>}<p className="mt-2 break-words text-sm font-bold">奖品：{item.prizeName}</p>{item.wonAt ? <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">中奖时间：{dateLabel(item.wonAt)}</p> : null}</li> })}</ul>{winnerPageCount > 1 ? <nav aria-label="中奖名单分页" className="mt-3 flex flex-wrap items-center gap-2"><button type="button" className={buttonClass} disabled={currentWinnerPage <= 1} onClick={() => setWinnerPage(currentWinnerPage - 1)}>上一页</button><span className="text-xs font-bold">第 {currentWinnerPage} / {winnerPageCount} 页</span><button type="button" className={buttonClass} disabled={currentWinnerPage >= winnerPageCount} onClick={() => setWinnerPage(currentWinnerPage + 1)}>下一页</button></nav> : null}<p className="mt-2 text-xs text-[var(--foreground-muted)]">真实姓名、手机号码、收货地址、身份证信息、邮箱与领奖凭证永不公开。</p></div> : null}
     {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
   </section>
 }

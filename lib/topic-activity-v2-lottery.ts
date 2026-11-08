@@ -7,6 +7,9 @@ import { assertTopicLotteryConfigUpdateAllowed, assertTopicLotterySourceProgramR
 import { sampleTopicLotteryUsers } from '@/lib/topic-activity-v2-lottery-random'
 import { getTopicLotteryPiiConfigStatus } from '@/lib/topic-activity-v2-lottery-private'
 import { upsertNotificationWithDb } from '@/lib/notification-write'
+import { getPublicUserDisplayName } from '@/lib/friend-display'
+import { profileImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import type { TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
@@ -21,6 +24,8 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(cano
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 function fail(code: string, message: string, status = 409): never { throw new TopicLotteryError(code, message, status) }
 export const TOPIC_LOTTERY_PENDING_EXPIRY_REASON = '活动资格审核期限已结束，未在截止前通过审核'
+/** Upper bound for the public winner list of a single draw batch. */
+export const PUBLIC_WINNER_LIMIT = 1000
 type DB = Pick<Prisma.TransactionClient, 'topicActivitySubmission' | 'topicActivityLotteryEligibility'>
 async function sources(db: DB, activity: Activity, config: TopicLotteryConfig, userId?: string) {
   if (!activity.activityPostId || !config.eligibilityDeadline || !config.sourceEntryIds.length) return []
@@ -466,13 +471,29 @@ export async function getTopicLotteryView(activityId: string, viewerId?: string 
   const eligible = value.batch ? frozen?.some((candidate) => candidate.userId === viewerId) : ownSources.some((row) => row.status === 'APPROVED')
   const myStatus = !viewerId ? 'LOGIN_REQUIRED' : ownWinner ? 'WON' : value.state === 'DRAWN' ? 'NOT_WON' : eligible ? 'ELIGIBLE'
     : ownSources.some((row) => row.status === 'PENDING') ? 'SUBMITTED_PENDING' : now > new Date(value.config.eligibilityDeadline!) ? 'MISSED_DEADLINE' : 'NOT_ELIGIBLE'
-  const publicWinners = value.config.publishWinners && value.state === 'DRAWN' ? await prisma.lotteryEntry.findMany({ where: { lotteryId: value.lottery.lotteryId },
-    select: { User: { select: { nickname: true, uid: true } }, LotteryPrize: { select: { name: true } } }, take: 1000 }) : []
+  // Winner lists are public for every completed draw (platform policy, no
+  // per-activity opt-out). Only a strict display whitelist is projected:
+  // nickname, avatar, E院ID, prize name and win time. Real name, phone, address,
+  // e-mail, ID card and claim tokens are never selected here, so they cannot
+  // leak through this public payload even by accident.
+  const publicWinners = value.state === 'DRAWN' ? await prisma.lotteryEntry.findMany({ where: { lotteryId: value.lottery.lotteryId },
+    orderBy: [{ wonAt: 'asc' }, { id: 'asc' }], take: PUBLIC_WINNER_LIMIT,
+    select: { wonAt: true,
+      User: { select: { nickname: true, uid: true, avatarUrl: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { avatarUrl: true } } } },
+      LotteryPrize: { select: { name: true } } } }) : []
   return { enabled: true, config: value.config, state: value.state, candidateCount: value.candidateCount, myStatus,
     myEligibility: eligible ? { count: 1 } : null, myWinner: ownWinner ? { id: ownWinner.id, prize: { name: ownWinner.LotteryPrize?.name || '活动奖品', imageUrl: topicLotteryPrizeImageReferenceForRead(ownWinner.LotteryPrize?.imageUrl), description: ownWinner.LotteryPrize?.description },
       wonAt: ownWinner.wonAt, addressDeadline: ownWinner.TopicShipping?.addressDeadline, shippingStatus: shippingState(ownWinner.TopicShipping, now), addressSaved: Boolean(ownWinner.TopicShipping?.addressCiphertext),
       claimUrl: '/activities/' + encodeURIComponent(activityId) + '/lottery/claims/' + encodeURIComponent(ownWinner.id) } : null,
-    winners: publicWinners.map((winner) => ({ nickname: winner.User.nickname, uid: winner.User.uid, prizeName: winner.LotteryPrize?.name || '活动奖品' })),
+    winners: publicWinners.map((winner) => ({
+      nickname: getPublicUserDisplayName(winner.User),
+      // E院ID is a public, non-identifying handle; string form keeps the public
+      // payload type stable and safe to place in the profile URL.
+      uid: String(winner.User.uid),
+      avatarUrl: publicImageVariantUrl(profileImageUrl(winner.User.Profile?.avatarUrl || winner.User.avatarUrl), 'avatar-sm'),
+      prizeName: winner.LotteryPrize?.name || '活动奖品',
+      wonAt: winner.wonAt,
+    })),
     draw: drawRecord }
 }
 export async function getAdminTopicLotteryView(activityId: string, now = new Date()) {

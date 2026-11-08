@@ -36,8 +36,16 @@ export function assertTopicLotterySourceProgramRulesUnchanged(previous: TopicAct
     throw new TopicLotteryError('LOTTERY_SOURCE_RULES_LOCKED', '已有截图参与，不能更改抽奖来源、截图要求或关闭资格入口')
   }
 }
+/**
+ * Platform-wide disclosure policy (applies to every lottery module, current and
+ * future): once a draw has completed successfully the winner list is public.
+ * There is no per-activity opt-out. `publishWinners` is kept on the config
+ * object only so historical JSON stays readable and old clients keep working;
+ * every write and every read normalizes it back to `true`.
+ */
+export const TOPIC_LOTTERY_WINNERS_ALWAYS_PUBLIC = true
 export const defaultTopicLotteryConfig = (): TopicLotteryConfig => ({ version: 1, enabled: false, title: '幸运抽奖', description: '', mode: 'MANUAL',
-  drawAt: null, eligibilityDeadline: null, addressDeadline: null, publishWinners: false, retentionDays: 90, sourceEntryIds: [], prizes: [] })
+  drawAt: null, eligibilityDeadline: null, addressDeadline: null, publishWinners: TOPIC_LOTTERY_WINNERS_ALWAYS_PUBLIC, retentionDays: 90, sourceEntryIds: [], prizes: [] })
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 function invalid(message: string): never { throw new TopicLotteryError('LOTTERY_CONFIG_INVALID', message, 400) }
 function text(value: unknown, fallback: string, maximum: number) {
@@ -125,7 +133,10 @@ export function normalizeTopicLotteryConfig(value: unknown): TopicLotteryConfig 
   if (prizes.reduce((sum, item) => sum + item.quantity, 0) > 1000) invalid('单次抽奖最多配置 1000 件奖品')
   const config: TopicLotteryConfig = { version: 1, enabled: flag(input.enabled, false), title: text(input.title, defaults.title, 200), description: text(input.description, '', 8000), mode,
     drawAt: date(input.drawAt), eligibilityDeadline: date(input.eligibilityDeadline), addressDeadline: date(input.addressDeadline),
-    publishWinners: flag(input.publishWinners, false), retentionDays: integer(input.retentionDays, 90, 1, 365), sourceEntryIds, prizes }
+    // Winner-list disclosure is a platform policy, not an activity setting: any
+    // stored `false` (legacy rows, stale clients, hand-edited JSON) is ignored so
+    // historical draws are published too. Nothing else in the config is altered.
+    publishWinners: TOPIC_LOTTERY_WINNERS_ALWAYS_PUBLIC, retentionDays: integer(input.retentionDays, 90, 1, 365), sourceEntryIds, prizes }
   if (config.enabled) {
     if (!config.title || !sourceEntryIds.length || !prizes.length || prizes.some((prize) => !prize.name)) invalid('请填写标题、资格来源和完整奖品')
     if (!config.drawAt || !config.eligibilityDeadline || !config.addressDeadline) invalid('请设置资格截止、开奖和收件截止时间')

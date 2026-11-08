@@ -41,7 +41,7 @@ export function TopicActivityWizardSummary({ draft, coverName, badgeName }: {
         <p>资格截止：{displayDate(lottery.eligibilityDeadline) === '未填写' ? '同活动结束时间' : displayDate(lottery.eligibilityDeadline)}（北京时间）</p>
         <p>开奖：{displayDate(lottery.drawAt)}（北京时间） · {lottery.mode === 'MANUAL' ? '管理员确认开奖' : '到时自动开奖，仍受服务端安全条件限制'}</p>
         <p>收件截止：{displayDate(lottery.addressDeadline)}（北京时间）</p>
-        <p>中奖名单：默认不公开 · 收件信息保留策略：{lottery.retentionDays} 天</p>
+        <p>中奖名单：开奖成功后自动公开（昵称、头像、E院ID与奖品） · 收件信息保留策略：{lottery.retentionDays} 天</p>
       </> : <p>未开启抽奖。话题活动可独立运营。</p>}
     </section>
   </div>

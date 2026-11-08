@@ -1,4 +1,5 @@
 /* eslint-disable @next/next/no-img-element */
+import Link from 'next/link'
 import { activityDateLabel } from '@/lib/activity'
 import type { ActivityLotteryPublicView } from '@/lib/activity-lottery'
 
@@ -75,17 +76,22 @@ export function ActivityLotteryPanel({ lotteries, isRegistered, embedded = false
                       <div key={prize.id} className="rounded-lg bg-[var(--surface-subtle)] p-3">
                         <h6 className="text-xs font-black text-[var(--foreground)]">{prize.tierName || '中奖奖项'} · {prize.name}</h6>
                         <ul className="mt-2 space-y-2">
-                          {prize.winners.map((winner, index) => (
-                            <li key={`${prize.id}:${winner.wonAt}:${index}`} className="flex items-center gap-3">
-                              <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--navigation-active)] text-xs font-black text-[var(--primary)]">
-                                {winner.avatarUrl ? <img src={winner.avatarUrl} alt="" className="size-full object-cover" loading="lazy" /> : winner.nickname.slice(0, 1)}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="break-words text-sm font-black text-[var(--foreground)]">{winner.nickname} · {winner.prizeName}</p>
-                                <p className="mt-0.5 text-xs font-bold text-[var(--foreground-muted)]">开奖时间：{activityDateLabel(lottery.drawnAt || winner.wonAt)} · {publicRewardStatusLabel(winner.rewardStatus)}{winner.rewardAt ? ` · ${activityDateLabel(winner.rewardAt)}` : ''}</p>
-                              </div>
-                            </li>
-                          ))}
+                          {prize.winners.map((winner, index) => {
+                            const profileHref = winner.uid ? `/user/${encodeURIComponent(String(winner.uid))}` : null
+                            const avatar = winner.avatarUrl
+                              ? <img src={winner.avatarUrl} alt="" className="size-full object-cover" loading="lazy" />
+                              : winner.nickname.slice(0, 1)
+                            const avatarClass = 'grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--navigation-active)] text-xs font-black text-[var(--primary)]'
+                            return (
+                              <li key={`${prize.id}:${winner.wonAt}:${index}`} className="flex items-center gap-3">
+                                {profileHref ? <Link href={profileHref} className={avatarClass} aria-label={`查看 ${winner.nickname} 的个人主页`}>{avatar}</Link> : <div className={avatarClass}>{avatar}</div>}
+                                <div className="min-w-0 flex-1">
+                                  <p className="break-words text-sm font-black text-[var(--foreground)]">{profileHref ? <Link href={profileHref} className="underline-offset-4 hover:underline">{winner.nickname}</Link> : winner.nickname} · {winner.prizeName}</p>
+                                  <p className="mt-0.5 text-xs font-bold text-[var(--foreground-muted)]">开奖时间：{activityDateLabel(lottery.drawnAt || winner.wonAt)} · {publicRewardStatusLabel(winner.rewardStatus)}{winner.rewardAt ? ` · ${activityDateLabel(winner.rewardAt)}` : ''}</p>
+                                </div>
+                              </li>
+                            )
+                          })}
                         </ul>
                       </div>
                     ))}
