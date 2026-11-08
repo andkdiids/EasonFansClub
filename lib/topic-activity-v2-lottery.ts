@@ -6,6 +6,7 @@ import { isTopicActivityOriginalObjectKey } from '@/lib/topic-activity-image-ori
 import { assertTopicLotteryConfigUpdateAllowed, assertTopicLotterySourceProgramRulesUnchanged, defaultTopicLotteryConfig, normalizeTopicLotteryConfig, normalizeTopicLotteryConfigForRead, topicLotteryPrizeImageReferenceForRead, topicLotterySourceRulesLocked, TopicLotteryError, type TopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
 import { sampleTopicLotteryUsers } from '@/lib/topic-activity-v2-lottery-random'
 import { getTopicLotteryPiiConfigStatus } from '@/lib/topic-activity-v2-lottery-private'
+import { upsertNotificationWithDb } from '@/lib/notification-write'
 import type { TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
@@ -19,6 +20,7 @@ function canonical(value: unknown): unknown {
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex')
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 function fail(code: string, message: string, status = 409): never { throw new TopicLotteryError(code, message, status) }
+export const TOPIC_LOTTERY_PENDING_EXPIRY_REASON = '活动资格审核期限已结束，未在截止前通过审核'
 type DB = Pick<Prisma.TransactionClient, 'topicActivitySubmission' | 'topicActivityLotteryEligibility'>
 async function sources(db: DB, activity: Activity, config: TopicLotteryConfig, userId?: string) {
   if (!activity.activityPostId || !config.eligibilityDeadline || !config.sourceEntryIds.length) return []
@@ -242,8 +244,123 @@ async function freeze(input: { activityId: string; actorId?: string; trigger: 'A
     return drawn
   })
 }
+/**
+ * New unified rule: after the activity's eligibility deadline passes, any
+ * submission still in PENDING is automatically rejected (reason recorded) so it
+ * can no longer block the automatic draw. Idempotent: it only transitions rows
+ * that are still PENDING and never creates duplicate records or notifications.
+ */
+export async function autoRejectExpiredPendingSubmissions(input: { activityId: string; actorId?: string | null; now?: Date }) {
+  const now = input.now || new Date()
+  return withTopicV2Transaction(async (tx) => {
+    const lottery = await tx.topicActivityLottery.findUnique({ where: { activityId: input.activityId } })
+    if (!lottery?.enabled) return { rejected: 0 }
+    const config = normalizeTopicLotteryConfigForRead(lottery.config)
+    const eligibilityDeadline = config.eligibilityDeadline ? new Date(config.eligibilityDeadline) : null
+    // Only act once the eligibility deadline has actually passed.
+    if (!eligibilityDeadline || now.getTime() <= eligibilityDeadline.getTime()) return { rejected: 0 }
+    if (!config.sourceEntryIds.length) return { rejected: 0 }
+    const activity = await tx.activity.findUnique({ where: { id: input.activityId } })
+    if (!activity) return { rejected: 0 }
+    // Unified rule: any submission still PENDING after the eligibility deadline
+    // is auto-rejected. We query PENDING directly within the candidate scope
+    // (activity, source entries, submission window, live comment, active user)
+    // but deliberately DO NOT require a qualifying FORM_ANSWER asset. An
+    // asset-less PENDING could never have been eligible yet must still be cleared
+    // uniformly so it no longer lingers as PENDING and the auto-draw proceeds.
+    // (sources() itself requires the asset, which would skip exactly those rows.)
+    const pendingRows = await tx.topicActivitySubmission.findMany({
+      where: {
+        activityId: input.activityId,
+        rewardEntryId: { in: config.sourceEntryIds },
+        submittedAt: { lte: eligibilityDeadline, ...(activity.startsAt ? { gte: activity.startsAt } : {}) },
+        status: 'PENDING',
+        commentDeletedAt: null,
+        User: { is: { status: 'ACTIVE', isDeleted: false } },
+      },
+      select: { id: true },
+    })
+    const pendingIds = pendingRows.map((row) => row.id)
+    if (!pendingIds.length) return { rejected: 0 }
+    const result = await tx.topicActivitySubmission.updateMany({
+      where: { id: { in: pendingIds }, status: 'PENDING' },
+      data: { status: 'REJECTED', reviewedAt: now, reviewedById: input.actorId || null, rejectReason: TOPIC_LOTTERY_PENDING_EXPIRY_REASON },
+    })
+    if (!result.count) return { rejected: 0 }
+    await audit(tx, lottery, 'PENDING_AUTO_REJECTED', input.actorId || null, {
+      reason: TOPIC_LOTTERY_PENDING_EXPIRY_REASON,
+      count: result.count,
+      submissionIds: pendingIds,
+    })
+    // Related user status prompt: one idempotent notification per submission.
+    await Promise.all(pendingIds.map((submissionId) => notifyPendingAutoRejection(tx, input.activityId, activity.title, submissionId)))
+    return { rejected: result.count }
+  })
+}
+
+async function notifyPendingAutoRejection(tx: Prisma.TransactionClient, activityId: string, activityTitle: string, submissionId: string) {
+  const submission = await tx.topicActivitySubmission.findUnique({ where: { id: submissionId }, select: { userId: true } })
+  if (!submission) return
+  const key = `topic-v2-lottery-submission-expired:${submissionId}`
+  try {
+    await upsertNotificationWithDb(tx, {
+      where: { recipientId_key: { recipientId: submission.userId, key } },
+      create: {
+        recipientId: submission.userId,
+        actorId: null,
+        type: 'ACTIVITY',
+        title: '抽奖资格投稿未通过审核',
+        content: `您参与「${activityTitle}」的抽奖资格投稿因资格审核期限已结束、未在截止前通过审核，已自动标记为未通过。`,
+        link: `/activities/${activityId}`,
+        key,
+        activityId,
+      },
+      update: {},
+    }, { operation: 'topic-v2-lottery-pending-expiry', userId: submission.userId })
+  } catch (error) {
+    console.error('[topic-v2-lottery.pending-expiry-notification.failed]', {
+      activityId,
+      submissionId,
+      code: 'PENDING_EXPIRY_NOTIFICATION_FAILED',
+      error: error instanceof Error ? error.name : 'unknown',
+    })
+  }
+}
+
+/**
+ * Scheduler step (phase 1): after the eligibility deadline, expire lingering
+ * PENDING submissions for every published, enabled lottery so the automatic
+ * draw (phase 2) is never blocked. Safe to run every heartbeat — idempotent.
+ */
+export async function expirePendingTopicLotterySubmissions(options: { activityId?: string; batchSize?: number; now?: Date } = {}) {
+  const now = options.now || new Date()
+  const rows = await prisma.topicActivityLottery.findMany({
+    where: {
+      ...(options.activityId ? { activityId: options.activityId } : {}),
+      enabled: true,
+      Activity: { status: 'PUBLISHED' },
+      state: { in: ['COLLECTING', 'FROZEN', 'DRAWING', 'FAILED'] },
+    },
+    orderBy: [{ drawAt: 'asc' }, { id: 'asc' }],
+    take: Math.min(200, Math.max(1, options.batchSize || 50)),
+  })
+  let expired = 0
+  for (const row of rows) {
+    const config = normalizeTopicLotteryConfigForRead(row.config)
+    const deadline = config.eligibilityDeadline ? new Date(config.eligibilityDeadline) : null
+    if (!deadline || now.getTime() <= deadline.getTime()) continue
+    const result = await autoRejectExpiredPendingSubmissions({ activityId: row.activityId, now })
+    expired += result.rejected
+  }
+  return { scanned: rows.length, expired }
+}
+
 export async function drawTopicLottery(input: { activityId: string; actorId?: string; trigger: 'AUTO' | 'MANUAL'; now?: Date }) {
   const now = input.now || new Date()
+  // Phase 1: if the eligibility deadline has passed, auto-reject lingering
+  // PENDING submissions before freezing so they no longer block the draw.
+  // Idempotent and covered by the same audit/notification guarantees.
+  await autoRejectExpiredPendingSubmissions({ activityId: input.activityId, actorId: input.actorId, now })
   await freeze({ ...input, now })
   // Cache an uncommitted plan across deadlock retries; a committed plan is
   // always read from the database. Never resample a persisted allocation.

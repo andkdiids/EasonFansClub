@@ -344,7 +344,7 @@ async function start() {
     if (activityAutoCheckInRunning) return
     activityAutoCheckInRunning = true
     try {
-      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }, { expireUserBadges }, { scanSustainedBadgeQualifications }, { dispatchDueTopicActivityRewards, expireTopicActivityPins }, { dispatchDueTopicActivityV2Rewards }, { drawDueTopicLotteries }, { deliverTopicLotteryNotices, purgeExpiredTopicLotteryPII }, { deliverDueConcertReminders }] = await Promise.all([
+      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }, { expireUserBadges }, { scanSustainedBadgeQualifications }, { dispatchDueTopicActivityRewards, expireTopicActivityPins }, { dispatchDueTopicActivityV2Rewards }, { drawDueTopicLotteries, expirePendingTopicLotterySubmissions }, { deliverTopicLotteryNotices, purgeExpiredTopicLotteryPII }, { deliverDueConcertReminders }] = await Promise.all([
         import('./lib/activity-registration'),
         import('./lib/activity-lottery'),
         import('./lib/activity-badge-rewards'),
@@ -365,7 +365,7 @@ async function start() {
           })
           return { scanned: 0, delivered: 0, failed: true as const }
         })
-      const [expirationResult, result, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicV2RewardResult, topicPinResult, topicLotteryResult, concertReminders] = await Promise.all([
+      const [expirationResult, result, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicV2RewardResult, topicPinResult, expirePendingResult, topicLotteryResult, concertReminders] = await Promise.all([
         expireUserBadges(),
         autoCheckInEndedActivityRegistrations({ batchSize: 100 }),
         drawDueActivityLotteries({ batchSize: 200 }),
@@ -374,13 +374,14 @@ async function start() {
         dispatchDueTopicActivityRewards({ batchSize: 200 }),
         dispatchDueTopicActivityV2Rewards({ batchSize: 200 }),
         expireTopicActivityPins(),
+        expirePendingTopicLotterySubmissions({ batchSize: 50 }),
         drawDueTopicLotteries({ batchSize: 50 }),
         concertReminderTask,
       ])
       // Results commit before notices; retryable outbox and retention use the
       // existing heartbeat, without a new worker/service/workflow.
       const [topicLotteryNotices, topicLotteryPii] = await Promise.all([deliverTopicLotteryNotices({ batchSize: 100 }), purgeExpiredTopicLotteryPII({ batchSize: 100 })])
-      if (expirationResult.expiredCount || expirationResult.clearedEquippedCount || result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed || sustainedQualificationResult.evaluated || sustainedQualificationResult.granted || sustainedQualificationResult.restored || sustainedQualificationResult.grayed || sustainedQualificationResult.revoked || sustainedQualificationResult.failed || topicRewardResult.processed || topicV2RewardResult.processed || topicV2RewardResult.failed || topicPinResult.unpinned || topicLotteryResult.scanned || topicLotteryNotices.scanned || topicLotteryPii.scanned || concertReminders.delivered || concertReminders.failed) {
+      if (expirationResult.expiredCount || expirationResult.clearedEquippedCount || result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed || sustainedQualificationResult.evaluated || sustainedQualificationResult.granted || sustainedQualificationResult.restored || sustainedQualificationResult.grayed || sustainedQualificationResult.revoked || sustainedQualificationResult.failed || topicRewardResult.processed || topicV2RewardResult.processed || topicV2RewardResult.failed || topicPinResult.unpinned || expirePendingResult.expired || topicLotteryResult.scanned || topicLotteryNotices.scanned || topicLotteryPii.scanned || concertReminders.delivered || concertReminders.failed) {
         console.info('[activities.auto-check-in.completed]', {
           event: 'activities.auto_check_in.completed',
           badgeExpiration: expirationResult,
@@ -393,6 +394,7 @@ async function start() {
           topicActivityRewards: topicRewardResult,
           topicActivityV2Rewards: topicV2RewardResult,
           topicActivityPins: topicPinResult,
+          expirePendingTopicLotteries: expirePendingResult,
           topicLottery: topicLotteryResult,
           topicLotteryNotices,
           topicLotteryPii,
