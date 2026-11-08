@@ -32,6 +32,8 @@ export function getActivityLotteryRecordIntegrityIssues(input: {
 
 export type PublicLotteryWinnerRecord = {
   nickname: string
+  /** Public E院ID; used to link the winner to their public profile. */
+  uid: number | null
   avatarUrl: string | null
   tierName: string
   prizeName: string
@@ -53,6 +55,7 @@ export function groupActivityLotteryWinnersByPrize<TPrize extends { id: string; 
       const prizeWinners = winnersByPrize.get(winner.prizeId) || []
       prizeWinners.push({
         nickname: winner.nickname,
+        uid: winner.uid,
         avatarUrl: winner.avatarUrl,
         tierName: winner.tierName,
         prizeName: winner.prizeName,

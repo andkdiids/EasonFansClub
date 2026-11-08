@@ -35,10 +35,25 @@ export type TopicLotteryAdminPayload = {
   draw?: TopicLotteryDrawView | null
 }
 
+/**
+ * Public winner row for a completed draw. This is the ONLY shape the public
+ * lottery endpoint may return: no real name, phone, address, e-mail, ID card,
+ * claim token or internal id is allowed here.
+ */
 export type TopicLotteryPublicWinner = {
   nickname: string
   uid: string
+  avatarUrl: string | null
   prizeName: string
+  wonAt: string | null
+}
+
+/** Server-side pagination metadata for the public winner list. */
+export type TopicLotteryPublicWinnerPage = {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
 }
 
 export type TopicLotteryPublicPayload = {
@@ -58,6 +73,7 @@ export type TopicLotteryPublicPayload = {
     claimUrl: string | null
   } | null
   winners: TopicLotteryPublicWinner[]
+  winnerPage: TopicLotteryPublicWinnerPage
   draw: TopicLotteryPublicDraw | null
 }
 

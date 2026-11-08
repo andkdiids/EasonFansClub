@@ -80,7 +80,8 @@ before(async () => {
         calls.publicView.push([activityId, viewerId])
         const prize = { id: 'prize-one', name: '实物奖', description: '公开奖品', imageUrl: '/cos/activities/asset-one/source.webp', quantity: 1, sortOrder: 0 }
         return { enabled: true, config: { version: 1, enabled: true, title: '幸运抽奖', prizes: [prize] }, state: 'DRAWN', myStatus: viewerId ? 'ELIGIBLE' : 'LOGIN_REQUIRED',
-          myWinner: { id: 'winner-one', prize, address: 'never-public' }, winners: [{ id: 'public-winner', prizeName: '实物奖', address: 'never-public' }] }
+          myWinner: { id: 'winner-one', prize, address: 'never-public' }, winners: [{ id: 'public-winner', prizeName: '实物奖', address: 'never-public' }],
+          winnerPage: { page: 1, pageSize: 20, total: 1, totalPages: 1, internalCursor: 'never-public' } }
       },
       getAdminTopicLotteryView: async (activityId: string) => {
         calls.adminView.push(activityId)
@@ -151,6 +152,8 @@ test('public lottery GET permits anonymous and optional Bearer viewers without e
   let body = await responseBody(result)
   assert.equal(body.myStatus, 'LOGIN_REQUIRED')
   assert.equal((body.winners as Array<Record<string, unknown>>)[0].address, undefined)
+  // Pagination metadata is whitelisted down to four plain counters.
+  assert.deepEqual(body.winnerPage, { page: 1, pageSize: 20, total: 1, totalPages: 1 })
   assert.equal((((body.config as Record<string, unknown>).prizes as Array<Record<string, unknown>>)[0]).imageUrl, '/cos/activities/asset-one/source.webp', 'anonymous public contract carries stable prize object reference')
   assert.equal(((body.myWinner as Record<string, unknown>).address), undefined)
   assert.equal((((body.myWinner as Record<string, unknown>).prize as Record<string, unknown>).imageUrl), '/cos/activities/asset-one/source.webp', 'winner view carries the same stable image reference')

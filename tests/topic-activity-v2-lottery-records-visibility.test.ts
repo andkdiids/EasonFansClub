@@ -38,12 +38,14 @@ test('未开奖活动不得提前泄露中奖结果：draw 仅在 DRAWN 状态�
   assert.match(source, /value\.batch && value\.state === 'DRAWN'/)
   assert.match(source, /draw:\s*null/)
   assert.match(source, /draw:\s*drawRecord/)
-  assert.match(source, /publishWinners && value\.state === 'DRAWN'/)
+  // Winner disclosure is platform policy: no per-activity opt-out gate remains.
+  assert.match(source, /const winnerPage = value\.state === 'DRAWN' \? await publicWinnerPage\(/)
+  assert.doesNotMatch(source, /publishWinners && value\.state === 'DRAWN'/)
   const component = publicComponent()
   assert.match(component, /payload\.draw \?/)
   assert.match(component, /开奖记录/)
-  // The draw record section is not gated by the optional winners list.
-  assert.match(component, /const showWinners = config\.publishWinners && payload\.winners\.length > 0/)
+  // The draw record section is not gated by the winners list.
+  assert.match(component, /const showWinners = payload\.state === 'DRAWN' && winnerTotal > 0/)
   assert.doesNotMatch(component, /showWinners \?.*开奖记录/)
 })
 
@@ -121,7 +123,7 @@ test('敏感信息访问控制：通知与后台记录页均不含完整地址/�
 
 test('用户端公开字段白名单不含 userId / 手机号 / 真实姓名', () => {
   const route = publicRoute()
-  assert.match(route, /publicWinnerFields\s*=\s*\['nickname',\s*'uid',\s*'prizeName'\]/)
+  assert.match(route, /publicWinnerFields\s*=\s*\['nickname',\s*'uid',\s*'avatarUrl',\s*'prizeName',\s*'wonAt'\]/)
   assert.doesNotMatch(route, /'phone'|'realName'|'userId'/)
 })
 

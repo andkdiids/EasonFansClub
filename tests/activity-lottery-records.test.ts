@@ -61,6 +61,7 @@ test('多奖品中奖记录按奖品分组且不合并重复用户记录', () =>
   const winner = (prizeId: string, wonAt: string) => ({
     prizeId,
     nickname: '公开昵称',
+    uid: 1001,
     avatarUrl: 'https://cdn.example/avatar.webp',
     tierName: '一等奖',
     prizeName: prizeId === 'prize-a' ? '周边礼包' : '限定徽章',
@@ -96,11 +97,14 @@ test('开奖记录复用既有开奖结果、开奖服务及 activity_manage 管
   assert.match(adminRoute, /requireAdmin\('activity_manage'\)/)
 })
 
-test('公开赢家查询只取公开昵称和头像，不序列化用户内部标识或联系方式', () => {
+test('公开赢家查询只取公开昵称、头像与 E院ID，不序列化内部主键或联系方式', () => {
   const service = read('lib/activity-lottery.ts')
-  const userProjection = service.match(/User: \{ select: \{ id: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: \{ select: \{ avatarUrl: true \} \} \} \}/)
+  const userProjection = service.match(/User: \{ select: \{ id: true, uid: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: \{ select: \{ avatarUrl: true \} \} \} \}/)
   assert.ok(userProjection)
-  assert.doesNotMatch(userProjection?.[0] || '', /phone|email|username|userId|uid/)
+  // `uid` is the public E院ID used for the profile link; internal primary keys
+  // and contact fields must never be projected to the public winner list.
+  assert.doesNotMatch(userProjection?.[0] || '', /phone|email|username|userId|realName|idCard/)
+  assert.match(userProjection?.[0] || '', /uid: true/)
   assert.match(service, /nickname: getPublicUserDisplayName\(entry\.User\)/)
   assert.match(service, /avatarUrl: publicImageVariantUrl\(/)
 })
