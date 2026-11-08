@@ -152,12 +152,17 @@ export function assertTopicLotteryConfigUpdateAllowed(
   }
   if (!locks.participantsLocked) return
 
+  // addressDeadline is deliberately EXCLUDED from the locked rules: it only
+  // controls how long winners may submit shipping info, and extending it (e.g.
+  // to give more time after a delayed draw) does not change eligibility, the
+  // draw result, or any other fairness parameter. Keeping it unlocked lets an
+  // admin extend the shipping window via the normal business interface even
+  // after participation is locked, without re-opening any fairness rule.
   const rules = (config: TopicLotteryConfig) => ({
     enabled: config.enabled,
     mode: config.mode,
     drawAt: config.drawAt,
     eligibilityDeadline: config.eligibilityDeadline,
-    addressDeadline: config.addressDeadline,
     retentionDays: config.retentionDays,
     sourceEntryIds: config.sourceEntryIds,
   })

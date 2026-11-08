@@ -96,11 +96,69 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
       const timely = await submit(s, users[1], 0, cutoff); await approve(timely.submission.id, drawAt)
       assert.equal(await prisma.topicActivityLotteryEligibility.count({ where: { activityId: s.activityId, userId: users[1], valid: true } }), 1)
     })
-    await t.test('valid pending submission blocks freezing; rejecting it permits draw', async () => {
-      const s = await scenario(); const pending = await submit(s)
-      await assert.rejects(draw(s), { code: 'LOTTERY_PENDING_SUBMISSIONS' })
-      assert.equal(await prisma.topicActivityLotteryDraw.count({ where: { activityId: s.activityId } }), 0)
-      await reject(pending.submission.id); assert.equal((await draw(s)).winnerCount, 0)
+    await t.test('eligibility-deadline auto-reject transitions PENDING to REJECTED with reason and is idempotent', async () => {
+      const s = await scenario()
+      const pending = await submit(s)
+      const betweenDeadlineAndDraw = new Date(cutoff.getTime() + 1) // after cutoff, before drawAt
+      const first = await core.autoRejectExpiredPendingSubmissions({ activityId: s.activityId, now: betweenDeadlineAndDraw })
+      assert.equal(first.rejected, 1)
+      const rejected = await prisma.topicActivitySubmission.findUniqueOrThrow({ where: { id: pending.submission.id } })
+      assert.equal(rejected.status, 'REJECTED')
+      assert.equal(rejected.rejectReason, '活动资格审核期限已结束，未在截止前通过审核')
+      assert.ok(rejected.reviewedAt)
+      const note = await prisma.notification.findFirst({ where: { recipientId: users[0], key: 'topic-v2-lottery-submission-expired:' + pending.submission.id } })
+      assert.ok(note, 'user receives a status prompt notification')
+      // Idempotent: a second run after the deadline rejects nothing new.
+      const second = await core.autoRejectExpiredPendingSubmissions({ activityId: s.activityId, now: drawAt })
+      assert.equal(second.rejected, 0)
+      assert.equal(await prisma.notification.count({ where: { recipientId: users[0], key: 'topic-v2-lottery-submission-expired:' + pending.submission.id } }), 1, 'no duplicate notification')
+    })
+    await t.test('auto-reject before deadline is a no-op; approved/withdrawn/rejected untouched', async () => {
+      const s = await scenario()
+      const pending = await submit(s)
+      const approved = await submit(s, users[1]); await approve(approved.submission.id)
+      assert.equal((await core.autoRejectExpiredPendingSubmissions({ activityId: s.activityId, now: new Date(cutoff.getTime() - 1) })).rejected, 0)
+      assert.equal((await prisma.topicActivitySubmission.findUniqueOrThrow({ where: { id: pending.submission.id } })).status, 'PENDING')
+      // After the deadline, the pending is rejected but the approved stays approved and keeps eligibility.
+      await core.autoRejectExpiredPendingSubmissions({ activityId: s.activityId, now: drawAt })
+      assert.equal((await prisma.topicActivitySubmission.findUniqueOrThrow({ where: { id: pending.submission.id } })).status, 'REJECTED')
+      assert.equal((await prisma.topicActivitySubmission.findUniqueOrThrow({ where: { id: approved.submission.id } })).status, 'APPROVED')
+      assert.equal(await prisma.topicActivityLotteryEligibility.count({ where: { activityId: s.activityId, valid: true } }), 1)
+    })
+    await t.test('auto-reject covers asset-less PENDING (unified rule: ANY pending after deadline)', async () => {
+      const s = await scenario()
+      // The unified rule rejects ANY submission still PENDING after the eligibility
+      // deadline, including one that never uploaded a qualifying FORM_ANSWER asset.
+      // sources() itself requires the asset, so this exercises the direct PENDING
+      // query path used by autoRejectExpiredPendingSubmissions.
+      const assetLess = await prisma.topicActivitySubmission.create({
+        data: { activityId: s.activityId, userId: users[2], rewardEntryId: s.program.entries[0].id, status: 'PENDING', submittedAt: new Date(cutoff.getTime() - 1000) },
+      })
+      const approved = await submit(s, users[1]); await approve(approved.submission.id)
+      const result = await core.autoRejectExpiredPendingSubmissions({ activityId: s.activityId, now: drawAt })
+      assert.equal(result.rejected, 1)
+      const after = await prisma.topicActivitySubmission.findUniqueOrThrow({ where: { id: assetLess.id } })
+      assert.equal(after.status, 'REJECTED')
+      assert.equal(after.rejectReason, '活动资格审核期限已结束，未在截止前通过审核')
+      assert.ok(after.reviewedAt)
+      // An approved submission is left untouched and keeps its eligibility.
+      assert.equal((await prisma.topicActivitySubmission.findUniqueOrThrow({ where: { id: approved.submission.id } })).status, 'APPROVED')
+      assert.equal(await prisma.topicActivityLotteryEligibility.count({ where: { activityId: s.activityId, valid: true } }), 1)
+      // Idempotent: a second run after the deadline rejects nothing new.
+      const second = await core.autoRejectExpiredPendingSubmissions({ activityId: s.activityId, now: drawAt })
+      assert.equal(second.rejected, 0)
+    })
+    await t.test('AUTO draw auto-rejects pending then draws from approved only; never blocked', async () => {
+      const s = await scenario({ mode: 'AUTO' })
+      const pending = await submit(s, users[0])
+      const approved = await submit(s, users[1]); await approve(approved.submission.id)
+      const result = await core.drawDueTopicLotteries({ activityId: s.activityId, now: drawAt })
+      assert.equal(result.scanned, 1)
+      assert.equal(result.drawn, 1)
+      assert.equal(result.blocked, 0)
+      assert.equal((await prisma.topicActivitySubmission.findUniqueOrThrow({ where: { id: pending.submission.id } })).status, 'REJECTED')
+      assert.equal((await winners(s)).length, 1)
+      assert.equal((await winners(s))[0].userId, users[1])
     })
     await t.test('manual draw never runs before scheduled server time', async () => {
       const s = await scenario(); await assert.rejects(draw(s, new Date(drawAt.getTime() - 1)), { code: 'LOTTERY_NOT_DUE' })
