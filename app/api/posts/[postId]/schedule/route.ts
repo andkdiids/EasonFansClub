@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 import { isCancellableApprovedSchedule } from '@/lib/post-scheduling'
 
 type Params = { params: Promise<{ postId: string }> }
 
-export async function DELETE(_request: Request, { params }: Params) {
-  const guard = await requireUser()
+export async function DELETE(request: Request, { params }: Params) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { postId } = await params
   const canManagePosts = await hasAdminPermission(guard.user, 'post_manage')
