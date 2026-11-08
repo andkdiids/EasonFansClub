@@ -10,11 +10,26 @@ import {
   numberOr,
   stringOr,
   type TopicLotteryPublicPayload,
+  type TopicLotteryPublicWinnerPage,
 } from '@/components/activities/TopicActivityV2LotteryTypes'
 
 const buttonClass = 'min-h-10 rounded-sm border border-[var(--border)] px-3 text-sm font-bold disabled:opacity-40'
-/** Winners are paginated in the browser so long lists stay readable. */
-const WINNERS_PER_PAGE = 20
+/**
+ * Winner lists are paginated by the server. The page size only bounds one
+ * response: every winner stays reachable, so a large batch never drops rows.
+ */
+const WINNERS_PAGE_SIZE = 20
+const emptyWinnerPage: TopicLotteryPublicWinnerPage = { page: 1, pageSize: WINNERS_PAGE_SIZE, total: 0, totalPages: 0 }
+
+function readWinnerPage(value: unknown): TopicLotteryPublicWinnerPage {
+  if (!isRecord(value)) return emptyWinnerPage
+  return {
+    page: Math.max(1, numberOr(value.page, 1)),
+    pageSize: Math.max(1, numberOr(value.pageSize, WINNERS_PAGE_SIZE)),
+    total: Math.max(0, numberOr(value.total, 0)),
+    totalPages: Math.max(0, numberOr(value.totalPages, 0)),
+  }
+}
 
 function readConfig(value: unknown): TopicLotteryConfig {
   try {
@@ -77,6 +92,7 @@ function readPayload(value: unknown): TopicLotteryPublicPayload | null {
       }
       : null,
     winners,
+    winnerPage: readWinnerPage(value.winnerPage),
     draw,
   }
 }
@@ -129,18 +145,22 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [winnerPage, setWinnerPage] = useState(1)
+  const winnerPageRef = useRef(1)
   const requestBusy = useRef(false)
-  const load = useCallback(async () => {
+  const load = useCallback(async (page?: number) => {
     if (requestBusy.current) return
     requestBusy.current = true
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/activities/' + encodeURIComponent(activityId) + '/v2/lottery', { credentials: 'same-origin', cache: 'no-store' })
+      const query = new URLSearchParams({ page: String(page ?? winnerPageRef.current), pageSize: String(WINNERS_PAGE_SIZE) })
+      const response = await fetch('/api/activities/' + encodeURIComponent(activityId) + '/v2/lottery?' + query.toString(), { credentials: 'same-origin', cache: 'no-store' })
       const body = await response.json().catch(() => null)
       if (!response.ok) throw new Error(isRecord(body) && typeof body.message === 'string' ? body.message : '抽奖信息加载失败')
       const next = readPayload(body)
       if (!next) throw new Error('抽奖信息格式不可用')
+      winnerPageRef.current = next.winnerPage.page
+      setWinnerPage(next.winnerPage.page)
       setPayload(next)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '抽奖信息加载失败')
@@ -150,7 +170,7 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
     }
   }, [activityId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(1) }, [load])
   useTopicActivityV2LotteryVisibleRefresh({ enabled: payload?.enabled === true, state: payload?.state || null, onRefresh: load })
 
   if (loading && !payload) return <section aria-label="活动实物抽奖" className="border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6"><p role="status" className="text-sm">正在加载抽奖信息…</p></section>
@@ -162,10 +182,12 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
   const winnerClaimUrl = safeClaimUrl(winner?.claimUrl || null)
   // Winner lists are always public once the draw completed (platform policy).
   // The server never returns winners before DRAWN, so no early leak is possible.
-  const showWinners = payload.state === 'DRAWN' && payload.winners.length > 0
-  const winnerPageCount = Math.max(1, Math.ceil(payload.winners.length / WINNERS_PER_PAGE))
+  // The list is a server-paginated page, never a truncated in-memory slice.
+  const winnerTotal = payload.winnerPage.total
+  const showWinners = payload.state === 'DRAWN' && winnerTotal > 0
+  const winnerPageCount = Math.max(1, payload.winnerPage.totalPages)
   const currentWinnerPage = Math.min(Math.max(1, winnerPage), winnerPageCount)
-  const visibleWinners = payload.winners.slice((currentWinnerPage - 1) * WINNERS_PER_PAGE, currentWinnerPage * WINNERS_PER_PAGE)
+  const loadingWinners = loading && Boolean(payload)
 
   return <section aria-label="活动实物抽奖" className="space-y-5 border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -185,7 +207,7 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
       </>}
     </div>
     {payload.draw ? <div className="border-t border-[var(--border)] pt-4"><h3 className="font-bold">开奖记录</h3><dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-xs text-[var(--foreground-muted)]">开奖时间</dt><dd>{dateLabel(payload.draw.drawnAt || payload.draw.frozenAt)}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">开奖批次</dt><dd className="break-all">{payload.draw.id}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">候选 / 中奖人数</dt><dd>{payload.draw.candidateCount} 人 / {payload.draw.winnerCount} 人</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">名单公开</dt><dd>已公开</dd></div></dl><p className="mt-2 text-xs text-[var(--foreground-muted)]">开奖成功后中奖名单自动公开，仅展示昵称、头像、E院ID与奖品；领取状态与收货信息不会在此公开。</p></div> : null}
-    {showWinners ? <div className="border-t border-[var(--border)] pt-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-bold">中奖名单</h3><p className="text-xs text-[var(--foreground-muted)]">共 {payload.winners.length} 人 · 对所有人公开</p></div><ul className="mt-3 grid gap-2 sm:grid-cols-2">{visibleWinners.map((item, index) => { const href = item.uid ? '/user/' + encodeURIComponent(item.uid) : null; const identity = <>{item.avatarUrl ? <img src={item.avatarUrl} alt="" className="size-10 shrink-0 rounded-full border border-[var(--border)] object-cover" loading="lazy" /> : <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full border border-[var(--border)] text-xs font-black text-[var(--foreground-muted)]">{item.nickname.slice(0, 1)}</span>}<span className="min-w-0"><span className="block break-words text-sm font-black">{item.nickname}</span>{item.uid ? <span className="block break-words text-xs text-[var(--foreground-muted)]">E院ID：{item.uid}</span> : null}</span></>; return <li key={`${item.uid}-${item.prizeName}-${index}`} className="min-w-0 border border-[var(--border)] px-3 py-2">{href ? <Link href={href} className="flex min-w-0 items-center gap-3 underline-offset-4 hover:underline" aria-label={`查看 ${item.nickname} 的个人主页`}>{identity}</Link> : <div className="flex min-w-0 items-center gap-3">{identity}</div>}<p className="mt-2 break-words text-sm font-bold">奖品：{item.prizeName}</p>{item.wonAt ? <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">中奖时间：{dateLabel(item.wonAt)}</p> : null}</li> })}</ul>{winnerPageCount > 1 ? <nav aria-label="中奖名单分页" className="mt-3 flex flex-wrap items-center gap-2"><button type="button" className={buttonClass} disabled={currentWinnerPage <= 1} onClick={() => setWinnerPage(currentWinnerPage - 1)}>上一页</button><span className="text-xs font-bold">第 {currentWinnerPage} / {winnerPageCount} 页</span><button type="button" className={buttonClass} disabled={currentWinnerPage >= winnerPageCount} onClick={() => setWinnerPage(currentWinnerPage + 1)}>下一页</button></nav> : null}<p className="mt-2 text-xs text-[var(--foreground-muted)]">真实姓名、手机号码、收货地址、身份证信息、邮箱与领奖凭证永不公开。</p></div> : null}
+    {showWinners ? <div className="border-t border-[var(--border)] pt-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-bold">中奖名单</h3><p className="text-xs text-[var(--foreground-muted)]">共 {winnerTotal} 人 · 对所有人公开{loadingWinners ? ' · 加载中…' : ''}</p></div><ul className="mt-3 grid gap-2 sm:grid-cols-2">{payload.winners.map((item, index) => { const href = item.uid ? '/user/' + encodeURIComponent(item.uid) : null; const identity = <>{item.avatarUrl ? <img src={item.avatarUrl} alt="" className="size-10 shrink-0 rounded-full border border-[var(--border)] object-cover" loading="lazy" /> : <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full border border-[var(--border)] text-xs font-black text-[var(--foreground-muted)]">{item.nickname.slice(0, 1)}</span>}<span className="min-w-0"><span className="block break-words text-sm font-black">{item.nickname}</span>{item.uid ? <span className="block break-words text-xs text-[var(--foreground-muted)]">E院ID：{item.uid}</span> : null}</span></>; return <li key={`${item.uid}-${item.prizeName}-${index}`} className="min-w-0 border border-[var(--border)] px-3 py-2">{href ? <Link href={href} className="flex min-w-0 items-center gap-3 underline-offset-4 hover:underline" aria-label={`查看 ${item.nickname} 的个人主页`}>{identity}</Link> : <div className="flex min-w-0 items-center gap-3">{identity}</div>}<p className="mt-2 break-words text-sm font-bold">奖品：{item.prizeName}</p>{item.wonAt ? <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">中奖时间：{dateLabel(item.wonAt)}</p> : null}</li> })}</ul>{winnerPageCount > 1 ? <nav aria-label="中奖名单分页" className="mt-3 flex flex-wrap items-center gap-2"><button type="button" className={buttonClass} disabled={currentWinnerPage <= 1} onClick={() => void load(currentWinnerPage - 1)}>上一页</button><span className="text-xs font-bold">第 {currentWinnerPage} / {winnerPageCount} 页</span><button type="button" className={buttonClass} disabled={currentWinnerPage >= winnerPageCount} onClick={() => void load(currentWinnerPage + 1)}>下一页</button></nav> : null}<p className="mt-2 text-xs text-[var(--foreground-muted)]">真实姓名、手机号码、收货地址、身份证信息、邮箱与领奖凭证永不公开。</p></div> : null}
     {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
   </section>
 }

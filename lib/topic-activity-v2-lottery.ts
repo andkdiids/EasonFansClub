@@ -10,6 +10,7 @@ import { upsertNotificationWithDb } from '@/lib/notification-write'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { PUBLIC_WINNER_DEFAULT_PAGE_SIZE, resolvePublicWinnerWindow, type PublicWinnerPagination } from '@/lib/public-winner-pagination'
 import type { TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
@@ -24,8 +25,12 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(cano
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 function fail(code: string, message: string, status = 409): never { throw new TopicLotteryError(code, message, status) }
 export const TOPIC_LOTTERY_PENDING_EXPIRY_REASON = '活动资格审核期限已结束，未在截止前通过审核'
-/** Upper bound for the public winner list of a single draw batch. */
-export const PUBLIC_WINNER_LIMIT = 1000
+/**
+ * Public winner lists are paginated on the server. A page size cap only bounds
+ * one response, never the total: every winner of a draw batch stays reachable
+ * through pagination, so a large batch can never silently lose winners.
+ */
+export { PUBLIC_WINNER_DEFAULT_PAGE_SIZE, PUBLIC_WINNER_MAX_PAGE_SIZE, normalizePublicWinnerPagination, resolvePublicWinnerWindow } from '@/lib/public-winner-pagination'
 type DB = Pick<Prisma.TransactionClient, 'topicActivitySubmission' | 'topicActivityLotteryEligibility'>
 async function sources(db: DB, activity: Activity, config: TopicLotteryConfig, userId?: string) {
   if (!activity.activityPostId || !config.eligibilityDeadline || !config.sourceEntryIds.length) return []
@@ -454,7 +459,7 @@ async function viewData(activityId: string, now: Date) {
 function shippingState(shipping: { shippingStatus: string; addressDeadline: Date; addressCiphertext: string | null } | null, now: Date) {
   return shipping && !shipping.addressCiphertext && now > shipping.addressDeadline && shipping.shippingStatus === 'WAITING_ADDRESS' ? 'EXPIRED' : shipping?.shippingStatus || 'WAITING_ADDRESS'
 }
-export async function getTopicLotteryView(activityId: string, viewerId?: string | null, now = new Date()) {
+export async function getTopicLotteryView(activityId: string, viewerId?: string | null, now = new Date(), pagination?: PublicWinnerPagination | null) {
   const value = await viewData(activityId, now)
   if (!['PUBLISHED', 'CANCELLED'].includes(value.activity.status)) fail('LOTTERY_ACTIVITY_NOT_FOUND', '活动不存在', 404)
   // Public draw records are exposed only after the draw has completed, so an
@@ -464,7 +469,8 @@ export async function getTopicLotteryView(activityId: string, viewerId?: string 
     ? { id: value.batch.id, state: value.batch.state, frozenAt: value.batch.frozenAt, drawnAt: value.batch.drawnAt,
         candidateCount: value.batch.candidateCount, winnerCount: value.batch.winnerCount, errorCode: value.batch.errorCode }
     : null
-  if (!value.lottery?.enabled) return { enabled: false, config: value.config, state: 'DISABLED', candidateCount: 0, myStatus: 'NOT_ENABLED', myEligibility: null, myWinner: null, winners: [], draw: null }
+  if (!value.lottery?.enabled) return { enabled: false, config: value.config, state: 'DISABLED', candidateCount: 0, myStatus: 'NOT_ENABLED', myEligibility: null, myWinner: null, winners: [],
+    winnerPage: { page: 1, pageSize: PUBLIC_WINNER_DEFAULT_PAGE_SIZE, total: 0, totalPages: 0 }, draw: null }
   const ownWinner = viewerId ? await prisma.lotteryEntry.findUnique({ where: { lotteryId_userId: { lotteryId: value.lottery.lotteryId, userId: viewerId } }, include: { LotteryPrize: true, TopicShipping: true } }) : null
   const ownSources = value.rows.filter((row) => row.userId === viewerId)
   const frozen = value.batch?.candidateSnapshot as unknown as FrozenCandidate[] | undefined
@@ -476,16 +482,36 @@ export async function getTopicLotteryView(activityId: string, viewerId?: string 
   // nickname, avatar, E院ID, prize name and win time. Real name, phone, address,
   // e-mail, ID card and claim tokens are never selected here, so they cannot
   // leak through this public payload even by accident.
-  const publicWinners = value.state === 'DRAWN' ? await prisma.lotteryEntry.findMany({ where: { lotteryId: value.lottery.lotteryId },
-    orderBy: [{ wonAt: 'asc' }, { id: 'asc' }], take: PUBLIC_WINNER_LIMIT,
-    select: { wonAt: true,
-      User: { select: { nickname: true, uid: true, avatarUrl: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { avatarUrl: true } } } },
-      LotteryPrize: { select: { name: true } } } }) : []
+  // Pagination is executed by the database (COUNT + SKIP/TAKE) instead of
+  // slicing an in-memory capped list, so a batch with more rows than one page
+  // keeps every winner reachable and never silently drops the tail.
+  const winnerPage = value.state === 'DRAWN' ? await publicWinnerPage(value.lottery.lotteryId, pagination) : emptyPublicWinnerPage(pagination)
   return { enabled: true, config: value.config, state: value.state, candidateCount: value.candidateCount, myStatus,
     myEligibility: eligible ? { count: 1 } : null, myWinner: ownWinner ? { id: ownWinner.id, prize: { name: ownWinner.LotteryPrize?.name || '活动奖品', imageUrl: topicLotteryPrizeImageReferenceForRead(ownWinner.LotteryPrize?.imageUrl), description: ownWinner.LotteryPrize?.description },
       wonAt: ownWinner.wonAt, addressDeadline: ownWinner.TopicShipping?.addressDeadline, shippingStatus: shippingState(ownWinner.TopicShipping, now), addressSaved: Boolean(ownWinner.TopicShipping?.addressCiphertext),
       claimUrl: '/activities/' + encodeURIComponent(activityId) + '/lottery/claims/' + encodeURIComponent(ownWinner.id) } : null,
-    winners: publicWinners.map((winner) => ({
+    winners: winnerPage.items,
+    winnerPage: { page: winnerPage.page, pageSize: winnerPage.pageSize, total: winnerPage.total, totalPages: winnerPage.totalPages },
+    draw: drawRecord }
+}
+type PublicWinnerRow = { nickname: string; uid: string; avatarUrl: string | null; prizeName: string; wonAt: Date }
+function emptyPublicWinnerPage(pagination?: PublicWinnerPagination | null) {
+  const pageWindow = resolvePublicWinnerWindow({ ...pagination, total: 0 })
+  return { items: [] as PublicWinnerRow[], page: pageWindow.page, pageSize: pageWindow.pageSize, total: 0, totalPages: 0 }
+}
+async function publicWinnerPage(lotteryId: string, pagination?: PublicWinnerPagination | null) {
+  // COUNT + SKIP/TAKE keeps the list complete for any number of winners: the
+  // page size only limits one response, never the set of reachable winners.
+  const total = await prisma.lotteryEntry.count({ where: { lotteryId } })
+  const pageWindow = resolvePublicWinnerWindow({ ...pagination, total })
+  if (!total) return emptyPublicWinnerPage(pagination)
+  const rows = await prisma.lotteryEntry.findMany({ where: { lotteryId },
+    orderBy: [{ wonAt: 'asc' }, { id: 'asc' }], skip: pageWindow.skip, take: pageWindow.take,
+    select: { wonAt: true,
+      User: { select: { nickname: true, uid: true, avatarUrl: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { avatarUrl: true } } } },
+      LotteryPrize: { select: { name: true } } } })
+  return { page: pageWindow.page, pageSize: pageWindow.pageSize, total: pageWindow.total, totalPages: pageWindow.totalPages,
+    items: rows.map((winner): PublicWinnerRow => ({
       nickname: getPublicUserDisplayName(winner.User),
       // E院ID is a public, non-identifying handle; string form keeps the public
       // payload type stable and safe to place in the profile URL.
@@ -493,8 +519,7 @@ export async function getTopicLotteryView(activityId: string, viewerId?: string 
       avatarUrl: publicImageVariantUrl(profileImageUrl(winner.User.Profile?.avatarUrl || winner.User.avatarUrl), 'avatar-sm'),
       prizeName: winner.LotteryPrize?.name || '活动奖品',
       wonAt: winner.wonAt,
-    })),
-    draw: drawRecord }
+    })) }
 }
 export async function getAdminTopicLotteryView(activityId: string, now = new Date()) {
   const value = await viewData(activityId, now)

@@ -39,13 +39,13 @@ test('未开奖活动不得提前泄露中奖结果：draw 仅在 DRAWN 状态�
   assert.match(source, /draw:\s*null/)
   assert.match(source, /draw:\s*drawRecord/)
   // Winner disclosure is platform policy: no per-activity opt-out gate remains.
-  assert.match(source, /const publicWinners = value\.state === 'DRAWN'/)
+  assert.match(source, /const winnerPage = value\.state === 'DRAWN' \? await publicWinnerPage\(/)
   assert.doesNotMatch(source, /publishWinners && value\.state === 'DRAWN'/)
   const component = publicComponent()
   assert.match(component, /payload\.draw \?/)
   assert.match(component, /开奖记录/)
   // The draw record section is not gated by the winners list.
-  assert.match(component, /const showWinners = payload\.state === 'DRAWN' && payload\.winners\.length > 0/)
+  assert.match(component, /const showWinners = payload\.state === 'DRAWN' && winnerTotal > 0/)
   assert.doesNotMatch(component, /showWinners \?.*开奖记录/)
 })
 

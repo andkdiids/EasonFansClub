@@ -48,6 +48,14 @@ export type TopicLotteryPublicWinner = {
   wonAt: string | null
 }
 
+/** Server-side pagination metadata for the public winner list. */
+export type TopicLotteryPublicWinnerPage = {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
+
 export type TopicLotteryPublicPayload = {
   enabled: boolean
   config: unknown
@@ -65,6 +73,7 @@ export type TopicLotteryPublicPayload = {
     claimUrl: string | null
   } | null
   winners: TopicLotteryPublicWinner[]
+  winnerPage: TopicLotteryPublicWinnerPage
   draw: TopicLotteryPublicDraw | null
 }
 
