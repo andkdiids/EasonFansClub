@@ -7,11 +7,16 @@ import { buildMobilePublicActivityWinnersPage, type MobilePublicActivityLottery 
 const root = process.cwd()
 const source = (path: string) => readFileSync(join(root, path), 'utf8')
 function lottery(status: MobilePublicActivityLottery['status'] = 'DRAWN'): MobilePublicActivityLottery {
-  return { status, prizes: [{ winners: [{
-    nickname: '院友', uid: 23, avatarUrl: 'https://ecfc.fans/avatar.png', tierName: '一等奖', prizeName: '礼品',
-    wonAt: '2026-11-09T00:00:00.000Z', rewardStatus: 'PENDING', rewardAt: null,
-    realName: '不可公开', phone: '不可公开', address: '不可公开', email: '不可公开', claimToken: '不可公开',
-  } as unknown as MobilePublicActivityLottery['prizes'][number]['winners'][number] }] }
+  return {
+    status,
+    prizes: [{
+      winners: [{
+        nickname: '院友', uid: 23, avatarUrl: 'https://ecfc.fans/avatar.png', tierName: '一等奖', prizeName: '礼品',
+        wonAt: '2026-11-09T00:00:00.000Z', rewardStatus: 'PENDING', rewardAt: null,
+        realName: '不可公开', phone: '不可公开', address: '不可公开', email: '不可公开', claimToken: '不可公开',
+      }],
+    }],
+  } as unknown as MobilePublicActivityLottery
 }
 test('ordinary lottery results expose only paged public fields after a verified draw', () => {
   const result = buildMobilePublicActivityWinnersPage(lottery(), '1', '1')
