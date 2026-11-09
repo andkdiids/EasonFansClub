@@ -218,14 +218,19 @@ async function grantActivityBadgeWithEligibilityRecheck(
   })
 }
 
-async function processActivityBadgeGrantEffects(result: BadgeOperationResult) {
+type ActivityBadgeEffectsDispatcher = (input: { userId: string; grants: Array<{ badgeId: string; recordId: string }> }) => Promise<unknown>
+
+async function processActivityBadgeGrantEffects(result: BadgeOperationResult, effectsDispatcher?: ActivityBadgeEffectsDispatcher) {
   const grants = result.created
     ? [{ badgeId: result.badgeId, recordId: result.recordId }, ...(result.derivedGrants || [])]
     : (result.derivedGrants || [])
   if (!grants.length) return
   try {
-    const { processBadgeGrantEffects } = await import('@/lib/badge-phase3')
-    await processBadgeGrantEffects({ userId: result.userId, grants })
+    if (effectsDispatcher) await effectsDispatcher({ userId: result.userId, grants })
+    else {
+      const { processBadgeGrantEffects } = await import('@/lib/badge-phase3')
+      await processBadgeGrantEffects({ userId: result.userId, grants })
+    }
   } catch (error) {
     // The durable badge grant is already committed; this records the
     // presentation-effect failure without adding a new retry queue.
@@ -239,7 +244,10 @@ async function processActivityBadgeGrantEffects(result: BadgeOperationResult) {
  * The query intentionally ignores legacy ActivityReward rows without an
  * explicit grant time; those rows keep their old immediate verification flow.
  */
-export async function grantEligibleActivityBadges(options: GrantEligibleActivityBadgesOptions = {}): Promise<GrantEligibleActivityBadgesSummary> {
+export async function grantEligibleActivityBadges(
+  options: GrantEligibleActivityBadgesOptions = {},
+  effectsDispatcher?: ActivityBadgeEffectsDispatcher,
+): Promise<GrantEligibleActivityBadgesSummary> {
   const now = options.now || new Date()
   const batchSize = clampBatchSize(options.batchSize)
   const { activityIds, plansByActivity } = await loadActivityBadgePlans(options, now)
@@ -258,7 +266,7 @@ export async function grantEligibleActivityBadges(options: GrantEligibleActivity
           if (!outcome.eligible) continue
           activityEligible = true
           const result = outcome.result
-          await processActivityBadgeGrantEffects(result)
+          await processActivityBadgeGrantEffects(result, effectsDispatcher)
           if (result.created) summary.granted += 1
           else summary.alreadyOwned += 1
         } catch (error) {

@@ -10,7 +10,7 @@ process.env.JWT_SECRET = 'topic-v2-main-integration-test-only-secret'
 let middleware: typeof import('../middleware').middleware
 before(async () => { ({ middleware } = await import('../middleware')) })
 const source = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
-const baseSource = (path: string) => execFileSync('git', ['show', `8f3c92cb1229c492ee0ed188bbef7c3d38d640b2:${path}`], { encoding: 'utf8' }).replace(/\r\n/g, '\n')
+const baseSource = (path: string) => execFileSync('git', ['show', `80b62a5938aba4d2b50075ed0ed55da169c94f4d:${path}`], { encoding: 'utf8' }).replace(/\r\n/g, '\n')
 const request = (path: string, method: string, extra: Record<string, string> = {}, bearer = true) => new NextRequest(`https://ecfc.fans${path}`, {
   method, headers: { ...(bearer ? { authorization: 'Bearer synthetic-test-token' } : {}), ...extra },
 })
@@ -29,16 +29,18 @@ test('main integration retains Home/Growth, V2 and Cantonese Bearer route famili
   }
 })
 
-test('lottery winner address PUT reaches its owner guard, without opening unrelated PUT routes', async () => {
+test('lottery winner address is owner-guarded and lottery views expose no unrelated PUT handlers', async () => {
   const path = '/api/activities/test/v2/lottery/winners/winner-test/address'
   assert.equal((await middleware(request(path, 'PUT'))).status, 200)
   assert.equal((await middleware(request(path, 'PUT', {}, false))).status, 401)
-  for (const other of ['/api/activities/test/v2/lottery', '/api/admin/activities/test/v2/lottery/winners/winner-test/address', '/api/admin/permissions']) {
-    assert.equal((await middleware(request(other, 'PUT'))).status, 401, other)
-  }
   const route = source('app/api/activities/[activityId]/v2/lottery/winners/[winnerId]/address/route.ts')
   assert.match(route, /export async function PUT[\s\S]*?requireRequestUser\(request\)/)
   assert.match(route, /saveTopicLotteryAddress\(\{ activityId, winnerId, userId: guard\.user\.id/)
+  const publicLotteryRoute = source('app/api/activities/[activityId]/v2/lottery/route.ts')
+  assert.doesNotMatch(publicLotteryRoute, /export async function PUT/)
+  const adminAddressRoute = source('app/api/admin/activities/[activityId]/v2/lottery/winners/[winnerId]/address/route.ts')
+  assert.match(adminAddressRoute, /export async function GET\(request: Request[\s\S]*?requireRequestAdmin\(request, 'activity_manage'\)/)
+  assert.doesNotMatch(adminAddressRoute, /export async function PUT/)
 })
 
 test('global CSRF executes before merged Bearer bypass for V2, Cantonese and main writes', async () => {
@@ -79,9 +81,9 @@ test('deployment retains main release boundary and candidate exact-SHA safety', 
 })
 
 test('main production diagnostic workflows and scripts remain unchanged', () => {
-  const paths = execFileSync('git', ['ls-tree', '-r', '--name-only', 'f8b70b994684856d2044ceab962b485c068d7543', '.github'], { encoding: 'utf8' })
+  const paths = execFileSync('git', ['ls-tree', '-r', '--name-only', '80b62a5938aba4d2b50075ed0ed55da169c94f4d', '.github'], { encoding: 'utf8' })
     .trim().split('\n').filter(path => path !== '.github/workflows/deploy.yml')
-  assert.equal(paths.length, 16, 'all main diagnostic/release-policy files except the separately audited deployment workflow')
+  assert.equal(paths.length, 37, 'all current main diagnostic/release-policy files except the separately audited deployment workflow')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
 })
 

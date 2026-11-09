@@ -26,6 +26,19 @@ const eslintConfig = [
     ],
   },
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
+  {
+    // These explicit .cjs release utilities execute under Node's CommonJS
+    // loader. Keep the exception limited to the three files that must retain
+    // require() for local helpers and pinned CommonJS dependencies.
+    files: [
+      '.github/release/production-anywhere-door-diagnostic-v2.cjs',
+      '.github/release/test-production-anywhere-door-diagnostic-v2.cjs',
+      '.github/release/test-production-anywhere-door-manual-trace.cjs',
+    ],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
 ]
 
 export default eslintConfig

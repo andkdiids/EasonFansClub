@@ -7,8 +7,9 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 test('Hero resolves title and CTA visibility from the active slide without state leakage', () => {
   const hero = read('components/HomeHero.tsx')
-  assert.match(hero, /const active = visibleSlides\[index\] \|\| visibleSlides\[0\] \|\| null/)
-  assert.match(hero, /resolveHomeHeroCopy\(active, defaultTitle, defaultSubtitle\)/)
+  assert.match(hero, /const active = carouselSlides\[index\] \|\| carouselSlides\[0\] \|\| null/)
+  assert.match(hero, /const activeSiteSlide = active\?\.type === 'site' \? active\.slide : null/)
+  assert.match(hero, /resolveHomeHeroCopy\(activeSiteSlide, defaultTitle, defaultSubtitle\)/)
   assert.match(hero, /const buttonText = active\?\.buttonText\?\.trim\(\) \|\| ''/)
   assert.match(hero, /const buttonHref = active\?\.href\?\.trim\(\) \|\| ''/)
   assert.match(hero, /showTitle: \(active\?\.showTitle !== false\) && Boolean\(title\)/)

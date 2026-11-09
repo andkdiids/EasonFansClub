@@ -181,7 +181,6 @@ before(async () => {
         return { created, alreadyOwned: !created, badgeId: input.badgeId, badgeName: '活动徽章', recordId: `record-${input.badgeId}`, userId: input.userId }
       },
     }
-    if (request === '@/lib/badge-phase3' || /[/\\]badge-phase3(?:\.ts)?$/.test(request)) return { processBadgeGrantEffects: async () => { state.phase3Calls += 1 } }
     return originalLoader.call(this, request, parent, main)
   }
   badgeService = await import('@/lib/activity-badge-rewards')
@@ -189,16 +188,20 @@ before(async () => {
 
 after(() => { loader._load = originalLoader })
 
+function runBadgeReconcile(options: Parameters<typeof badgeService.grantEligibleActivityBadges>[0] = {}) {
+  return badgeService.grantEligibleActivityBadges(options, async () => { state.phase3Calls += 1 })
+}
+
 test('自动扫描在最终发放事务重新锁定并复核 ACTIVE 报名，重复 reconcile 保持幂等', async () => {
   resetServiceState('NONE')
-  const first = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const first = await runBadgeReconcile({ now: serviceNow })
   assert.equal(first.granted, 1)
   assert.equal(first.eligibleRegistrations, 1)
   assert.equal(state.phase3Calls, 1)
   assert.match(state.lockQueries[0] || '', /Activity/)
   assert.match(state.lockQueries[1] || '', /ActivityRegistration/)
 
-  const second = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const second = await runBadgeReconcile({ now: serviceNow })
   assert.equal(second.granted, 0)
   assert.equal(second.alreadyOwned, 1)
   assert.equal(second.eligibleRegistrations, 1)
@@ -207,14 +210,14 @@ test('自动扫描在最终发放事务重新锁定并复核 ACTIVE 报名，重
 
   resetServiceState('NONE')
   state.beforeGrant = () => { if (state.registration) state.registration.status = 'CANCELLED' }
-  const cancelledBeforeGrant = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const cancelledBeforeGrant = await runBadgeReconcile({ now: serviceNow })
   assert.equal(cancelledBeforeGrant.granted, 0)
   assert.equal(cancelledBeforeGrant.eligibleRegistrations, 0)
   assert.equal(state.grantCalls, 0)
 
   resetServiceState('NONE')
   state.beforeGrant = () => { state.activity.status = 'CANCELLED' }
-  const activityCancelledBeforeGrant = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const activityCancelledBeforeGrant = await runBadgeReconcile({ now: serviceNow })
   assert.equal(activityCancelledBeforeGrant.granted, 0)
   assert.equal(activityCancelledBeforeGrant.eligibleRegistrations, 0)
   assert.equal(state.grantCalls, 0)
@@ -223,30 +226,30 @@ test('自动扫描在最终发放事务重新锁定并复核 ACTIVE 报名，重
 test('活动结束后新增规则由周期扫描识别，缺报名和未知模式不会自动授予', async () => {
   resetServiceState('NONE')
   state.rules = []
-  const beforeRule = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const beforeRule = await runBadgeReconcile({ now: serviceNow })
   assert.equal(beforeRule.scannedActivities, 0)
   assert.equal(beforeRule.granted, 0)
 
   state.rules = [{ badgeId: 'badge-one', configJson: { activityId: 'activity-one' }, Badge: { id: 'badge-one', name: '活动徽章' } }]
-  const afterRule = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const afterRule = await runBadgeReconcile({ now: serviceNow })
   assert.equal(afterRule.scannedActivities, 1)
   assert.equal(afterRule.granted, 1)
 
   resetServiceState('NONE')
   state.registration = null
-  const withoutRegistration = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const withoutRegistration = await runBadgeReconcile({ now: serviceNow })
   assert.equal(withoutRegistration.granted, 0)
   assert.equal(withoutRegistration.eligibleRegistrations, 0)
 
   resetServiceState('UNKNOWN')
-  const unknownMode = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const unknownMode = await runBadgeReconcile({ now: serviceNow })
   assert.equal(unknownMode.granted, 0)
   assert.equal(unknownMode.eligibleRegistrations, 0)
 })
 
 test('MANUAL/QR 规则只接受真实现场来源，AUTO_AFTER_ACTIVITY_END 不冒充现场', async () => {
   resetServiceState('MANUAL')
-  const manual = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const manual = await runBadgeReconcile({ now: serviceNow })
   assert.equal(manual.granted, 1)
 
   resetServiceState('QR')
@@ -255,7 +258,7 @@ test('MANUAL/QR 规则只接受真实现场来源，AUTO_AFTER_ACTIVITY_END 不�
     state.registration.verifiedAt = new Date('2026-09-01T04:00:00.000Z')
     state.registration.checkedInAt = new Date('2026-09-01T04:00:00.000Z')
   }
-  const qr = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const qr = await runBadgeReconcile({ now: serviceNow })
   assert.equal(qr.granted, 1)
 
   resetServiceState('MANUAL')
@@ -264,7 +267,7 @@ test('MANUAL/QR 规则只接受真实现场来源，AUTO_AFTER_ACTIVITY_END 不�
     state.registration.verifiedAt = serviceNow
     state.registration.checkedInAt = serviceNow
   }
-  const automatic = await badgeService.grantEligibleActivityBadges({ now: serviceNow })
+  const automatic = await runBadgeReconcile({ now: serviceNow })
   assert.equal(automatic.granted, 0)
   assert.equal(automatic.eligibleRegistrations, 0)
 })

@@ -2,13 +2,18 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { canSubmitTopicActivityV2Entry, normalizeTopicActivityV2Progress } from '../components/activities/topic-activity-v2-types'
 
-test('platform status precedence is granted > approved > pending > rejected regardless of submission order', () => {
+test('platform fallback resolves undated rows by status priority while newer timestamped attempts remain authoritative', () => {
   for (const statuses of [['REJECTED', 'PENDING', 'APPROVED'], ['APPROVED', 'REJECTED', 'PENDING']]) {
     const rows = normalizeTopicActivityV2Progress({ submissions: statuses.map((status) => ({ id: status, rewardEntryId: 'entry', status, commentId: 'comment-' + status })) })
     assert.equal(rows[0].status, 'APPROVED')
     assert.equal(rows[0].commentId, 'comment-APPROVED')
   }
   assert.equal(normalizeTopicActivityV2Progress({ submissions: [{ rewardEntryId: 'entry', status: 'REJECTED' }, { rewardEntryId: 'entry', status: 'PENDING' }] })[0].status, 'PENDING')
+  assert.equal(normalizeTopicActivityV2Progress({ submissions: [{ rewardEntryId: 'entry', status: 'PENDING' }, { rewardEntryId: 'entry', status: 'REJECTED' }] })[0].status, 'PENDING')
+  assert.equal(normalizeTopicActivityV2Progress({ submissions: [
+    { rewardEntryId: 'entry', status: 'PENDING', submittedAt: '2026-11-01T10:00:00.000Z' },
+    { rewardEntryId: 'entry', status: 'REJECTED', submittedAt: '2026-11-01T11:00:00.000Z' },
+  ] })[0].status, 'REJECTED', 'a newer timestamped attempt remains authoritative')
 })
 
 test('granted state and displayed amount come only from actual successful grant rows, not configured rewards', () => {
