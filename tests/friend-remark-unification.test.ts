@@ -166,7 +166,9 @@ test('点赞头像组件优先使用统一 friend display helper', () => {
 test('通知服务端动态解析 actor 备注，不改写持久化公共内容模型', () => {
   const service = read('lib/notifications.ts')
   assert.match(service, /loadFriendRemarkMap\(userId, actorIds\)/)
-  assert.match(service, /actorName: actorDisplayName/)
+  assert.match(service, /actorDisplayName = actor\s*\?\s*getFriendDisplayName\(/)
+  assert.match(service, /const actorName = moderationResult \? SYSTEM_REVIEW_SENDER_NAME : actorDisplayName/)
+  assert.match(service, /\n\s*actorName,/)
 })
 
 test('通知列表备注变更会刷新当前 actor 文案和资料卡', () => {

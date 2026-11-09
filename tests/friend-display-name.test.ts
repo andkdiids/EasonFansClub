@@ -58,7 +58,9 @@ test('通知和游戏邀请只在本地好友语境使用备注，房间/排行�
   const duelService = read('lib/guess-song-duel-service.ts')
   const leaderboard = read('lib/guess-song-leaderboard.ts')
 
-  assert.match(notifications, /actorName: actorDisplayName/)
+  assert.match(notifications, /actorDisplayName = actor\s*\?\s*getFriendDisplayName\(/)
+  assert.match(notifications, /const actorName = moderationResult \? SYSTEM_REVIEW_SENDER_NAME : actorDisplayName/)
+  assert.match(notifications, /\n\s*actorName,/)
   assert.match(duel, /getFriendDisplayName\(\{\n\s+nickname: friend\.nickname/)
   assert.match(privateRoomNames, /loadFriendRemarkMap/)
   assert.match(duel, /getDuelDisplayName = \(player: \{ name: string \}\) => player\.name/)

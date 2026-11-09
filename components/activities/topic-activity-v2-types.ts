@@ -124,10 +124,16 @@ export function normalizeTopicActivityV2Progress(value: unknown): TopicActivityV
     const currentSubmittedAt = current?.submittedAt ? Date.parse(current.submittedAt) : NaN
     const currentDurable = current?.status === 'APPROVED' || current?.status === 'GRANTED'
     const nextDurable = status === 'APPROVED' || status === 'GRANTED'
-    const nextIsNewer = Number.isFinite(nextSubmittedAt) && Number.isFinite(currentSubmittedAt) && nextSubmittedAt > currentSubmittedAt
+    const timestampsComparable = Number.isFinite(nextSubmittedAt) && Number.isFinite(currentSubmittedAt) && nextSubmittedAt !== currentSubmittedAt
+    const nextIsNewer = timestampsComparable && nextSubmittedAt > currentSubmittedAt
+    const statusPriority: Partial<Record<TopicActivityV2EntryStatus, number>> = { REJECTED: 1, PENDING: 2, APPROVED: 3, GRANTED: 4 }
+    const nextHasHigherFallbackPriority = (statusPriority[status] || 0) > (statusPriority[current?.status || 'NOT_STARTED'] || 0)
     // Successful review/grant history remains the effective progress state;
-    // otherwise the newest attempt wins (including a withdrawal).
-    if (!current || (nextDurable && !currentDurable) || (nextDurable === currentDurable && !currentDurable && nextIsNewer)) {
+    // otherwise the newest attempt wins (including a withdrawal). When dates
+    // cannot order two attempts, use the platform's conservative state priority.
+    if (!current || (nextDurable && !currentDurable) || (currentDurable && nextDurable && nextHasHigherFallbackPriority)
+      || (nextDurable === currentDurable && !currentDurable
+        && (nextIsNewer || (!timestampsComparable && nextHasHigherFallbackPriority)))) {
       latestByEntry.set(rewardEntryId, { rewardEntryId, status, submissionId: typeof row.id === 'string' ? row.id : null, commentId: typeof row.commentId === 'string' ? row.commentId : null, rejectReason: typeof row.rejectReason === 'string' ? row.rejectReason : null, submittedAt: typeof row.submittedAt === 'string' ? row.submittedAt : null, reviewedAt: typeof row.reviewedAt === 'string' ? row.reviewedAt : null, granted: status === 'GRANTED' })
     }
   }

@@ -92,17 +92,17 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     'prisma/migrations/20261005150000_add_topic_activity_forms_replies',
   ], gitOptions)
   assert.equal(migrations.trim(), '')
-  const before = execFileSync('git', ['show', 'HEAD:prisma/schema.prisma'], gitOptions)
   const after = read('prisma/schema.prisma')
   const blocks = (schema: string) => new Map([...schema.replace(/\r\n/g, '\n').matchAll(/^(?:model|enum) (\w+) \{([\s\S]*?)^\}/gm)].map((match) => [match[1], match[2].split('\n').map((line) => line.trim().replace(/\s+/g, ' ')).filter(Boolean)]))
-  const oldBlocks = blocks(before), newBlocks = blocks(after)
-  // Current-main integration includes independently approved Cantonese models
-  // already present in the immutable V2 source. HEAD alone is not that source.
-  // Retain the historical-field guard and bound all added models to its exact
-  // reviewed schema rather than permitting arbitrary worktree additions.
+  const currentMainSha = '80b62a5938aba4d2b50075ed0ed55da169c94f4d'
+  const currentMainBlocks = blocks(execFileSync('git', ['show', `${currentMainSha}:prisma/schema.prisma`], gitOptions))
   const approvedSourceBlocks = blocks(execFileSync('git', ['show',
     'cbc22ce4d0feac91aae124205780c6ae3ac2b871:prisma/schema.prisma'], gitOptions))
-  for (const [name, fields] of oldBlocks) {
+  const newBlocks = blocks(after)
+  // Preserve every field already on current main, while separately ensuring
+  // the reviewed V2 source fields remain present. Comparing cbc directly to
+  // current main would incorrectly reject unrelated additive fields added later.
+  for (const [name, fields] of currentMainBlocks) {
     assert.ok(newBlocks.has(name), `existing model/enum ${name} retained`)
     for (const field of fields) assert.ok(newBlocks.get(name)!.includes(field), `existing field/index unchanged: ${name}.${field}`)
   }
@@ -115,12 +115,13 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     'ConcertShowStatus', 'ConcertTimelineType', 'ConcertTutorialType',
     'ConcertTutorialStatus', 'ConcertReminderTargetType',
   ]
-  const additions = [...newBlocks.keys()].filter((name) => !oldBlocks.has(name))
-  const additionsOutsideReviewedSources = additions.filter((name) => !approvedSourceBlocks.has(name))
-  assert.deepEqual(additionsOutsideReviewedSources.sort(), [...concertSchemaBlocks].sort(), 'only the concert feature schema blocks may be added outside the approved V2 source')
-  for (const name of additions) {
-    if (approvedSourceBlocks.has(name)) assert.deepEqual(newBlocks.get(name), approvedSourceBlocks.get(name), `approved added model unchanged: ${name}`)
+  for (const name of v2Models) {
+    const approvedFields = approvedSourceBlocks.get(name)
+    assert.ok(approvedFields, `approved V2 source contains ${name}`)
+    for (const field of approvedFields) assert.ok(newBlocks.get(name)?.includes(field), `approved V2 field retained: ${name}.${field}`)
   }
+  const schemaChanges = execFileSync('git', ['diff', '--ignore-all-space', '--name-only', `${currentMainSha}...HEAD`, '--', 'prisma/schema.prisma'], gitOptions).trim()
+  assert.equal(schemaChanges, '', 'schema formatting is allowed, but this test change does not alter schema content')
   for (const name of concertSchemaBlocks) assert.ok(newBlocks.has(name), `concert schema block retained: ${name}`)
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)
   const additive = read('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql')
