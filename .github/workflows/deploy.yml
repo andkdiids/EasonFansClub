@@ -42,8 +42,12 @@ on:
       - 'tests/android-rc11-publish-infrastructure.test.ts'
       - 'tests/rc11-apksigner-diagnostics.test.mjs'
       - 'scripts/production-backup-gate.mjs'
+      - 'scripts/production-backup-gate.d.mts'
+      - 'scripts/deploy-production-git.sh'
       - 'scripts/production-risk-attestation.mjs'
       - 'tests/production-backup-gate.test.ts'
+      - 'tests/deploy-backup-gate.test.ts'
+      - 'tests/topic-v2-main-integration.test.ts'
       - 'tests/production-risk-attestation.test.mjs'
       - 'middleware.ts'
       - 'tests/deploy-skip-db-mode.test.ts'
@@ -356,8 +360,6 @@ jobs:
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           BACKUP_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
           DEPLOY_SHA: ${{ github.sha }}
-          DEPLOY_RUN_ID: ${{ github.run_id }}
-          DEPLOY_RUN_ATTEMPT: ${{ github.run_attempt }}
           RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
           RISK_ACCEPTANCE_MODE: ${{ inputs.risk_acceptance || 'none' }}
         run: |
@@ -391,19 +393,17 @@ jobs:
             approved) echo "RISK_ACCEPTANCE_MODE=APPROVED (one-off, exact-SHA written risk acceptance required)" ;;
             *) echo "::error::Invalid risk acceptance mode."; exit 1 ;;
           esac
+          if [[ "${RISK_ACCEPTANCE_MODE}" == approved && "${RESTORE_DRILL_WAIVER_MODE}" != none ]]; then
+            echo "::error::Schema v3 risk acceptance cannot be combined with a separate restore-drill waiver."
+            exit 1
+          fi
 
           remote_host="${SERVER_USER}@${SERVER_HOST}"
-          if [[ "${RISK_ACCEPTANCE_MODE}" == approved ]]; then
-            # Schema v3 is irreversibly consumed while holding the same host lock
-            # used by the deployment and signer. A run retry requires a new approval.
-            printf -v remote_command \
-              'test -f /home/apps/easonfansclub/.deploy.lock && test ! -L /home/apps/easonfansclub/.deploy.lock || exit 1; exec 9<>/home/apps/easonfansclub/.deploy.lock; flock -n 9 || { echo SERVER_DEPLOY_LOCK_BUSY; exit 1; }; node --input-type=module - --cli consume --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q --run-id %q --run-attempt %q' \
-              "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE" "$DEPLOY_RUN_ID" "$DEPLOY_RUN_ATTEMPT"
-          else
-            printf -v remote_command \
-              'node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q' \
-              "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE"
-          fi
+          # Preflight is read-only. Schema v3 is consumed only inside the final
+          # deploy script after its server lock and live-SHA compare-and-swap.
+          printf -v remote_command \
+            'test -f /home/apps/easonfansclub/.deploy.lock && test ! -L /home/apps/easonfansclub/.deploy.lock || exit 1; exec 9<>/home/apps/easonfansclub/.deploy.lock; flock -n 9 || { echo SERVER_DEPLOY_LOCK_BUSY; exit 1; }; current_target="$(readlink -f -- /home/apps/easonfansclub/current)" || exit 1; case "$current_target" in /home/apps/easonfansclub/releases/*) ;; *) echo PRODUCTION_CURRENT_OUTSIDE_RELEASES; exit 1 ;; esac; test -s "$current_target/.deployed-sha" || exit 1; production_sha="$(tr -d "[:space:]" < "$current_target/.deployed-sha")"; [[ "$production_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1; echo "BACKUP_GATE_PRODUCTION_SHA=$production_sha"; node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q' \
+            "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE"
 
           set +e
           gate_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s \
@@ -441,25 +441,26 @@ jobs:
             fi
           fi
           if [[ "${RISK_ACCEPTANCE_MODE}" == approved ]]; then
-            # Explicit risk acceptance must be unambiguous: no backup/PITR is
-            # claimed verified, and no fabricated backup id may appear.
-            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'RISK_ACCEPTED=YES' ||
+            # Risk acceptance must be an actual schema v3 proof for this exact SHA.
+            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_GATE_SCHEMA_VERSION=3' ||
+               ! printf '%s\n' "${gate_output}" | grep -Fxq "BACKUP_ATTESTATION_TARGET_SHA=${DEPLOY_SHA}" ||
+               ! printf '%s\n' "${gate_output}" | grep -Fxq 'RISK_ACCEPTED=YES' ||
                ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_VERIFIED=NO' ||
                ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_PITR_VERIFIED=NO'; then
-              echo "::error::An approved risk acceptance must explicitly report that no backup/PITR was verified."
+              echo "::error::Schema v3 risk acceptance must match this SHA and report unverified backup/PITR."
               exit 1
             fi
             if printf '%s\n' "${gate_output}" | grep -Eq '^BACKUP_ID='; then
               echo "::error::Risk acceptance must not assert a backup id; fabrication is rejected."
               exit 1
             fi
-            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'RISK_ACCEPTANCE_CONSUMED=YES' ||
-               ! printf '%s\n' "${gate_output}" | grep -Fxq "RISK_ACCEPTANCE_CONSUMED_RUN_ID=${DEPLOY_RUN_ID}" ||
-               ! printf '%s\n' "${gate_output}" | grep -Fxq "RISK_ACCEPTANCE_CONSUMED_RUN_ATTEMPT=${DEPLOY_RUN_ATTEMPT}"; then
-              echo "::error::The schema v3 risk acceptance was not durably consumed by this exact workflow attempt."
-              exit 1
-            fi
           fi
+          production_sha="$(printf '%s\n' "${gate_output}" | sed -n 's/^BACKUP_GATE_PRODUCTION_SHA=//p' | tail -n 1)"
+          [[ "${production_sha}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Locked preflight did not return the live production SHA."
+            exit 1
+          }
+          echo "production_sha=${production_sha}" >> "${GITHUB_OUTPUT}"
           echo "BACKUP_GATE_STEP=PASS"
           echo "verified_sha=${DEPLOY_SHA}" >> "${GITHUB_OUTPUT}"
 
@@ -480,6 +481,12 @@ jobs:
           # Server-side defence in depth: deploy-production-git.sh refuses any
           # migration/switch unless this exact SHA passed the backup gate.
           BACKUP_GATE_VERIFIED_SHA: ${{ steps.backup_gate.outputs.verified_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ steps.backup_gate.outputs.production_sha }}
+          BACKUP_GATE_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
+          BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
+          BACKUP_GATE_RISK_ACCEPTANCE_MODE: ${{ inputs.risk_acceptance || 'none' }}
+          BACKUP_GATE_RUN_ID: ${{ github.run_id }}
+          BACKUP_GATE_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
 
@@ -496,6 +503,23 @@ jobs:
                 "/${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}/" == *"/../"* ]]; then
             echo "::error::Lottery approval path must be a safe absolute .json path."
             exit 1
+          fi
+
+          backup_gate_file="${BACKUP_GATE_ATTESTATION_FILE:-/home/apps/easonfansclub/shared/.backup-verification.json}"
+          backup_gate_restore_mode="${BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE:-none}"
+          backup_gate_risk_mode="${BACKUP_GATE_RISK_ACCEPTANCE_MODE:-none}"
+          case "${backup_gate_restore_mode}" in none|approved) ;; *) echo "::error::Invalid backup-gate restore-drill mode."; exit 1 ;; esac
+          case "${backup_gate_risk_mode}" in none|approved) ;; *) echo "::error::Invalid backup-gate risk-acceptance mode."; exit 1 ;; esac
+          if [[ ! "${backup_gate_file}" =~ ^/[A-Za-z0-9._/-]+\.json$ ]]; then
+            echo "::error::Backup attestation path must be a safe absolute JSON file."
+            exit 1
+          fi
+          if [[ "${backup_gate_risk_mode}" == approved ]]; then
+            [[ "${backup_gate_file}" =~ ^/home/apps/easonfansclub/shared/[A-Za-z0-9._/-]+\.json$ &&
+               "/${backup_gate_file}/" != *"/../"* ]] || { echo "::error::Schema v3 attestation path must stay inside the protected shared directory."; exit 1; }
+            [[ "${backup_gate_restore_mode}" == none ]] || { echo "::error::Schema v3 risk acceptance cannot be combined with a restore-drill waiver."; exit 1; }
+            [[ "${BACKUP_GATE_RUN_ID:-}" =~ ^[1-9][0-9]{0,19}$ ]] || { echo "::error::Invalid deployment run ID."; exit 1; }
+            [[ "${BACKUP_GATE_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]{0,5}$ ]] || { echo "::error::Invalid deployment run attempt."; exit 1; }
           fi
 
           REMOTE_HOST="${SERVER_USER}@${SERVER_HOST}"
@@ -517,9 +541,8 @@ jobs:
           echo "===== [deploy] Deploy exact SHA from the server-side Git cache ====="
           echo "Deploy SHA: ${DEPLOY_SHA}"
           echo "This path transfers only the deployment script over SSH; source and dependencies stay on the server."
-          expected_production_sha="$(timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
-            'set -eu; target=$(readlink -f -- /home/apps/easonfansclub/current); cat -- "$target/.deployed-sha"')"
-          [[ "$expected_production_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid current production SHA." >&2; exit 1; }
+          expected_production_sha="${EXPECTED_PRODUCTION_SHA:-}"
+          [[ "$expected_production_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid locked preflight production SHA." >&2; exit 1; }
           deploy_arguments=("${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}" "${expected_production_sha}")
           if [[ "${deploy_db_mode}" == skip-db ]]; then
             deploy_arguments+=(--skip-db)
@@ -532,6 +555,11 @@ jobs:
             | timeout --foreground --signal=TERM --kill-after=7m 35m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
               env "TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE=${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}" \
                   "BACKUP_GATE_VERIFIED_SHA=${BACKUP_GATE_VERIFIED_SHA:-}" \
+                  "BACKUP_GATE_ATTESTATION_FILE=${backup_gate_file}" \
+                  "BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE=${backup_gate_restore_mode}" \
+                  "BACKUP_GATE_RISK_ACCEPTANCE_MODE=${backup_gate_risk_mode}" \
+                  "BACKUP_GATE_RUN_ID=${BACKUP_GATE_RUN_ID:-}" \
+                  "BACKUP_GATE_RUN_ATTEMPT=${BACKUP_GATE_RUN_ATTEMPT:-}" \
               bash -s -- "${deploy_arguments[@]}")"
           deploy_status=$?
           set -e

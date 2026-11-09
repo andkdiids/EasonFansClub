@@ -98,27 +98,84 @@ test('risk acceptance (schemaVersion=3) is opt-in, asserts nothing verified, and
   assert.match(gate, /RISK_ACCEPTANCE_RELEASE_ID_MISMATCH/)
 })
 
-test('schema v3 is consumed once under the deployment lock and recovery never resets prior consumption', () => {
+test('schema v3 is consumed only after the final locked SHA compare-and-swap, with no automatic push deployment', () => {
   const workflow = read('.github/workflows/deploy.yml')
   const gate = read('scripts/production-backup-gate.mjs')
+  const script = read('scripts/deploy-production-git.sh')
   const ignore = workflow.match(/paths-ignore:\s*([\s\S]*?)\n\s+workflow_dispatch:/)?.[1] ?? ''
   const gateStart = workflow.indexOf('- name: Require a verified recoverable production database backup')
   const deployStart = workflow.indexOf('- name: Deploy exact commit from server Git')
+  const deployEnd = workflow.indexOf('- name: Verify public website', deployStart)
   const gateBlock = workflow.slice(gateStart, deployStart)
-  assert.match(gateBlock, /--cli consume/)
-  assert.match(gateBlock, /flock -n 9/)
-  assert.match(gateBlock, /RISK_ACCEPTANCE_CONSUMED=YES/)
-  assert.match(gateBlock, /RISK_ACCEPTANCE_CONSUMED_RUN_ID=/)
-  assert.match(gateBlock, /RISK_ACCEPTANCE_CONSUMED_RUN_ATTEMPT=/)
+  const deployBlock = workflow.slice(deployStart, deployEnd)
+
+  assert.match(gateBlock, /--cli verify/)
+  assert.doesNotMatch(gateBlock, /--cli consume|RISK_ACCEPTANCE_CONSUMED/)
+  assert.match(gateBlock, /BACKUP_GATE_SCHEMA_VERSION=3/)
+  assert.match(gateBlock, /BACKUP_ATTESTATION_TARGET_SHA=/)
+  assert.match(deployBlock, /BACKUP_GATE_RUN_ID: \$\{\{ github\.run_id \}\}/)
+  assert.match(deployBlock, /EXPECTED_PRODUCTION_SHA: \$\{\{ steps\.backup_gate\.outputs\.production_sha \}\}/)
+  assert.doesNotMatch(deployBlock, /expected_production_sha="\$\(/)
+  assert.match(deployBlock, /BACKUP_GATE_RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/)
+  assert.match(deployBlock, /BACKUP_GATE_ATTESTATION_FILE=/)
+  assert.match(deployBlock, /BACKUP_GATE_RISK_ACCEPTANCE_MODE=/)
+  assert.match(deployBlock, /BACKUP_GATE_RUN_ID=\$\{BACKUP_GATE_RUN_ID:-\}/)
+
+  const preflightLock = gateBlock.indexOf('flock -n 9')
+  const capturedSha = gateBlock.indexOf('BACKUP_GATE_PRODUCTION_SHA=')
+  const lock = script.indexOf('flock -n 9 || die')
+  const lockedShaCas = script.indexOf('previous_target="$(deploy_require_expected_production_sha')
+  const gateSha = script.indexOf('BACKUP_GATE_VERIFIED_SHA_CHECK=PASS')
+  const consume = script.indexOf('--cli consume')
+  const migration = script.indexOf('pnpm_run prisma migrate deploy')
+  const switchCall = script.indexOf('atomic_switch "${release_dir}"')
+  assert.ok(preflightLock >= 0 && preflightLock < capturedSha, 'preflight baseline must be captured under the server lock')
+  assert.ok(lock >= 0 && lock < lockedShaCas, 'server lock must precede the live-SHA CAS')
+  assert.ok(lockedShaCas < gateSha && gateSha < consume, 'consume only after the locked CAS and preflight verdict')
+  assert.ok(consume < migration && consume < switchCall, 'consume before any migration or atomic switch')
+  assert.match(script, /BACKUP_GATE_RISK_ACCEPTANCE_MODE/)
+  assert.match(script, /BACKUP_GATE_RUN_ATTEMPT/)
+  assert.match(script, /RISK_ACCEPTANCE_CONSUMED_RUN_ID=/)
+  assert.match(script, /RISK_ACCEPTANCE_CONSUMED_RUN_ATTEMPT=/)
+  assert.match(script, /RISK_ACCEPTANCE_ATTESTATION_ID=/)
+  assert.match(gate, /RISK_ACCEPTANCE_ALREADY_CONSUMED/)
   assert.match(gate, /createExclusiveAtomic/)
   assert.match(gate, /linkSync\(temporaryPath, filePath\)/)
-  assert.match(gate, /RISK_ACCEPTANCE_ALREADY_CONSUMED/)
   assert.match(gate, /REAPPROVED_AFTER_CONSUMPTION/)
   assert.match(gate, /Never roll back or delete the old proof\/consumption records automatically/)
-  assert.match(ignore, /scripts\/production-backup-gate\.mjs/)
-  assert.match(ignore, /tests\/production-backup-gate\.test\.ts/)
-  assert.match(ignore, /scripts\/production-risk-attestation\.mjs/)
-  assert.match(ignore, /tests\/production-risk-attestation\.test\.mjs/)
+
+  const releaseControlPaths = [
+    'scripts/production-backup-gate.mjs',
+    'scripts/production-backup-gate.d.mts',
+    'scripts/production-risk-attestation.mjs',
+    'scripts/deploy-production-git.sh',
+    'tests/production-backup-gate.test.ts',
+    'tests/production-risk-attestation.test.mjs',
+    'tests/deploy-backup-gate.test.ts',
+    'tests/topic-v2-main-integration.test.ts',
+  ]
+  for (const path of releaseControlPaths) assert.ok(ignore.includes(path), `default push deployment must ignore ${path}`)
+
+  const serializedWriters = [
+    '.github/workflows/deploy.yml',
+    '.github/workflows/configure-android-version.yml',
+    '.github/workflows/rollback-android-version.yml',
+    '.github/workflows/rollback-android-version-to-code31.yml',
+    '.github/workflows/rollback-android-version-to-code32.yml',
+    '.github/workflows/rollback-native-bearer-server.yml',
+    '.github/workflows/production-release-approved.yml',
+    '.github/workflows/production-server-rc-v3.yml',
+    '.github/workflows/issue-production-risk-acceptance.yml',
+    '.github/workflows/publish-android-rc11.yml',
+  ]
+  for (const path of serializedWriters) {
+    const source = read(path)
+    assert.match(source, /group: production-deploy/, `${path} must share the production lock group`)
+    assert.match(source, /cancel-in-progress:\s*false/, `${path} must not cancel an active operation`)
+  }
+  const entryConfig = read('.github/workflows/configure-production-entry.yml')
+  assert.match(entryConfig, /group: production-entry/)
+  assert.doesNotMatch(entryConfig, /deploy-production-git\.sh|rollback-production-git\.sh|\.deployed-sha/)
 })
 
 test('the read-only diagnostic never blocks on a not-yet-deployed candidate SHA', () => {

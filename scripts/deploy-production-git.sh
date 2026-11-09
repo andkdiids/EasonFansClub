@@ -92,6 +92,21 @@ if [[ "${GITHUB_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then :; el
   die "GITHUB_REPOSITORY has an unexpected format."
 fi
 
+backup_gate_restore_mode="${BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE:-none}"
+backup_gate_risk_mode="${BACKUP_GATE_RISK_ACCEPTANCE_MODE:-none}"
+backup_gate_attestation_file="${BACKUP_GATE_ATTESTATION_FILE:-/home/apps/easonfansclub/shared/.backup-verification.json}"
+backup_gate_run_id="${BACKUP_GATE_RUN_ID:-}"
+backup_gate_run_attempt="${BACKUP_GATE_RUN_ATTEMPT:-}"
+case "${backup_gate_restore_mode}" in none|approved) ;; *) die "Invalid backup-gate restore-drill mode." ;; esac
+case "${backup_gate_risk_mode}" in none|approved) ;; *) die "Invalid backup-gate risk-acceptance mode." ;; esac
+if [ "${backup_gate_risk_mode}" = approved ]; then
+  [[ "${backup_gate_restore_mode}" == none ]] || die "Schema v3 risk acceptance cannot be combined with a restore-drill waiver."
+  [[ "${backup_gate_attestation_file}" =~ ^/home/apps/easonfansclub/shared/[A-Za-z0-9._/-]+\.json$ ]] || die "Backup attestation path is outside the protected shared directory."
+  [[ "/${backup_gate_attestation_file}/" != *"/../"* ]] || die "Backup attestation path contains traversal."
+  [[ "${backup_gate_run_id}" =~ ^[1-9][0-9]{0,19}$ ]] || die "Invalid deployment run ID."
+  [[ "${backup_gate_run_attempt}" =~ ^[1-9][0-9]{0,5}$ ]] || die "Invalid deployment run attempt."
+fi
+
 releases_dir="${APP_DIR}/releases"
 shared_dir="${APP_DIR}/shared"
 repo_dir="${APP_DIR}/repo"
@@ -477,6 +492,44 @@ if [ "${BACKUP_GATE_VERIFIED_SHA:-}" != "${DEPLOY_SHA}" ]; then
   die "Backup verification gate did not approve ${DEPLOY_SHA}; refusing ALL database migration and deployment."
 fi
 echo "BACKUP_GATE_VERIFIED_SHA_CHECK=PASS"
+
+if [ "${backup_gate_risk_mode}" = approved ]; then
+  log_step "5/8" "Consume schema v3 proof after locked production SHA compare-and-swap"
+  gate_script="${release_dir}/scripts/production-backup-gate.mjs"
+  [ -s "${gate_script}" ] || die "Candidate release is missing the reviewed backup-gate consumer."
+  set +e
+  consume_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s \
+    node "${gate_script}" --cli consume \
+      --attestation "${backup_gate_attestation_file}" \
+      --deploy-sha "${DEPLOY_SHA}" \
+      --waiver-mode "${backup_gate_restore_mode}" \
+      --risk-acceptance-mode approved \
+      --run-id "${backup_gate_run_id}" \
+      --run-attempt "${backup_gate_run_attempt}" 2>&1)"
+  consume_status=$?
+  set -e
+  printf '%s\n' "${consume_output}"
+  [ "${consume_status}" -eq 0 ] || die "Schema v3 proof consumption failed closed; no database phase or switch may continue."
+  for required_line in \
+    "BACKUP_GATE=VERIFIED" \
+    "BACKUP_GATE_SCHEMA_VERSION=3" \
+    "BACKUP_ATTESTATION_TARGET_SHA=${DEPLOY_SHA}" \
+    "RISK_ACCEPTED=YES" \
+    "BACKUP_VERIFIED=NO" \
+    "BACKUP_PITR_VERIFIED=NO" \
+    "RISK_ACCEPTANCE_CONSUMED=YES" \
+    "RISK_ACCEPTANCE_CONSUMED_RUN_ID=${backup_gate_run_id}" \
+    "RISK_ACCEPTANCE_CONSUMED_RUN_ATTEMPT=${backup_gate_run_attempt}"; do
+    printf '%s\n' "${consume_output}" | grep -Fxq -- "${required_line}" || die "Schema v3 consumption proof did not confirm the exact SHA and workflow attempt."
+  done
+  printf '%s\n' "${consume_output}" | grep -Eq '^RISK_ACCEPTANCE_ATTESTATION_ID=[0-9a-f-]{36}$' || die "Schema v3 consumption did not return a valid attestation identity."
+  if printf '%s\n' "${consume_output}" | grep -Eq '^BACKUP_ID='; then
+    die "Risk acceptance must not assert a backup id."
+  fi
+  echo "SCHEMA_V3_CONSUMPTION=VERIFIED"
+  echo "SCHEMA_V3_CONSUMED_RUN_ID=${backup_gate_run_id}"
+  echo "SCHEMA_V3_CONSUMED_RUN_ATTEMPT=${backup_gate_run_attempt}"
+fi
 
 if [ "${db_mode}" = skip-db ]; then
   log_step "6/8" "Skip all database migration and maintenance phases"

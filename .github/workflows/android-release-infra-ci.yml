@@ -17,6 +17,8 @@ on:
       - 'scripts/android-rc13-multipart.*'
       - 'scripts/update-android-version-env.*'
       - 'scripts/production-backup-gate.mjs'
+      - 'scripts/production-backup-gate.d.mts'
+      - 'scripts/deploy-production-git.sh'
       - 'scripts/production-risk-attestation.mjs'
       - 'tests/production-backup-gate.test.ts'
       - 'tests/production-risk-attestation.test.mjs'
