@@ -886,7 +886,7 @@ function activityLotteryResultNotificationData(input: {
     content: winner
       ? `恭喜你在「${input.activityTitle}」的「${input.lotteryTitle}」抽奖中获得：${winner.tierName} · ${winner.prizeName}。请使用该活动现有核销码领取。`
       : `「${input.activityTitle}」的「${input.lotteryTitle}」抽奖结果已公布，很遗憾，本次未中奖，感谢参与。`,
-    link: `/activities/${input.activityId}`,
+    link: `/activities/${input.activityId}?nativeTarget=event-center`,
     key: `activity-lottery-result:${input.lotteryId}:${input.userId}`,
   }
 }
