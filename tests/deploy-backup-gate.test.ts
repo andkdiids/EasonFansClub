@@ -149,10 +149,12 @@ test('schema v3 is consumed only after the final locked SHA compare-and-swap, wi
     'scripts/production-backup-gate.d.mts',
     'scripts/production-risk-attestation.mjs',
     'scripts/diagnose-production-attestation.mjs',
+    'scripts/quarantine-invalid-production-attestation.mjs',
     'scripts/deploy-production-git.sh',
     'tests/production-backup-gate.test.ts',
     'tests/production-risk-attestation.test.mjs',
     'tests/production-attestation-diagnostic.test.mjs',
+    'tests/production-attestation-quarantine.test.mjs',
     'tests/deploy-backup-gate.test.ts',
     'tests/topic-v2-main-integration.test.ts',
   ]
