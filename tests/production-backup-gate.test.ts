@@ -762,7 +762,8 @@ test('schema v3 issuer refuses any existing proof, including a symlink, and neve
       symlinkSync(originalPath, proofPath)
     } catch (error) {
       if (process.platform === 'win32') {
-        t.skip(`Windows symlink creation is unavailable: ${String(error?.code ?? 'unknown')}`)
+        const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'unknown'
+        t.skip(`Windows symlink creation is unavailable: ${errorCode}`)
         return
       }
       throw error
@@ -873,7 +874,7 @@ test('fresh approval cannot replace an active unused proof or unknown schema', (
     assert.equal(readFileSync(proofPath, 'utf8'), original)
 
     const otherProofPath = path.join(dir, '.unknown-attestation.json')
-    writeFileSync(otherProofPath, JSON.stringify(validAttestation()))
+    writeFileSync(otherProofPath, JSON.stringify(validAttestation()), { mode: 0o600 })
     assert.throws(
       () => issueRiskAcceptance({ attestationPath: otherProofPath, deploySha: DEPLOY_SHA, payloadBase64: second.payloadBase64, workflowRunId: '800000002', now }),
       /EXISTING_ATTESTATION_UNKNOWN_REFUSING_REPLACEMENT/,

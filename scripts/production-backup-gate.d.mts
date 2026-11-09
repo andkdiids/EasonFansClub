@@ -27,6 +27,8 @@ export interface RiskAcceptance {
   releaseId: string
   noIndependentBackupVerification: boolean
   noRestoreDrill: boolean
+  approvalCommentId: string
+  approvalAuthorAssociation: string
 }
 
 export interface BackupEvidence {
@@ -79,3 +81,46 @@ export function assertAttestationFileStat(
 ): true
 
 export function readAttestationFile(filePath: string): string
+export interface RiskAcceptanceIssueInput {
+  attestationPath: string
+  deploySha: string
+  payloadBase64: string
+  workflowRunId: string
+  now?: number
+}
+
+export interface RiskAcceptanceIssueResult {
+  attestationId: string
+  approvalCommentId: string
+  proofSha256: string
+}
+
+export interface RiskAcceptanceConsumeInput {
+  attestationPath: string
+  deploySha: string
+  runId: string
+  runAttempt: string
+  now?: number
+}
+
+export interface RiskAcceptanceConsumptionRecord {
+  schemaVersion: 1
+  targetReleaseSha: string
+  runId: string
+  runAttempt: string
+  attestationId: string
+  approvalCommentId: string
+  approvedBy: string
+  approvedAt: string
+  proofSha256: string
+  consumedAt: string
+}
+
+export interface RiskAcceptanceConsumeResult {
+  consumed: boolean
+  evidence: BackupEvidence
+  record?: RiskAcceptanceConsumptionRecord
+}
+
+export function issueRiskAcceptance(input: RiskAcceptanceIssueInput): RiskAcceptanceIssueResult
+export function consumeRiskAcceptance(input: RiskAcceptanceConsumeInput): RiskAcceptanceConsumeResult
