@@ -1,0 +1,160 @@
+name: Issue one-time schema v3 production risk acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval_comment_id:
+        description: Numeric GitHub PR comment ID containing the exact-SHA risk approval
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  APP_DIR: /home/apps/easonfansclub
+
+jobs:
+  issue-risk-acceptance:
+    if: github.ref == 'refs/heads/main'
+    name: Issue one-time SHA-bound proof
+    environment: Production
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the dispatched main commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Require the current protected main commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
+
+      - name: Validate the live approval and prepare a short-lived payload
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          APPROVAL_COMMENT_ID: ${{ inputs.approval_comment_id }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" == 'refs/heads/main' ]] || { echo '::error::Signer must run from main.'; exit 1; }
+          [[ "${APPROVAL_COMMENT_ID}" =~ ^[1-9][0-9]{0,19}$ ]] || {
+            echo '::error::Approval comment ID must be numeric.'
+            exit 1
+          }
+          [[ "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::Invalid dispatched main SHA.'; exit 1; }
+          payload_file="${RUNNER_TEMP}/risk-acceptance-payload.json"
+          payload_b64_file="${RUNNER_TEMP}/risk-acceptance-payload.b64"
+          umask 077
+          node scripts/production-risk-attestation.mjs --cli create-payload > "${payload_b64_file}"
+          [[ -s "${payload_b64_file}" ]] || { echo '::error::Approval validation returned no payload.'; exit 1; }
+          base64 --decode "${payload_b64_file}" > "${payload_file}"
+          node -e 'const p=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); if(p.targetReleaseSha!==process.env.DEPLOY_SHA || p.issuedByWorkflowRunId!==process.env.GITHUB_RUN_ID) process.exit(1); console.log("APPROVAL_EVIDENCE=VALID"); console.log(`APPROVAL_CREATED_AT=${p.riskAcceptance.approvedAt}`); console.log(`APPROVAL_COMMENT_ID=${p.riskAcceptance.approvalCommentId}`); console.log(`TARGET_SHA=${p.targetReleaseSha}`)' "${payload_file}"
+
+      - name: Validate production SSH settings
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOST_KEY_SHA256: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          for setting in SERVER_HOST SERVER_USER SERVER_PORT SERVER_SSH_KEY PINNED_HOST_KEY_SHA256; do
+            [[ -n "${!setting:-}" ]] || { echo "::error::Required production SSH setting ${setting} is missing."; exit 1; }
+          done
+          [[ "${SERVER_HOST}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo '::error::Production host format is invalid.'; exit 1; }
+          [[ "${SERVER_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo '::error::Production user format is invalid.'; exit 1; }
+          [[ "${SERVER_PORT}" =~ ^[0-9]{1,5}$ ]] && (( 10#${SERVER_PORT} >= 1 && 10#${SERVER_PORT} <= 65535 )) || { echo '::error::Production port is invalid.'; exit 1; }
+          [[ "${PINNED_HOST_KEY_SHA256}" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]] || { echo '::error::Pinned host fingerprint format is invalid.'; exit 1; }
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${SERVER_SSH_KEY}" | tr -d '\r' > "${RUNNER_TEMP}/easonfansclub_deploy_key"
+          chmod 600 "${RUNNER_TEMP}/easonfansclub_deploy_key"
+          scan_file="${RUNNER_TEMP}/easonfansclub_host_scan"
+          verified_file="${RUNNER_TEMP}/easonfansclub_known_hosts"
+          key_line_file="${RUNNER_TEMP}/easonfansclub_host_key_line"
+          timeout 30s ssh-keyscan -T 15 -p "${SERVER_PORT}" -H "${SERVER_HOST}" > "${scan_file}" 2>/dev/null
+          : > "${verified_file}"
+          while IFS= read -r entry; do
+            [[ -n "${entry}" && "${entry}" != \#* ]] || continue
+            printf '%s\n' "${entry}" > "${key_line_file}"
+            fingerprint="$(ssh-keygen -lf "${key_line_file}" -E sha256 | awk 'NR == 1 { print $2 }')"
+            [[ "${fingerprint}" == "${PINNED_HOST_KEY_SHA256}" ]] && printf '%s\n' "${entry}" >> "${verified_file}"
+          done < "${scan_file}"
+          [[ -s "${verified_file}" ]] || { echo '::error::Production host key did not match the protected fingerprint.'; exit 1; }
+          ssh-keygen -lf "${verified_file}" -E sha256 | awk '{ print $2 }' | grep -Fx -- "${PINNED_HOST_KEY_SHA256}" >/dev/null
+          install -m 600 "${verified_file}" "${HOME}/.ssh/known_hosts"
+
+      - name: Create the proof once under the production server lock
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          BACKUP_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
+          DEPLOY_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/assert-release-main.mjs
+          PAYLOAD_B64="$(cat "${RUNNER_TEMP}/risk-acceptance-payload.b64")"
+          gate_file="${BACKUP_ATTESTATION_FILE:-/home/apps/easonfansclub/shared/.backup-verification.json}"
+          [[ "${gate_file}" =~ ^/[A-Za-z0-9._/-]+\.json$ && "${gate_file}" != *..* ]] || {
+            echo '::error::Configured backup attestation path is invalid.'
+            exit 1
+          }
+          [[ "${gate_file}" == /home/apps/easonfansclub/shared/* ]] || {
+            echo '::error::Schema v3 signer only permits the protected shared attestation directory.'
+            exit 1
+          }
+          [[ "${#PAYLOAD_B64}" -le 64000 && "${PAYLOAD_B64}" =~ ^[A-Za-z0-9+/]+=*$ ]] || {
+            echo '::error::Validated proof payload is missing or malformed.'
+            exit 1
+          }
+          [[ -s "${RUNNER_TEMP}/easonfansclub_deploy_key" && -s "${HOME}/.ssh/known_hosts" ]] || {
+            echo '::error::Strict production SSH credentials were not prepared.'
+            exit 1
+          }
+          printf -v remote_command \
+            'test -f /home/apps/easonfansclub/.deploy.lock && test ! -L /home/apps/easonfansclub/.deploy.lock || exit 1; exec 9<>/home/apps/easonfansclub/.deploy.lock; flock -n 9 || { echo SERVER_DEPLOY_LOCK_BUSY; exit 1; }; node --input-type=module - --cli issue --attestation %q --deploy-sha %q --payload-base64 %q --workflow-run-id %q' \
+            "${gate_file}" "${DEPLOY_SHA}" "${PAYLOAD_B64}" "${GITHUB_RUN_ID}"
+          set +e
+          issue_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s \
+            ssh -T -p "${SERVER_PORT}" \
+              -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
+              -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey -o PasswordAuthentication=no \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
+              -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+              "${SERVER_USER}@${SERVER_HOST}" "${remote_command}" \
+            < scripts/production-backup-gate.mjs 2>&1)"
+          issue_status=$?
+          set -e
+          printf '%s\n' "${issue_output}"
+          [[ "${issue_status}" -eq 0 ]] || { echo '::error::Schema v3 proof issuance failed closed.'; exit "${issue_status}"; }
+          printf '%s\n' "${issue_output}" | grep -Fxq 'RISK_ACCEPTANCE_ATTESTATION=ISSUED' || {
+            echo '::error::Signer did not confirm atomic issuance.'
+            exit 1
+          }
+          printf '%s\n' "${issue_output}" | grep -Fxq "RISK_ACCEPTANCE_TARGET_SHA=${DEPLOY_SHA}" || {
+            echo '::error::Signer output did not match the dispatched main SHA.'
+            exit 1
+          }

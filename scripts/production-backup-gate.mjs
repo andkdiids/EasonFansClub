@@ -78,11 +78,15 @@
  *
  *   {
  *     "schemaVersion": 3,
+ *     "attestationId": "<UUID v4 generated once by the protected signer>",
+ *     "issuedByWorkflowRunId": "<GitHub signer workflow run id>",
  *     "targetReleaseSha": "<exact 40-char deployed main SHA>",
  *     "expiresAt": "<short expiry, <=24h from now>",
  *     "riskAcceptance": {
  *       "approvedBy": "<named human approver>",
  *       "approvedAt": "<ISO timestamp of the written approval>",
+ *       "approvalCommentId": "<numeric GitHub PR issue-comment id>",
+ *       "approvalAuthorAssociation": "OWNER",
  *       "riskStatement": "No independent CynosDB backup/PITR verification was
  *                         obtained and no restore drill was performed. The
  *                         database has no automatic down migration; failures
@@ -132,7 +136,20 @@
  *   #   node --input-type=module - --cli verify --attestation <path> --deploy-sha <sha>
  */
 
-import { lstatSync, readFileSync } from 'node:fs'
+import {
+  closeSync,
+  fsyncSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { basename, dirname, join, resolve } from 'node:path'
 
 export const SCHEMA_VERSION = 1
 export const WAIVER_SCHEMA_VERSION = 2
@@ -161,11 +178,21 @@ export const RISK_ACCEPTANCE_SCHEMA_VERSION = 3
 export const RISK_ACCEPTANCE_MODE_NONE = 'none'
 export const RISK_ACCEPTANCE_MODE_APPROVED = 'approved'
 export const SUPPORTED_RISK_ACCEPTANCE_MODES = [RISK_ACCEPTANCE_MODE_NONE, RISK_ACCEPTANCE_MODE_APPROVED]
-export const RISK_ACCEPTANCE_REQUIRED_FIELDS = ['approvedBy', 'approvedAt', 'riskStatement', 'releaseId']
+export const RISK_ACCEPTANCE_REQUIRED_FIELDS = [
+  'approvedBy',
+  'approvedAt',
+  'approvalCommentId',
+  'approvalAuthorAssociation',
+  'riskStatement',
+  'releaseId',
+]
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/
 const SAFE_NAME = /^[A-Za-z0-9._@-]{1,64}$/
 const SHA40 = /^[0-9a-f]{40}$/
+const NUMERIC_ID = /^[1-9][0-9]{0,19}$/
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+export const RISK_ACCEPTANCE_APPROVER = 'andkdiids'
 const HOUR_MS = 3_600_000
 const WAIVER_REQUIRED_FIELDS = ['approvedBy', 'approvedAt', 'riskStatement', 'releaseId']
 // Any restore-drill record inside a waiver attestation is a fabricated drill.
@@ -350,6 +377,8 @@ function verifyRiskAcceptanceAttestation(data, { deploySha, now, reject }) {
     }
   }
   if (data.targetReleaseSha !== deploySha) return reject('TARGET_RELEASE_SHA_MISMATCH')
+  if (!UUID_V4.test(String(data.attestationId ?? ''))) return reject('RISK_ACCEPTANCE_ATTESTATION_ID_INVALID')
+  if (!NUMERIC_ID.test(String(data.issuedByWorkflowRunId ?? ''))) return reject('RISK_ACCEPTANCE_ISSUANCE_RUN_ID_INVALID')
 
   const expiresAt = parseTime(data.expiresAt)
   if (expiresAt === null) return reject('EXPIRES_AT_INVALID')
@@ -363,7 +392,9 @@ function verifyRiskAcceptanceAttestation(data, { deploySha, now, reject }) {
       return reject('RISK_ACCEPTANCE_FIELD_MISSING')
     }
   }
-  if (!SAFE_NAME.test(risk.approvedBy)) return reject('RISK_ACCEPTANCE_APPROVED_BY_INVALID')
+  if (risk.approvedBy !== RISK_ACCEPTANCE_APPROVER) return reject('RISK_ACCEPTANCE_APPROVED_BY_INVALID')
+  if (!NUMERIC_ID.test(String(risk.approvalCommentId ?? ''))) return reject('RISK_ACCEPTANCE_COMMENT_ID_INVALID')
+  if (risk.approvalAuthorAssociation !== 'OWNER') return reject('RISK_ACCEPTANCE_AUTHOR_ASSOCIATION_INVALID')
   if (risk.riskStatement.trim().length < 8 || risk.riskStatement.length > 1024) {
     return reject('RISK_ACCEPTANCE_RISK_STATEMENT_INVALID')
   }
@@ -394,11 +425,15 @@ function verifyRiskAcceptanceAttestation(data, { deploySha, now, reject }) {
       riskAcceptance: {
         approvedBy: risk.approvedBy,
         approvedAt: risk.approvedAt,
+        approvalCommentId: risk.approvalCommentId,
+        approvalAuthorAssociation: risk.approvalAuthorAssociation,
         riskStatement: risk.riskStatement,
         releaseId: risk.releaseId,
         noIndependentBackupVerification: true,
         noRestoreDrill: true,
       },
+      attestationId: data.attestationId,
+      issuedByWorkflowRunId: String(data.issuedByWorkflowRunId),
       targetReleaseSha: data.targetReleaseSha,
       expiresAt: data.expiresAt,
     },
@@ -479,6 +514,348 @@ export function readAttestationFile(filePath) {
   return readFileSync(filePath, 'utf8')
 }
 
+function assertPrivateFileStat(stats) {
+  assertAttestationFileStat(stats)
+  if (process.platform !== 'win32' && (stats.mode & 0o077) !== 0) {
+    throw new Error('ATTESTATION_PRIVATE_FILE_PERMISSIONS_REQUIRED')
+  }
+}
+
+function assertPrivateDirectoryStat(stats) {
+  if (!stats.isDirectory() || stats.isSymbolicLink()) throw new Error('ATTESTATION_STATE_NOT_A_DIRECTORY')
+  if (process.platform !== 'win32') {
+    if ((stats.mode & 0o077) !== 0) throw new Error('ATTESTATION_STATE_UNSAFE_PERMISSIONS')
+    if (typeof process.getuid === 'function' && stats.uid !== process.getuid()) {
+      throw new Error('ATTESTATION_STATE_UNEXPECTED_OWNER')
+    }
+  }
+}
+
+function assertSafeAttestationPath(filePath) {
+  const isWindowsTestPath = process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(String(filePath ?? ''))
+  if (typeof filePath !== 'string' || (!filePath.startsWith('/') && !isWindowsTestPath) || filePath.includes('..')) {
+    throw new Error('ATTESTATION_PATH_INVALID')
+  }
+  const parent = dirname(filePath)
+  if (realpathSync(parent) !== resolve(parent)) throw new Error('ATTESTATION_PATH_PARENT_NOT_CANONICAL')
+}
+
+function statePathsFor(attestationPath) {
+  const root = `${attestationPath}.state`
+  return { root, issued: join(root, 'issued'), consumed: join(root, 'consumed'), archived: join(root, 'archived') }
+}
+
+function secureDirectory(dirPath, { create }) {
+  if (create) {
+    try {
+      mkdirSync(dirPath, { mode: 0o700 })
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+    }
+  }
+  const stats = lstatSync(dirPath)
+  assertPrivateDirectoryStat(stats)
+  return dirPath
+}
+
+function ensureStateLayout(attestationPath, { create }) {
+  const paths = statePathsFor(attestationPath)
+  secureDirectory(paths.root, { create })
+  secureDirectory(paths.issued, { create })
+  secureDirectory(paths.consumed, { create })
+  secureDirectory(paths.archived, { create })
+  return paths
+}
+
+function fsyncDirectory(dirPath) {
+  if (process.platform === 'win32') return
+  const descriptor = openSync(dirPath, 'r')
+  try {
+    fsyncSync(descriptor)
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+/** Atomic no-replace creation using a same-directory temporary file and hard link. */
+export function createExclusiveAtomic(filePath, contents) {
+  const dirPath = dirname(filePath)
+  const temporaryPath = join(dirPath, `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`)
+  let descriptor
+  try {
+    descriptor = openSync(temporaryPath, 'wx', 0o600)
+    writeFileSync(descriptor, contents, 'utf8')
+    fsyncSync(descriptor)
+    closeSync(descriptor)
+    descriptor = undefined
+    linkSync(temporaryPath, filePath)
+    unlinkSync(temporaryPath)
+    fsyncDirectory(dirPath)
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { closeSync(descriptor) } catch {}
+    }
+    try { unlinkSync(temporaryPath) } catch {}
+    if (error?.code === 'EEXIST') throw new Error('ATTESTATION_TARGET_ALREADY_EXISTS')
+    throw error
+  }
+}
+
+function hasPath(filePath) {
+  try {
+    lstatSync(filePath)
+    return true
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+function readPrivateJson(filePath, errorCode) {
+  const stats = lstatSync(filePath)
+  assertPrivateFileStat(stats)
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(filePath, 'utf8'))
+  } catch {
+    throw new Error(errorCode)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(errorCode)
+  return parsed
+}
+
+function sha256(text) {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+function parseJsonPayload(base64Text) {
+  if (typeof base64Text !== 'string' || base64Text.length === 0 || base64Text.length > 64_000 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(base64Text)) {
+    throw new Error('ATTESTATION_PAYLOAD_INVALID')
+  }
+  let text
+  try {
+    text = Buffer.from(base64Text, 'base64').toString('utf8')
+  } catch {
+    throw new Error('ATTESTATION_PAYLOAD_INVALID')
+  }
+  try {
+    const data = JSON.parse(text)
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error()
+    if (Buffer.from(text, 'utf8').toString('base64') !== base64Text) throw new Error()
+    return { text: `${JSON.stringify(data, null, 2)}\n`, data }
+  } catch {
+    throw new Error('ATTESTATION_PAYLOAD_INVALID')
+  }
+}
+
+function hasExactKeys(value, expected) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const actual = Object.keys(value).sort()
+  return actual.length === expected.length && actual.every((key, index) => key === [...expected].sort()[index])
+}
+
+/** Create a schema v3 proof and immutable issuance ledger; never replace either. */
+export function issueRiskAcceptance({ attestationPath, deploySha, payloadBase64, workflowRunId, now = Date.now() }) {
+  assertSafeAttestationPath(attestationPath)
+  if (!NUMERIC_ID.test(String(workflowRunId ?? ''))) throw new Error('ISSUANCE_RUN_ID_INVALID')
+  const { text, data } = parseJsonPayload(payloadBase64)
+  if (!hasExactKeys(data, ['schemaVersion', 'attestationId', 'issuedByWorkflowRunId', 'targetReleaseSha', 'expiresAt', 'riskAcceptance']) ||
+      !hasExactKeys(data.riskAcceptance, [
+        'approvedBy', 'approvedAt', 'approvalCommentId', 'approvalAuthorAssociation', 'riskStatement', 'releaseId',
+        'noIndependentBackupVerification', 'noRestoreDrill',
+      ])) {
+    throw new Error('ATTESTATION_PAYLOAD_FIELDS_INVALID')
+  }
+  if (String(data.issuedByWorkflowRunId) !== String(workflowRunId)) throw new Error('ISSUANCE_RUN_ID_MISMATCH')
+  const verified = verifyBackupAttestation(text, { deploySha, now, allowRiskAcceptance: true })
+  if (!verified.ok || verified.evidence?.schemaVersion !== RISK_ACCEPTANCE_SCHEMA_VERSION) {
+    throw new Error(verified.reason ?? 'RISK_ACCEPTANCE_SCHEMA_INVALID')
+  }
+  const expiresAt = Date.parse(data.expiresAt)
+  if (!Number.isFinite(expiresAt) || expiresAt - now > 60 * 60 * 1000) {
+    throw new Error('ISSUANCE_TTL_EXCEEDS_ONE_HOUR')
+  }
+  const state = ensureStateLayout(attestationPath, { create: true })
+  const risk = data.riskAcceptance
+  const issuedPath = join(state.issued, `${risk.approvalCommentId}.json`)
+  const consumedPath = join(state.consumed, `${risk.approvalCommentId}.json`)
+  if (hasPath(issuedPath) || hasPath(consumedPath)) throw new Error('APPROVAL_COMMENT_ALREADY_USED')
+
+  if (hasPath(attestationPath)) archiveExistingRiskAcceptance({
+    attestationPath,
+    state,
+    deploySha,
+    replacementCommentId: risk.approvalCommentId,
+    replacementRunId: String(workflowRunId),
+    now,
+  })
+
+  createExclusiveAtomic(attestationPath, text)
+  const record = {
+    schemaVersion: 1,
+    targetReleaseSha: deploySha,
+    approvalCommentId: risk.approvalCommentId,
+    approvedBy: risk.approvedBy,
+    approvalAuthorAssociation: risk.approvalAuthorAssociation,
+    approvedAt: risk.approvedAt,
+    attestationId: data.attestationId,
+    issuedByWorkflowRunId: String(workflowRunId),
+    issuedAt: new Date(now).toISOString(),
+    proofSha256: sha256(text),
+  }
+  try {
+    createExclusiveAtomic(issuedPath, `${JSON.stringify(record, null, 2)}\n`)
+  } catch {
+    // The proof remains in place and unusable without its issuance ledger.
+    // Never remove or overwrite it automatically; recovery is an audited operator action.
+    throw new Error('ISSUANCE_LEDGER_CREATE_FAILED_PROOF_REQUIRES_AUDIT')
+  }
+  try {
+    assertPrivateFileStat(lstatSync(attestationPath))
+    const readBackText = readFileSync(attestationPath, 'utf8')
+    const readBack = verifyBackupAttestation(readBackText, { deploySha, now, allowRiskAcceptance: true })
+    const readBackRecord = readPrivateJson(issuedPath, 'ISSUANCE_RECORD_INVALID')
+    if (readBackText !== text || !readBack.ok || readBack.evidence?.schemaVersion !== RISK_ACCEPTANCE_SCHEMA_VERSION) {
+      throw new Error('ISSUED_PROOF_READBACK_MISMATCH')
+    }
+    verifyIssuanceRecord(readBackRecord, { data, deploySha, proofSha256: sha256(readBackText) })
+  } catch {
+    // Leave all created evidence intact for audit; never retry by overwriting it.
+    throw new Error('ISSUED_PROOF_READBACK_FAILED_REQUIRES_AUDIT')
+  }
+  return { attestationId: data.attestationId, approvalCommentId: risk.approvalCommentId, proofSha256: record.proofSha256 }
+}
+
+function verifyIssuanceRecord(record, { data, deploySha, proofSha256 }) {
+  const risk = data.riskAcceptance
+  if (record.schemaVersion !== 1 || record.targetReleaseSha !== deploySha ||
+      record.approvalCommentId !== risk.approvalCommentId || record.approvedBy !== risk.approvedBy ||
+      record.approvalAuthorAssociation !== risk.approvalAuthorAssociation || record.approvedAt !== risk.approvedAt ||
+      record.attestationId !== data.attestationId || record.proofSha256 !== proofSha256 ||
+      record.issuedByWorkflowRunId !== String(data.issuedByWorkflowRunId) ||
+      !NUMERIC_ID.test(String(record.issuedByWorkflowRunId ?? '')) ||
+      !Number.isFinite(Date.parse(record.issuedAt))) {
+    throw new Error('ISSUANCE_RECORD_MISMATCH')
+  }
+}
+
+function archiveExistingRiskAcceptance({ attestationPath, state, deploySha, replacementCommentId, replacementRunId, now }) {
+  assertPrivateFileStat(lstatSync(attestationPath))
+  const oldText = readFileSync(attestationPath, 'utf8')
+  let oldData
+  try {
+    oldData = JSON.parse(oldText)
+  } catch {
+    throw new Error('EXISTING_ATTESTATION_UNKNOWN_REFUSING_REPLACEMENT')
+  }
+  const oldRisk = oldData?.riskAcceptance
+  const oldDeploySha = String(oldData?.targetReleaseSha ?? '')
+  if (oldData?.schemaVersion !== RISK_ACCEPTANCE_SCHEMA_VERSION || !SHA40.test(oldDeploySha) ||
+      oldRisk?.releaseId !== oldDeploySha ||
+      !UUID_V4.test(String(oldData.attestationId ?? '')) ||
+      !oldRisk || !NUMERIC_ID.test(String(oldRisk.approvalCommentId ?? '')) || oldRisk.approvedBy !== RISK_ACCEPTANCE_APPROVER) {
+    throw new Error('EXISTING_ATTESTATION_UNKNOWN_REFUSING_REPLACEMENT')
+  }
+  const oldDigest = sha256(oldText)
+  const issuedPath = join(state.issued, `${oldRisk.approvalCommentId}.json`)
+  const issuance = readPrivateJson(issuedPath, 'EXISTING_ISSUANCE_RECORD_INVALID')
+  verifyIssuanceRecord(issuance, { data: oldData, deploySha: oldDeploySha, proofSha256: oldDigest })
+
+  const consumedPath = join(state.consumed, `${oldRisk.approvalCommentId}.json`)
+  let consumedRecord = null
+  if (hasPath(consumedPath)) {
+    consumedRecord = readPrivateJson(consumedPath, 'EXISTING_CONSUMPTION_RECORD_INVALID')
+    if (consumedRecord.schemaVersion !== 1 || consumedRecord.targetReleaseSha !== oldDeploySha ||
+        consumedRecord.approvalCommentId !== oldRisk.approvalCommentId ||
+        consumedRecord.attestationId !== oldData.attestationId || consumedRecord.proofSha256 !== oldDigest ||
+        consumedRecord.approvedBy !== oldRisk.approvedBy || consumedRecord.approvedAt !== oldRisk.approvedAt ||
+        !NUMERIC_ID.test(String(consumedRecord.runId ?? '')) ||
+        !/^[1-9][0-9]{0,5}$/.test(String(consumedRecord.runAttempt ?? '')) ||
+        !Number.isFinite(Date.parse(consumedRecord.consumedAt))) {
+      throw new Error('EXISTING_CONSUMPTION_RECORD_INVALID')
+    }
+  } else {
+    const oldExpiry = Date.parse(oldData.expiresAt)
+    if (!Number.isFinite(oldExpiry) || oldExpiry > now) throw new Error('ACTIVE_ATTESTATION_NOT_CONSUMED')
+  }
+
+  const archiveProofPath = join(state.archived, `${oldData.attestationId}.json`)
+  const archiveRecordPath = join(state.archived, `${oldData.attestationId}.archive.json`)
+  const archiveRecord = {
+    schemaVersion: 1,
+    reason: consumedRecord ? 'REAPPROVED_AFTER_CONSUMPTION' : 'EXPIRED_UNCONSUMED',
+    archivedTargetReleaseSha: oldDeploySha,
+    replacementTargetReleaseSha: deploySha,
+    archivedAttestationId: oldData.attestationId,
+    archivedApprovalCommentId: oldRisk.approvalCommentId,
+    archivedProofSha256: oldDigest,
+    consumedRunId: consumedRecord?.runId ?? null,
+    consumedRunAttempt: consumedRecord?.runAttempt ?? null,
+    replacementApprovalCommentId: replacementCommentId,
+    replacementIssuanceRunId: replacementRunId,
+    archivedAt: new Date(now).toISOString(),
+  }
+  try {
+    linkSync(attestationPath, archiveProofPath)
+    fsyncDirectory(state.archived)
+    createExclusiveAtomic(archiveRecordPath, `${JSON.stringify(archiveRecord, null, 2)}\n`)
+    unlinkSync(attestationPath)
+    fsyncDirectory(dirname(attestationPath))
+  } catch (error) {
+    // Never roll back or delete the old proof/consumption records automatically.
+    if (error?.message === 'ATTESTATION_TARGET_ALREADY_EXISTS' || error?.code === 'EEXIST') {
+      throw new Error('ATTESTATION_ARCHIVE_ALREADY_EXISTS')
+    }
+    throw new Error('ATTESTATION_ARCHIVE_FAILED_REQUIRES_AUDIT')
+  }
+}
+
+/** Persist an irreversible schema v3 use marker bound to the exact GitHub run and proof. */
+export function consumeRiskAcceptance({ attestationPath, deploySha, runId, runAttempt, now = Date.now() }) {
+  assertSafeAttestationPath(attestationPath)
+  if (!NUMERIC_ID.test(String(runId ?? '')) || !/^[1-9][0-9]{0,5}$/.test(String(runAttempt ?? ''))) {
+    throw new Error('DEPLOY_RUN_ID_INVALID')
+  }
+  const rawText = readAttestationFile(attestationPath)
+  const verified = verifyBackupAttestation(rawText, { deploySha, now, allowRiskAcceptance: true })
+  if (!verified.ok) throw new Error(verified.reason)
+  if (verified.evidence?.schemaVersion !== RISK_ACCEPTANCE_SCHEMA_VERSION) {
+    return { consumed: false, evidence: verified.evidence }
+  }
+  assertPrivateFileStat(lstatSync(attestationPath))
+
+  const data = JSON.parse(rawText)
+  const risk = data.riskAcceptance
+  const state = ensureStateLayout(attestationPath, { create: false })
+  const issuedPath = join(state.issued, `${risk.approvalCommentId}.json`)
+  const consumedPath = join(state.consumed, `${risk.approvalCommentId}.json`)
+  const proofDigest = sha256(rawText)
+  const issuance = readPrivateJson(issuedPath, 'ISSUANCE_RECORD_INVALID')
+  verifyIssuanceRecord(issuance, { data, deploySha, proofSha256: proofDigest })
+  if (hasPath(consumedPath)) throw new Error('RISK_ACCEPTANCE_ALREADY_CONSUMED')
+
+  const record = {
+    schemaVersion: 1,
+    targetReleaseSha: deploySha,
+    runId: String(runId),
+    runAttempt: String(runAttempt),
+    attestationId: data.attestationId,
+    approvalCommentId: risk.approvalCommentId,
+    approvedBy: risk.approvedBy,
+    approvedAt: risk.approvedAt,
+    proofSha256: proofDigest,
+    consumedAt: new Date(now).toISOString(),
+  }
+  try {
+    createExclusiveAtomic(consumedPath, `${JSON.stringify(record, null, 2)}\n`)
+  } catch (error) {
+    if (error?.message === 'ATTESTATION_TARGET_ALREADY_EXISTS') throw new Error('RISK_ACCEPTANCE_ALREADY_CONSUMED')
+    throw new Error('RISK_ACCEPTANCE_CONSUMPTION_FAILED')
+  }
+  return { consumed: true, evidence: verified.evidence, record }
+}
+
 function parseArgs(argv) {
   const options = { command: argv[0] ?? '' }
   for (let index = 1; index < argv.length; index += 1) {
@@ -506,7 +883,7 @@ function emitRejected(reason) {
   return 1
 }
 
-function verifyOnHost(options) {
+function loadVerifiedAttestation(options) {
   const attestationPath = String(options.attestation ?? '')
   const deploySha = String(options['deploy-sha'] ?? '')
   const nowOption = options.now
@@ -514,8 +891,8 @@ function verifyOnHost(options) {
   const waiverMode = String(options['waiver-mode'] ?? WAIVER_MODE_NONE)
   const riskMode = String(options['risk-acceptance-mode'] ?? RISK_ACCEPTANCE_MODE_NONE)
 
-  if (!SUPPORTED_WAIVER_MODES.includes(waiverMode)) return emitRejected('WAIVER_MODE_INVALID')
-  if (!SUPPORTED_RISK_ACCEPTANCE_MODES.includes(riskMode)) return emitRejected('RISK_ACCEPTANCE_MODE_INVALID')
+  if (!SUPPORTED_WAIVER_MODES.includes(waiverMode)) return { ok: false, reason: 'WAIVER_MODE_INVALID' }
+  if (!SUPPORTED_RISK_ACCEPTANCE_MODES.includes(riskMode)) return { ok: false, reason: 'RISK_ACCEPTANCE_MODE_INVALID' }
 
   // Production is POSIX. Windows-style absolute paths are accepted only so the
   // gate can be smoke-tested on a developer machine; relative paths and any
@@ -523,14 +900,14 @@ function verifyOnHost(options) {
   const isPosixAbsolute = attestationPath.startsWith('/')
   const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(attestationPath)
   if ((!isPosixAbsolute && !isWindowsAbsolute) || attestationPath.includes('..')) {
-    return emitRejected('ATTESTATION_PATH_INVALID')
+    return { ok: false, reason: 'ATTESTATION_PATH_INVALID' }
   }
 
   let rawText
   try {
     rawText = readAttestationFile(attestationPath)
   } catch (error) {
-    return emitRejected(error.message ?? String(error))
+    return { ok: false, reason: error.message ?? String(error) }
   }
 
   const parsedNow = typeof nowOption === 'string' ? Date.parse(nowOption) : Date.now()
@@ -544,9 +921,11 @@ function verifyOnHost(options) {
     allowRiskAcceptance: riskMode === RISK_ACCEPTANCE_MODE_APPROVED,
   })
 
-  if (!result.ok) return emitRejected(result.reason)
+  if (!result.ok) return { ok: false, reason: result.reason }
+  return { ok: true, attestationPath, deploySha, rawText, evidence: result.evidence }
+}
 
-  const evidence = result.evidence
+function emitVerified(evidence, consumption = null) {
   console.log('BACKUP_GATE=VERIFIED')
   console.log(`BACKUP_GATE_SCHEMA_VERSION=${evidence.schemaVersion}`)
   if (evidence.schemaVersion === RISK_ACCEPTANCE_SCHEMA_VERSION) {
@@ -596,7 +975,60 @@ function verifyOnHost(options) {
     console.log(`BACKUP_ATTESTATION_TARGET_SHA=${evidence.targetReleaseSha}`)
     console.log(`BACKUP_ATTESTATION_EXPIRES_AT=${evidence.expiresAt}`)
   }
+  if (consumption?.consumed) {
+    console.log('RISK_ACCEPTANCE_CONSUMED=YES')
+    console.log(`RISK_ACCEPTANCE_CONSUMED_RUN_ID=${consumption.record.runId}`)
+    console.log(`RISK_ACCEPTANCE_CONSUMED_RUN_ATTEMPT=${consumption.record.runAttempt}`)
+    console.log(`RISK_ACCEPTANCE_ATTESTATION_ID=${consumption.record.attestationId}`)
+  }
   return 0
+}
+
+function verifyOnHost(options) {
+  const loaded = loadVerifiedAttestation(options)
+  if (!loaded.ok) return emitRejected(loaded.reason)
+  return emitVerified(loaded.evidence)
+}
+
+function consumeOnHost(options) {
+  const loaded = loadVerifiedAttestation(options)
+  if (!loaded.ok) return emitRejected(loaded.reason)
+  if (loaded.evidence.schemaVersion !== RISK_ACCEPTANCE_SCHEMA_VERSION) return emitVerified(loaded.evidence)
+  try {
+    const consumption = consumeRiskAcceptance({
+      attestationPath: loaded.attestationPath,
+      deploySha: loaded.deploySha,
+      runId: String(options['run-id'] ?? ''),
+      runAttempt: String(options['run-attempt'] ?? ''),
+    })
+    if (!consumption.consumed) return emitRejected('RISK_ACCEPTANCE_CONSUMPTION_REQUIRED')
+    return emitVerified(loaded.evidence, consumption)
+  } catch (error) {
+    const reason = /^[A-Z0-9_]+$/.test(error?.message ?? '') ? error.message : 'RISK_ACCEPTANCE_CONSUMPTION_FAILED'
+    return emitRejected(reason)
+  }
+}
+
+function issueOnHost(options) {
+  try {
+    const result = issueRiskAcceptance({
+      attestationPath: String(options.attestation ?? ''),
+      deploySha: String(options['deploy-sha'] ?? ''),
+      payloadBase64: String(options['payload-base64'] ?? ''),
+      workflowRunId: String(options['workflow-run-id'] ?? ''),
+    })
+    console.log('RISK_ACCEPTANCE_ATTESTATION=ISSUED')
+    console.log(`RISK_ACCEPTANCE_ATTESTATION_ID=${result.attestationId}`)
+    console.log(`RISK_ACCEPTANCE_APPROVAL_COMMENT_ID=${result.approvalCommentId}`)
+    console.log(`RISK_ACCEPTANCE_TARGET_SHA=${String(options['deploy-sha'])}`)
+    console.log(`RISK_ACCEPTANCE_PROOF_SHA256=${result.proofSha256}`)
+    return 0
+  } catch (error) {
+    const reason = /^[A-Z0-9_]+$/.test(error?.message ?? '') ? error.message : 'RISK_ACCEPTANCE_ISSUANCE_FAILED'
+    console.log('RISK_ACCEPTANCE_ATTESTATION=REJECTED')
+    console.log(`RISK_ACCEPTANCE_ISSUANCE_REASON=${reason}`)
+    return 1
+  }
 }
 
 async function main() {
@@ -604,6 +1036,8 @@ async function main() {
   const marker = cliArgs.indexOf('--cli')
   const options = parseArgs(marker === -1 ? cliArgs : cliArgs.slice(marker + 1))
   if (options.command === 'verify') return verifyOnHost(options)
+  if (options.command === 'consume') return consumeOnHost(options)
+  if (options.command === 'issue') return issueOnHost(options)
   throw new Error(`Unknown command: ${options.command || '(none)'}`)
 }
 
@@ -613,9 +1047,9 @@ if (process.argv.includes('--cli') || invokedAsScript) {
   Promise.resolve()
     .then(() => main())
     .then((code) => { process.exitCode = code })
-    .catch((error) => {
+    .catch(() => {
       console.log('BACKUP_GATE=REJECTED')
-      console.log(`BACKUP_GATE_REASON=GATE_ERROR ${error.message ?? error}`)
+      console.log('BACKUP_GATE_REASON=GATE_ERROR')
       console.log('BACKUP_GATE_ACTION=REFUSING_MIGRATION_AND_DEPLOYMENT')
       process.exitCode = 1
     })

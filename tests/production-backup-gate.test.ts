@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -8,6 +8,8 @@ import {
   verifyBackupAttestation,
   readAttestationFile,
   assertAttestationFileStat,
+  consumeRiskAcceptance,
+  issueRiskAcceptance,
 } from '../scripts/production-backup-gate.mjs'
 
 const DEPLOY_SHA = 'a'.repeat(40)
@@ -68,11 +70,15 @@ function validWaiver(): Record<string, unknown> {
 function validRiskAcceptance(): Record<string, unknown> {
   return {
     schemaVersion: 3,
+    attestationId: '550e8400-e29b-41d4-a716-446655440000',
+    issuedByWorkflowRunId: '800000001',
     targetReleaseSha: DEPLOY_SHA,
     expiresAt: '2026-11-07T00:00:00+08:00',
     riskAcceptance: {
-      approvedBy: 'Eason-release-authority',
+      approvedBy: 'andkdiids',
       approvedAt: '2026-11-06T17:45:00+08:00',
+      approvalCommentId: '6736686769',
+      approvalAuthorAssociation: 'OWNER',
       riskStatement: 'No independent CynosDB backup/PITR verification and no restore drill. Risk accepted for this release only.',
       releaseId: DEPLOY_SHA,
       noIndependentBackupVerification: true,
@@ -458,7 +464,7 @@ test('POSITIVE: an explicit, exact-SHA risk acceptance passes with nothing claim
   assert.equal(result.evidence?.restoreDrillVerified, false)
   assert.equal(result.evidence?.restoreDrillWaived, true)
   assert.equal(result.evidence?.riskAccepted, true)
-  assert.equal(result.evidence?.riskAcceptance?.approvedBy, 'Eason-release-authority')
+  assert.equal(result.evidence?.riskAcceptance?.approvedBy, 'andkdiids')
   assert.equal(result.evidence?.riskAcceptance?.releaseId, DEPLOY_SHA)
   assert.equal(result.evidence?.targetReleaseSha, DEPLOY_SHA)
 })
@@ -502,7 +508,7 @@ test('NEGATIVE: missing/!true acknowledgement flags, block or required fields ar
   arrayBlock.riskAcceptance = []
   assert.equal(verifyRisk(arrayBlock).reason, 'RISK_ACCEPTANCE_BLOCK_MISSING')
 
-  for (const field of ['approvedBy', 'approvedAt', 'riskStatement', 'releaseId']) {
+  for (const field of ['approvedBy', 'approvedAt', 'approvalCommentId', 'approvalAuthorAssociation', 'riskStatement', 'releaseId']) {
     const data = validRiskAcceptance()
     const risk = data.riskAcceptance as Record<string, unknown>
     delete risk[field]
@@ -595,6 +601,347 @@ test('CLI: the default (push-event) mode refuses a v3 attestation', () => {
     assert.match(run.stdout, /^BACKUP_GATE=REJECTED$/m)
     assert.match(run.stdout, /^BACKUP_GATE_REASON=RISK_ACCEPTANCE_NOT_ENABLED$/m)
     assert.match(run.stdout, /^BACKUP_GATE_ACTION=REFUSING_MIGRATION_AND_DEPLOYMENT$/m)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+function issueFixture({
+  now = Date.now(),
+  commentId = '6736686769',
+  issuanceRunId = '800000001',
+  attestationId = '550e8400-e29b-41d4-a716-446655440000',
+  deploySha = DEPLOY_SHA,
+}: {
+  now?: number
+  commentId?: string
+  issuanceRunId?: string
+  attestationId?: string
+  deploySha?: string
+} = {}) {
+  const data = validRiskAcceptance()
+  data.attestationId = attestationId
+  data.issuedByWorkflowRunId = issuanceRunId
+  data.targetReleaseSha = deploySha
+  data.expiresAt = new Date(now + 30 * 60_000).toISOString()
+  const risk = data.riskAcceptance as Record<string, unknown>
+  risk.releaseId = deploySha
+  risk.approvalCommentId = commentId
+  risk.approvedAt = new Date(now - 5 * 60_000).toISOString()
+  return { data, payloadBase64: Buffer.from(JSON.stringify(data)).toString('base64'), now }
+}
+
+function runIssueCli(attestationPath: string, payloadBase64: string, workflowRunId: string) {
+  return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+    const child = spawn(process.execPath, [
+      GATE_PATH,
+      '--cli', 'issue',
+      '--attestation', attestationPath,
+      '--deploy-sha', DEPLOY_SHA,
+      '--payload-base64', payloadBase64,
+      '--workflow-run-id', workflowRunId,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
+    child.on('close', status => resolve({ status, stdout, stderr }))
+  })
+}
+
+function runConsumeCli(attestationPath: string, runId: string, runAttempt: string) {
+  return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+    const child = spawn(process.execPath, [
+      GATE_PATH,
+      '--cli', 'consume',
+      '--attestation', attestationPath,
+      '--deploy-sha', DEPLOY_SHA,
+      '--risk-acceptance-mode', 'approved',
+      '--run-id', runId,
+      '--run-attempt', runAttempt,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
+    child.on('close', status => resolve({ status, stdout, stderr }))
+  })
+}
+
+test('schema v3 issuance is atomic, create-only, and first use is bound to SHA and workflow run', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const fixture = issueFixture()
+  try {
+    const issued = issueRiskAcceptance({
+      attestationPath: proofPath,
+      deploySha: DEPLOY_SHA,
+      payloadBase64: fixture.payloadBase64,
+      workflowRunId: '800000001',
+      now: fixture.now,
+    })
+    assert.equal(issued.approvalCommentId, '6736686769')
+    assert.match(issued.proofSha256, /^[0-9a-f]{64}$/)
+    assert.equal(JSON.parse(readFileSync(proofPath, 'utf8')).attestationId, fixture.data.attestationId)
+
+    const consumed = consumeRiskAcceptance({
+      attestationPath: proofPath,
+      deploySha: DEPLOY_SHA,
+      runId: '900000001',
+      runAttempt: '1',
+      now: fixture.now,
+    })
+    assert.equal(consumed.consumed, true)
+    assert.equal(consumed.record?.targetReleaseSha, DEPLOY_SHA)
+    assert.equal(consumed.record?.runId, '900000001')
+    assert.equal(consumed.record?.runAttempt, '1')
+    assert.equal(consumed.record?.attestationId, fixture.data.attestationId)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('schema v3 rejects same-run retries and different-run replay without resetting consumption', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-replay-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const fixture = issueFixture()
+  try {
+    issueRiskAcceptance({
+      attestationPath: proofPath,
+      deploySha: DEPLOY_SHA,
+      payloadBase64: fixture.payloadBase64,
+      workflowRunId: '800000001',
+      now: fixture.now,
+    })
+    consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000001', runAttempt: '1', now: fixture.now })
+    assert.throws(
+      () => consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000001', runAttempt: '2', now: fixture.now }),
+      /RISK_ACCEPTANCE_ALREADY_CONSUMED/,
+    )
+    assert.throws(
+      () => consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000002', runAttempt: '1', now: fixture.now }),
+      /RISK_ACCEPTANCE_ALREADY_CONSUMED/,
+    )
+    const markerPath = `${proofPath}.state/consumed/6736686769.json`
+    assert.equal(JSON.parse(readFileSync(markerPath, 'utf8')).runId, '900000001')
+    assert.throws(
+      () => issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: fixture.payloadBase64, workflowRunId: '800000001', now: fixture.now }),
+      /APPROVAL_COMMENT_ALREADY_USED/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('failed deployment does not reset a consumed schema v3 proof', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-deploy-failure-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const fixture = issueFixture()
+  try {
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: fixture.payloadBase64, workflowRunId: '800000001', now: fixture.now })
+    consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000003', runAttempt: '1', now: fixture.now })
+    // Model downstream deploy failure: no gate API deletes or rewrites the marker.
+    assert.equal(JSON.parse(readFileSync(`${proofPath}.state/consumed/6736686769.json`, 'utf8')).runId, '900000003')
+    assert.throws(
+      () => consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000004', runAttempt: '1', now: fixture.now }),
+      /RISK_ACCEPTANCE_ALREADY_CONSUMED/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('schema v3 issuer refuses any existing proof, including a symlink, and never overwrites it', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-existing-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const originalPath = path.join(dir, 'original.json')
+  const fixture = issueFixture()
+  try {
+    writeFileSync(originalPath, 'preserve-me')
+    try {
+      symlinkSync(originalPath, proofPath)
+    } catch (error) {
+      if (process.platform === 'win32') {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'unknown'
+        t.skip(`Windows symlink creation is unavailable: ${errorCode}`)
+        return
+      }
+      throw error
+    }
+    assert.throws(
+      () => issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: fixture.payloadBase64, workflowRunId: '800000001', now: fixture.now }),
+      /ATTESTATION_NOT_A_REGULAR_FILE/,
+    )
+    assert.equal(readFileSync(originalPath, 'utf8'), 'preserve-me')
+    assert.equal(lstatSync(proofPath).isSymbolicLink(), true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('schema v3 issuance race permits exactly one process for the same approval', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-race-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const fixture = issueFixture()
+  try {
+    const results = await Promise.all([
+      runIssueCli(proofPath, fixture.payloadBase64, '800000001'),
+      runIssueCli(proofPath, fixture.payloadBase64, '800000001'),
+    ])
+    assert.deepEqual(results.map(result => result.status).sort(), [0, 1])
+    assert.equal(JSON.parse(readFileSync(`${proofPath}.state/issued/6736686769.json`, 'utf8')).attestationId, fixture.data.attestationId)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('schema v3 consumption race permits exactly one deployment run', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-consume-race-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const fixture = issueFixture()
+  try {
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: fixture.payloadBase64, workflowRunId: '800000001', now: fixture.now })
+    const results = await Promise.all([
+      runConsumeCli(proofPath, '900000010', '1'),
+      runConsumeCli(proofPath, '900000011', '1'),
+    ])
+    assert.deepEqual(results.map(result => result.status).sort(), [0, 1])
+    const marker = JSON.parse(readFileSync(`${proofPath}.state/consumed/6736686769.json`, 'utf8'))
+    assert.ok(['900000010', '900000011'].includes(marker.runId))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a fresh approval archives a consumed proof without resetting its one-time record', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-reapproval-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const now = Date.now()
+  const first = issueFixture({ now, commentId: '6736686769', issuanceRunId: '800000001' })
+  const second = issueFixture({ now, commentId: '6736686770', issuanceRunId: '800000002', attestationId: '550e8400-e29b-41d4-a716-446655440001' })
+  try {
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: first.payloadBase64, workflowRunId: '800000001', now })
+    consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000040', runAttempt: '1', now })
+    const oldProofText = readFileSync(proofPath, 'utf8')
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: second.payloadBase64, workflowRunId: '800000002', now })
+
+    const archivedPath = `${proofPath}.state/archived/550e8400-e29b-41d4-a716-446655440000.json`
+    const archiveRecord = JSON.parse(readFileSync(`${proofPath}.state/archived/550e8400-e29b-41d4-a716-446655440000.archive.json`, 'utf8'))
+    assert.equal(readFileSync(archivedPath, 'utf8'), oldProofText)
+    assert.equal(archiveRecord.reason, 'REAPPROVED_AFTER_CONSUMPTION')
+    assert.equal(archiveRecord.consumedRunId, '900000040')
+    assert.equal(JSON.parse(readFileSync(`${proofPath}.state/consumed/6736686769.json`, 'utf8')).runId, '900000040')
+    assert.equal(JSON.parse(readFileSync(proofPath, 'utf8')).attestationId, second.data.attestationId)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a fresh approval for a new main SHA archives the prior consumed SHA without rewriting history', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-sha-change-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const now = Date.now()
+  const oldProof = issueFixture({ now, commentId: '6736686769', issuanceRunId: '800000001' })
+  const nextProof = issueFixture({ now, commentId: '6736686770', issuanceRunId: '800000002', attestationId: '550e8400-e29b-41d4-a716-446655440001', deploySha: OTHER_SHA })
+  try {
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: oldProof.payloadBase64, workflowRunId: '800000001', now })
+    consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000041', runAttempt: '1', now })
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: OTHER_SHA, payloadBase64: nextProof.payloadBase64, workflowRunId: '800000002', now })
+
+    const archiveRecord = JSON.parse(readFileSync(`${proofPath}.state/archived/550e8400-e29b-41d4-a716-446655440000.archive.json`, 'utf8'))
+    assert.equal(archiveRecord.archivedTargetReleaseSha, DEPLOY_SHA)
+    assert.equal(archiveRecord.replacementTargetReleaseSha, OTHER_SHA)
+    assert.equal(JSON.parse(readFileSync(`${proofPath}.state/consumed/6736686769.json`, 'utf8')).targetReleaseSha, DEPLOY_SHA)
+    assert.equal(JSON.parse(readFileSync(proofPath, 'utf8')).targetReleaseSha, OTHER_SHA)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('fresh approval cannot replace an active unused proof or unknown schema', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-no-replace-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const now = Date.now()
+  const first = issueFixture({ now, commentId: '6736686769' })
+  const second = issueFixture({ now, commentId: '6736686770', issuanceRunId: '800000002', attestationId: '550e8400-e29b-41d4-a716-446655440001' })
+  try {
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: first.payloadBase64, workflowRunId: '800000001', now })
+    const original = readFileSync(proofPath, 'utf8')
+    assert.throws(
+      () => issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: second.payloadBase64, workflowRunId: '800000002', now }),
+      /ACTIVE_ATTESTATION_NOT_CONSUMED/,
+    )
+    assert.equal(readFileSync(proofPath, 'utf8'), original)
+
+    const otherProofPath = path.join(dir, '.unknown-attestation.json')
+    writeFileSync(otherProofPath, JSON.stringify(validAttestation()), { mode: 0o600 })
+    assert.throws(
+      () => issueRiskAcceptance({ attestationPath: otherProofPath, deploySha: DEPLOY_SHA, payloadBase64: second.payloadBase64, workflowRunId: '800000002', now }),
+      /EXISTING_ATTESTATION_UNKNOWN_REFUSING_REPLACEMENT/,
+    )
+    assert.equal(JSON.parse(readFileSync(otherProofPath, 'utf8')).schemaVersion, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('schema v3 refuses expired proof and missing or mismatched issuance records', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-invalid-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const now = Date.now()
+  const expired = issueFixture({ now: now - 60 * 60_000 })
+  try {
+    assert.throws(
+      () => issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: expired.payloadBase64, workflowRunId: '800000001', now }),
+      /ATTESTATION_EXPIRED/,
+    )
+    const fixture = issueFixture({ now })
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: fixture.payloadBase64, workflowRunId: '800000001', now })
+    writeFileSync(`${proofPath}.state/issued/6736686769.json`, '{"unknown":true}')
+    assert.throws(
+      () => consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000020', runAttempt: '1', now }),
+      /ISSUANCE_RECORD_MISMATCH/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('schema v3 consumption requires a private proof file on POSIX production hosts', () => {
+  if (process.platform === 'win32') return
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v3-permissions-'))
+  const proofPath = path.join(dir, '.backup-verification.json')
+  const fixture = issueFixture()
+  try {
+    issueRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, payloadBase64: fixture.payloadBase64, workflowRunId: '800000001', now: fixture.now })
+    chmodSync(proofPath, 0o640)
+    assert.throws(
+      () => consumeRiskAcceptance({ attestationPath: proofPath, deploySha: DEPLOY_SHA, runId: '900000050', runAttempt: '1', now: fixture.now }),
+      /ATTESTATION_PRIVATE_FILE_PERMISSIONS_REQUIRED/,
+    )
+    assert.throws(() => lstatSync(`${proofPath}.state/consumed/6736686769.json`), { code: 'ENOENT' }, 'bad file mode must not consume the proof')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('consume preserves schema v1 and v2 verify semantics and does not create v3 state', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-risk-v12-'))
+  try {
+    for (const [name, data] of [['v1', validAttestation()], ['v2', validWaiver()]] as const) {
+      const file = path.join(dir, `${name}.json`)
+      writeFileSync(file, JSON.stringify(data))
+      chmodSync(file, 0o600)
+      const args = [
+        GATE_PATH, '--cli', 'consume', '--attestation', file, '--deploy-sha', DEPLOY_SHA,
+        '--waiver-mode', 'approved', '--risk-acceptance-mode', 'approved', '--run-id', '900000030', '--run-attempt', '1', '--now', NOW_ISO,
+      ]
+      const result = spawnSync(process.execPath, args, { encoding: 'utf8' })
+      assert.equal(result.status, 0, `${name}: ${result.stdout}\n${result.stderr}`)
+      assert.match(result.stdout, /^BACKUP_GATE=VERIFIED$/m)
+      assert.doesNotMatch(result.stdout, /^RISK_ACCEPTANCE_CONSUMED=YES$/m)
+      assert.throws(() => lstatSync(`${file}.state`), { code: 'ENOENT' }, `${name} must not create one-time state`)
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
