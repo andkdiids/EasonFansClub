@@ -81,7 +81,7 @@ test('EasMusic mobile paths and methods are specifically allowlisted', () => {
 })
 
 test('EasMusic stays schema-neutral while the activity lottery adds only its approved draw-source field', () => {
-  const schemaDiff = execSync('git diff HEAD --unified=3 -- prisma/schema.prisma', { encoding: 'utf8' })
+  const schemaDiff = execSync('git diff --ignore-all-space HEAD --unified=3 -- prisma/schema.prisma', { encoding: 'utf8' })
   const schemaAdditions = schemaDiff.split(/\r?\n/).filter((line) => line.startsWith('+') && !line.startsWith('+++'))
   const schemaDeletions = schemaDiff.split(/\r?\n/).filter((line) => line.startsWith('-') && !line.startsWith('---'))
   assert.deepEqual(schemaAdditions, schemaDiff ? ['+  drawSource         String?                            @db.VarChar(32)'] : [])

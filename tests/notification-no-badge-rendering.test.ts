@@ -48,7 +48,9 @@ test('通知 actor 名称由服务端按好友备注优先、昵称回退解析'
 
   assert.match(service, /loadFriendRemarkMap\(userId, actorIds\)/)
   assert.match(service, /getFriendDisplayName\(/)
-  assert.match(service, /actorName: actorDisplayName/)
+  assert.match(service, /actorDisplayName = actor\s*\?\s*getFriendDisplayName\(/)
+  assert.match(service, /const actorName = moderationResult \? SYSTEM_REVIEW_SENDER_NAME : actorDisplayName/)
+  assert.match(service, /\n\s*actorName,/)
   assert.match(remarks, /getFriendDisplayName/)
   assert.match(read('lib/friend-display-name.ts'), /return isFriendContext && remark \? remark : publicName/)
 })

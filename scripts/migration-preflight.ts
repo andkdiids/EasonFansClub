@@ -916,7 +916,10 @@ async function main() {
   }
 }
 
-void main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exitCode = 1
-})
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null
+if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
+  void main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
+  })
+}
