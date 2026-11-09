@@ -1,0 +1,160 @@
+name: Verify production quarantine archive integrity (read only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: Verify the fixed historical quarantine archive
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    environment:
+      name: Production
+    permissions:
+      contents: read
+    steps:
+      - name: Require manual dispatch from protected main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && "$GITHUB_REF" == 'refs/heads/main' ]] || {
+            echo '::error::This fixed-purpose verifier is allowed only by manual dispatch from main.'
+            exit 1
+          }
+
+      - name: Check out the exact dispatched main commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Validate configured SSH identity against the pinned production host key
+        id: ssh
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ ]] || { echo '::error::Configured production host format is invalid.'; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo '::error::Configured production user format is invalid.'; exit 1; }
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || {
+            echo '::error::Configured production port is invalid.'
+            exit 1
+          }
+          [[ -n "$SSH_KEY" && -n "$PINNED_HOSTS" && "$PINNED_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]] || {
+            echo '::error::Pinned production SSH settings are incomplete.'
+            exit 1
+          }
+
+          key="$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.key"
+          hosts="$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.hosts"
+          output="$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.out"
+          errors="$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.err"
+          umask 077
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          : > "$output"
+          : > "$errors"
+          chmod 600 "$key" "$hosts" "$output" "$errors"
+
+          SSH_HOST="$SSH_HOST" SSH_PORT="$SSH_PORT" HOSTS_FILE="$hosts" node <<'NODE'
+          const fs = require('node:fs')
+          const lines = fs.readFileSync(process.env.HOSTS_FILE, 'utf8').trim().split(/\r?\n/)
+          const expectedHost = process.env.SSH_PORT === '22'
+            ? process.env.SSH_HOST
+            : '[' + process.env.SSH_HOST + ']:' + process.env.SSH_PORT
+          const fields = lines.length === 1 ? lines[0].trim().split(/\s+/) : []
+          if (fields.length !== 3 || fields[0] !== expectedHost ||
+              !/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$/.test(fields[1]) ||
+              !/^[A-Za-z0-9+/]+={0,2}$/.test(fields[2])) process.exit(1)
+          NODE
+
+          actual_fingerprint="$(ssh-keygen -lf "$hosts" -E sha256 | awk 'NR == 1 { print $2 }')"
+          [[ "$actual_fingerprint" == "$PINNED_FINGERPRINT" ]] || {
+            echo '::error::Configured SSH host key does not match the pinned production fingerprint.'
+            exit 1
+          }
+          printf 'key_file=%s\nhosts_file=%s\noutput_file=%s\nerror_file=%s\n' "$key" "$hosts" "$output" "$errors" >> "$GITHUB_OUTPUT"
+          echo 'SSH_HOST_IDENTITY=PINNED_AND_VERIFIED'
+
+      - name: Verify fixed archive records under a nonblocking shared deploy lock
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          OUTPUT_FILE: ${{ steps.ssh.outputs.output_file }}
+          ERROR_FILE: ${{ steps.ssh.outputs.error_file }}
+        run: |
+          set -euo pipefail
+          [[ -s "$KEY_FILE" && -s "$HOSTS_FILE" ]] || { echo '::error::Pinned SSH identity files are unavailable.'; exit 1; }
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ && "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || exit 1
+          (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || exit 1
+
+          remote="$SSH_USER@$SSH_HOST"
+          remote_command='set -eu; lock=/home/apps/easonfansclub/.deploy.lock; test -f "$lock" && test ! -L "$lock" || { printf "DEPLOY_LOCK_UNAVAILABLE\n"; exit 41; }; test -x /usr/bin/env && test -x /usr/bin/flock && test -x /usr/bin/readlink || { printf "REMOTE_RUNTIME_UNAVAILABLE\n"; exit 42; }; exec 9< "$lock" || { printf "DEPLOY_LOCK_UNAVAILABLE\n"; exit 41; }; /usr/bin/flock -s -n 9 || { printf "DEPLOY_LOCK_BUSY\n"; exit 44; }; NVM_DIR="$HOME/.nvm"; if test -s "$NVM_DIR/nvm.sh"; then . "$NVM_DIR/nvm.sh"; fi; node_bin="$(command -v node 2>/dev/null)" || { printf "NODE_RUNTIME_UNAVAILABLE\n"; exit 42; }; case "$node_bin" in /*) ;; *) printf "NODE_RUNTIME_UNAVAILABLE\n"; exit 42 ;; esac; node_real="$(/usr/bin/readlink -f -- "$node_bin")" || { printf "NODE_RUNTIME_UNAVAILABLE\n"; exit 42; }; test -f "$node_real" && test -x "$node_real" && test ! -L "$node_real" || { printf "NODE_RUNTIME_UNAVAILABLE\n"; exit 42; }; case "$node_real" in "$HOME"/.nvm/versions/node/*/bin/node|/usr/bin/node|/usr/bin/nodejs|/usr/local/bin/node) ;; *) printf "NODE_RUNTIME_UNAVAILABLE\n"; exit 42 ;; esac; node_dir="$(dirname -- "$node_real")"; exec /usr/bin/env -i PATH="$node_dir:/usr/bin:/bin" LANG=C QUARANTINE_ARCHIVE_VERIFY_LOCK_HELD=YES "$node_real" --input-type=module -'
+
+          set +e
+          timeout --foreground --signal=TERM --kill-after=10s 90s ssh -T \
+            -i "$KEY_FILE" -p "$SSH_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+            "$remote" "$remote_command" \
+            < scripts/verify-production-quarantine-archive.mjs > "$OUTPUT_FILE" 2> "$ERROR_FILE"
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            echo 'ARCHIVE_INTEGRITY=FAIL'
+            echo 'PRODUCTION_FILES_MUTATED=NO'
+            if grep -hE '^(ARCHIVE_VERIFY_ERROR|DEPLOY_LOCK_BUSY|DEPLOY_LOCK_UNAVAILABLE|NODE_RUNTIME_UNAVAILABLE|REMOTE_RUNTIME_UNAVAILABLE)(=[A-Z0-9_]+)?$' "$OUTPUT_FILE" "$ERROR_FILE" | tail -n 1; then
+              true
+            else
+              echo 'ARCHIVE_VERIFY_ERROR=REMOTE_READ_FAILED'
+            fi
+            exit "$status"
+          fi
+
+          cat "$OUTPUT_FILE"
+          grep -Fxq 'ARCHIVE_INTEGRITY=PASS' "$OUTPUT_FILE"
+          grep -Fxq 'ARCHIVE_TARGET_SHA=80b62a5938aba4d2b50075ed0ed55da169c94f4d' "$OUTPUT_FILE"
+          grep -Fxq 'ARCHIVE_PROOF_SHA256=b7c50aad63c213282ab5b7bc962b24b0461b3723f01e62a72eec11203702460c' "$OUTPUT_FILE"
+          grep -Fxq 'QUARANTINE_RUN_ID=42653002337' "$OUTPUT_FILE"
+          grep -Fxq 'QUARANTINE_RUN_ID_MATCH=YES' "$OUTPUT_FILE"
+          grep -Fxq 'TARGET_SHA_MATCH=YES' "$OUTPUT_FILE"
+          grep -Fxq 'AUDIT_RECORD_STATUS=VALID' "$OUTPUT_FILE"
+          grep -Fxq 'PRODUCTION_FILES_MUTATED=NO' "$OUTPUT_FILE"
+
+      - name: Remove runner-only SSH and diagnostic files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- \
+            "$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.key" \
+            "$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.hosts" \
+            "$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.out" \
+            "$RUNNER_TEMP/ecfc-quarantine-archive-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.err"
