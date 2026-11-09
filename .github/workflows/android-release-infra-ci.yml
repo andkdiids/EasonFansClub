@@ -10,10 +10,17 @@ on:
       - '.github/workflows/rollback-android-version-to-code31.yml'
       - '.github/workflows/rollback-android-version-to-code32.yml'
       - '.github/workflows/android-release-infra-ci.yml'
+      - '.github/workflows/issue-production-risk-acceptance.yml'
+      - '.github/release/production-risk-acceptance-v3.md'
       - 'scripts/android-rc11-cos-publish.*'
       - 'scripts/android-rc13-release.*'
       - 'scripts/android-rc13-multipart.*'
       - 'scripts/update-android-version-env.*'
+      - 'scripts/production-backup-gate.mjs'
+      - 'scripts/production-risk-attestation.mjs'
+      - 'tests/production-backup-gate.test.ts'
+      - 'tests/production-risk-attestation.test.mjs'
+      - 'tests/deploy-backup-gate.test.ts'
       - 'tests/android-rc11-publish-infrastructure.test.ts'
       - 'tests/android-rc13-release.test.mjs'
       - 'tests/android-rc13-multipart.test.mjs'
@@ -69,9 +76,16 @@ jobs:
           node --check scripts/android-rc13-release.mjs
           node --check scripts/android-rc13-multipart.mjs
           node --check scripts/update-android-version-env.mjs
+          node --check scripts/production-backup-gate.mjs
+          node --check scripts/production-risk-attestation.mjs
 
       - name: Run Android release, rollback, and Version API regression tests
         run: pnpm exec tsx --test tests/android-rc11-publish-infrastructure.test.ts tests/android-rc13-release.test.mjs tests/android-rc13-multipart.test.mjs tests/update-android-version-env.test.ts tests/app-version.test.ts
+
+      - name: Run schema v3 approval and one-time consumption tests
+        run: |
+          pnpm exec tsx --test tests/production-backup-gate.test.ts tests/deploy-backup-gate.test.ts
+          node --test tests/production-risk-attestation.test.mjs
 
       - name: Run moderation notification identity regression tests
         run: pnpm exec tsx --test tests/moderation-notification-identity.test.ts tests/post-review-notification.test.ts tests/notification-center-stability.test.ts tests/notification-checkin-and-actor-card.test.ts tests/notification-type-guard.test.ts tests/activity-targeted-notification.test.ts
@@ -86,8 +100,10 @@ jobs:
       - name: Lint changed release scripts and tests
         run: >-
           pnpm exec eslint scripts/android-rc11-cos-publish.mjs scripts/android-rc13-release.mjs scripts/android-rc13-multipart.mjs scripts/update-android-version-env.mjs tests/android-rc13-release.test.mjs tests/android-rc13-multipart.test.mjs
+          scripts/production-backup-gate.mjs scripts/production-risk-attestation.mjs
           scripts/android-rc11-cos-publish.d.mts scripts/update-android-version-env.d.mts
           tests/android-rc11-publish-infrastructure.test.ts tests/update-android-version-env.test.ts
+          tests/production-backup-gate.test.ts tests/deploy-backup-gate.test.ts tests/production-risk-attestation.test.mjs
 
       - name: Check patch whitespace
         env:

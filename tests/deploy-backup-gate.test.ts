@@ -98,6 +98,29 @@ test('risk acceptance (schemaVersion=3) is opt-in, asserts nothing verified, and
   assert.match(gate, /RISK_ACCEPTANCE_RELEASE_ID_MISMATCH/)
 })
 
+test('schema v3 is consumed once under the deployment lock and recovery never resets prior consumption', () => {
+  const workflow = read('.github/workflows/deploy.yml')
+  const gate = read('scripts/production-backup-gate.mjs')
+  const ignore = workflow.match(/paths-ignore:\s*([\s\S]*?)\n\s+workflow_dispatch:/)?.[1] ?? ''
+  const gateStart = workflow.indexOf('- name: Require a verified recoverable production database backup')
+  const deployStart = workflow.indexOf('- name: Deploy exact commit from server Git')
+  const gateBlock = workflow.slice(gateStart, deployStart)
+  assert.match(gateBlock, /--cli consume/)
+  assert.match(gateBlock, /flock -n 9/)
+  assert.match(gateBlock, /RISK_ACCEPTANCE_CONSUMED=YES/)
+  assert.match(gateBlock, /RISK_ACCEPTANCE_CONSUMED_RUN_ID=/)
+  assert.match(gateBlock, /RISK_ACCEPTANCE_CONSUMED_RUN_ATTEMPT=/)
+  assert.match(gate, /createExclusiveAtomic/)
+  assert.match(gate, /linkSync\(temporaryPath, filePath\)/)
+  assert.match(gate, /RISK_ACCEPTANCE_ALREADY_CONSUMED/)
+  assert.match(gate, /REAPPROVED_AFTER_CONSUMPTION/)
+  assert.match(gate, /Never roll back or delete the old proof\/consumption records automatically/)
+  assert.match(ignore, /scripts\/production-backup-gate\.mjs/)
+  assert.match(ignore, /tests\/production-backup-gate\.test\.ts/)
+  assert.match(ignore, /scripts\/production-risk-attestation\.mjs/)
+  assert.match(ignore, /tests\/production-risk-attestation\.test\.mjs/)
+})
+
 test('the read-only diagnostic never blocks on a not-yet-deployed candidate SHA', () => {
   const diagnostic = read('.github/workflows/production-migration-status.yml')
 

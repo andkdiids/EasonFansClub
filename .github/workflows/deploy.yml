@@ -41,6 +41,10 @@ on:
       - 'scripts/rollback-production-git.sh'
       - 'tests/android-rc11-publish-infrastructure.test.ts'
       - 'tests/rc11-apksigner-diagnostics.test.mjs'
+      - 'scripts/production-backup-gate.mjs'
+      - 'scripts/production-risk-attestation.mjs'
+      - 'tests/production-backup-gate.test.ts'
+      - 'tests/production-risk-attestation.test.mjs'
       - 'middleware.ts'
       - 'tests/deploy-skip-db-mode.test.ts'
       - 'tests/middleware-auth.test.ts'
@@ -352,6 +356,8 @@ jobs:
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           BACKUP_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
           DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_RUN_ID: ${{ github.run_id }}
+          DEPLOY_RUN_ATTEMPT: ${{ github.run_attempt }}
           RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
           RISK_ACCEPTANCE_MODE: ${{ inputs.risk_acceptance || 'none' }}
         run: |
@@ -387,9 +393,17 @@ jobs:
           esac
 
           remote_host="${SERVER_USER}@${SERVER_HOST}"
-          printf -v remote_command \
-            'node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q' \
-            "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE"
+          if [[ "${RISK_ACCEPTANCE_MODE}" == approved ]]; then
+            # Schema v3 is irreversibly consumed while holding the same host lock
+            # used by the deployment and signer. A run retry requires a new approval.
+            printf -v remote_command \
+              'test -f /home/apps/easonfansclub/.deploy.lock && test ! -L /home/apps/easonfansclub/.deploy.lock || exit 1; exec 9<>/home/apps/easonfansclub/.deploy.lock; flock -n 9 || { echo SERVER_DEPLOY_LOCK_BUSY; exit 1; }; node --input-type=module - --cli consume --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q --run-id %q --run-attempt %q' \
+              "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE" "$DEPLOY_RUN_ID" "$DEPLOY_RUN_ATTEMPT"
+          else
+            printf -v remote_command \
+              'node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q' \
+              "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE"
+          fi
 
           set +e
           gate_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s \
@@ -437,6 +451,12 @@ jobs:
             fi
             if printf '%s\n' "${gate_output}" | grep -Eq '^BACKUP_ID='; then
               echo "::error::Risk acceptance must not assert a backup id; fabrication is rejected."
+              exit 1
+            fi
+            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'RISK_ACCEPTANCE_CONSUMED=YES' ||
+               ! printf '%s\n' "${gate_output}" | grep -Fxq "RISK_ACCEPTANCE_CONSUMED_RUN_ID=${DEPLOY_RUN_ID}" ||
+               ! printf '%s\n' "${gate_output}" | grep -Fxq "RISK_ACCEPTANCE_CONSUMED_RUN_ATTEMPT=${DEPLOY_RUN_ATTEMPT}"; then
+              echo "::error::The schema v3 risk acceptance was not durably consumed by this exact workflow attempt."
               exit 1
             fi
           fi
