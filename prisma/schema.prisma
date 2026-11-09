@@ -1398,24 +1398,24 @@ model DailyMessage {
 }
 
 model DailyMessageComment {
-  id                        String                    @id @default(cuid())
+  id                        String                  @id @default(cuid())
   content                   String
   ipRegion                  String?
-  isDeleted                 Boolean                   @default(false)
-  moderationStatus          ContentModerationStatus   @default(NORMAL)
+  isDeleted                 Boolean                 @default(false)
+  moderationStatus          ContentModerationStatus @default(NORMAL)
   moderationReason          String?
-  matchedBannedWords        String?                   @db.Text
+  matchedBannedWords        String?                 @db.Text
   deletedAt                 DateTime?
-  createdAt                 DateTime                  @default(now())
-  updatedAt                 DateTime                  @updatedAt
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
   messageId                 String
   authorId                  String
   parentId                  String?
-  User                      User                      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  DailyMessage              DailyMessage              @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  DailyMessageComment       DailyMessageComment?      @relation("DailyMessageCommentToDailyMessageComment", fields: [parentId], references: [id], onDelete: NoAction)
-  other_DailyMessageComment DailyMessageComment[]     @relation("DailyMessageCommentToDailyMessageComment")
-  DailyMessageCommentLike   DailyMessageCommentLike[]
+  User                      User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  DailyMessage              DailyMessage            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  DailyMessageComment       DailyMessageComment?    @relation("DailyMessageCommentToDailyMessageComment", fields: [parentId], references: [id], onDelete: NoAction)
+  other_DailyMessageComment DailyMessageComment[]   @relation("DailyMessageCommentToDailyMessageComment")
+  DailyMessageCommentLike    DailyMessageCommentLike[]
 
   @@index([authorId, createdAt])
   @@index([messageId, createdAt])
@@ -1449,12 +1449,12 @@ model DailyMessageLike {
 // 每日留言评论点赞。通知中心「评论回复」快捷点赞直接复用此表，
 // 点赞目标是对方回复的那条评论（即被回复的父评论）。
 model DailyMessageCommentLike {
-  id                  String              @id @default(cuid())
-  createdAt           DateTime            @default(now())
-  commentId           String
-  userId              String
+  id           String              @id @default(cuid())
+  createdAt    DateTime            @default(now())
+  commentId    String
+  userId       String
   DailyMessageComment DailyMessageComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  User                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  User         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([commentId, userId])
   @@index([commentId, createdAt])
