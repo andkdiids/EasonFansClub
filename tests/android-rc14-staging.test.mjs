@@ -33,3 +33,14 @@ test('RC14 staging requires protected ingress, same-run pin, production and OIDC
     /verify-android-apk-signature\.mjs/, /EXPECTED_SHA256/, /EXPECTED_SIZE/]) assert.match(workflow, expected)
   assert.doesNotMatch(workflow, /continue-on-error:\s*true/)
 })
+
+test('draft metadata verification retains immutable code33 and signed candidate gates', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/configure-android-version.yml', import.meta.url), 'utf8')
+  const start = workflow.indexOf('      - name: Validate RC14 signer and the immutable code33 rollback source')
+  const end = workflow.indexOf('      - name: Preserve RC13 release baseline snapshot', start)
+  assert.ok(start >= 0 && end > start)
+  const step = workflow.slice(start, end)
+  for (const text of ['android-rc14-release.mjs', 'CODE33_ROLLBACK_OBJECT_KEY', 'verify-android-apk-signature.mjs', 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE33', 'CODE33_ROLLBACK_SOURCE_URL_MISMATCH', 'verify_apk "\${code33_source}" 33', 'verify_apk "\${rc14_apk}" 34']) assert.ok(step.includes(text), text)
+  const options = workflow.slice(workflow.indexOf('release_candidate:'), workflow.indexOf('apk_object_key:'))
+  assert.doesNotMatch(options, /- rc14/, 'RC14 must not be selectable before complete release and rollback gates are wired')
+})
