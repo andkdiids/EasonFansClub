@@ -196,7 +196,7 @@ export function createVersionedObjectKey(kind, { date = new Date(), runId, runAt
   }
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) throw new Error('OBJECT_TIMESTAMP_INVALID')
   const timestamp = date.toISOString().replace(/[-:]/g, '').replace('T', '-').replace(/\.\d{3}Z$/, '')
-  const filename = (kind === 'rc14' ? 'ECFC-1.0.0-beta.22-release-beta22-' : 'ECFC-1.0.0-beta.21-release-beta21-') + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
+  const filename = (kind === 'rc14' ? 'ECFC-1.0.0-beta.21-release-beta21-' : 'ECFC-1.0.0-beta.21-release-beta21-') + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
   return 'android/releases/' + filename
 }
 
@@ -209,7 +209,7 @@ export function validateVersionedObjectKey(key, kind, { runId, runAttempt } = {}
       : kind === 'rc13'
         ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc13-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
         : kind === 'rc14'
-          ? /^android\/releases\/ECFC-1\.0\.0-beta\.22-release-beta22-rc14-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
+          ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc14-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
       : null
   if (!pattern || !pattern.test(key)) throw new Error('COS_OBJECT_KEY_INVALID')
   if (runId !== undefined && !key.includes('-run' + runId + '-attempt' + runAttempt + '.apk')) {
