@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { win32 } from 'node:path'
 
 export const RC13_BASELINE = Object.freeze({
@@ -43,4 +44,12 @@ export function validateCode33VersionApi(body) {
     throw new Error('PRODUCTION_VERSION_API_NOT_EXPECTED_CODE33')
   }
   return body
+}
+
+/** Load the reviewed pin; an absent or incomplete pin is never publishable. */
+export function loadRc14Pin() {
+  let pin
+  try { pin = JSON.parse(readFileSync(new URL('./android-rc14-release.json', import.meta.url), 'utf8')) }
+  catch { throw new Error('RC14_ARTIFACT_PIN_NOT_READY') }
+  return validateRc14Pin(pin)
 }
