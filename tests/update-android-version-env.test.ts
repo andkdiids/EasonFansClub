@@ -901,3 +901,46 @@ test('RC14 metadata update requires a pinned artifact and exact code33 CAS', (t)
   assert.equal(dotenv.parse(readFileSync(envPath)).ANDROID_VERSION_CODE, '34')
   assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, expectedCurrentMetadata: expected33, rc14Pin: pin }), /RC14_CODE33_ROLLBACK_SOURCE_MISMATCH/)
 })
+
+test('RC14 to code33 rollback requires exact live CAS, pinned code34 and authentic backup', (t) => {
+  const code33: AndroidReleaseMetadata = {
+    ...metadata, ANDROID_VERSION_CODE: 33,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-203019-run41906858324-attempt1.apk',
+    ANDROID_APK_SHA256: '5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7',
+    ANDROID_APK_SIZE: 183811739,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '基于 RC11 候选源码恢复 Beta21 原有移动端功能', '恢复广场、好友动态、活动及处方相关入口与交互',
+      '恢复 EasMUSIC、「还有什么可以送给你」及勋章展览馆体验', '改进被访问用户主页背景显示与勋章展览馆交互',
+      '保留 Native Bearer、多账号隔离及反馈上传认证修复', 'Beta.21 RC13 内测版本',
+    ]),
+    ANDROID_PUBLISHED_AT: '2026-11-04T20:42:23.000Z',
+  }
+  const pin = { sha256: 'A'.repeat(64), size: 181000000 }
+  const code34: AndroidReleaseMetadata = {
+    ...code33, ANDROID_VERSION_CODE: 34,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc14-20261110-120000-run123-attempt1.apk',
+    ANDROID_APK_SHA256: pin.sha256, ANDROID_APK_SIZE: pin.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.21 RC14 内测版本']),
+    ANDROID_PUBLISHED_AT: '2026-11-10T12:00:00.000Z',
+  }
+  const { ANDROID_APK_COS_KEY: sourceKey, ...expected33 } = code33
+  const { ANDROID_APK_COS_KEY: currentKey, ...expected34 } = code34
+  const { appDir, envPath } = fixture(t, `DATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code33)}\n`)
+  const published = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, expectedCurrentMetadata: expected33, rc14Pin: pin })
+  const backupName = path.basename(published.backupPath)
+  const before = readFileSync(envPath, 'utf8')
+  const rollback = { appDir, expectedProductionSha, backupName, targetVersionCode: 33 as const,
+    expectedCurrentMetadata: expected34, expectedCurrentObjectKey: currentKey, rc14Pin: pin }
+  assert.throws(() => restoreAndroidVersionEnv({ ...rollback, expectedCurrentObjectKey: currentKey.replace('run123', 'run124') }), /ANDROID_BASELINE_MISMATCH:ANDROID_APK_COS_KEY/)
+  assert.throws(() => restoreAndroidVersionEnv({ ...rollback, expectedCurrentMetadata: { ...expected34, ANDROID_APK_SHA256: 'B'.repeat(64) } }), /ANDROID_BASELINE_MISMATCH/)
+  assert.throws(() => restoreAndroidVersionEnv({ ...rollback, rc14Pin: { ...pin, sha256: 'B'.repeat(64) } }), /INVALID_RC14_APK_SHA256/)
+  assert.equal(readFileSync(envPath, 'utf8'), before)
+  restoreAndroidVersionEnv(rollback)
+  const restored = dotenv.parse(readFileSync(envPath))
+  assert.equal(restored.ANDROID_VERSION_CODE, '33')
+  assert.equal(restored.ANDROID_APK_COS_KEY, sourceKey)
+  assert.equal(restored.ANDROID_APK_SHA256, code33.ANDROID_APK_SHA256)
+  assert.equal(restored.ANDROID_RELEASE_NOTES, code33.ANDROID_RELEASE_NOTES)
+  assert.equal(restored.ANDROID_PUBLISHED_AT, code33.ANDROID_PUBLISHED_AT)
+  assert.throws(() => restoreAndroidVersionEnv(rollback), /ANDROID_BASELINE_MISMATCH/)
+})
