@@ -92,7 +92,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   assert.equal(paths.length, 35, 'all other main diagnostic/release-policy files remain unchanged')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
   const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
-  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), '9468d781dc997db14b80859bb6310aa7e0841e9be87c934a4a2c75d082ff053d', 'reviewed Android staging workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), 'a544e2d4f069242e94979f65a6cd9fcc155439b07769c8a7cd43e3f4ed154247', 'reviewed Android staging workflow must not change without updating this guard')
 })
 
 test('Ecenter conflict retains GET/PATCH request-auth plus generic identity regression guard', () => {
