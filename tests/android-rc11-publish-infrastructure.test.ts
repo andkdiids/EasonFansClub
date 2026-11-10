@@ -587,7 +587,7 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
   assert.match(workflowText, /RC11-20261102-152136\.apk/)
   assert.match(workflowText, /verify --print-certs/)
   const configureWorkflowText = read('.github/workflows/configure-android-version.yml')
-  assert.equal((configureWorkflowText.match(/verify-android-apk-signature\.mjs/g) || []).length, 5)
+  assert.equal((configureWorkflowText.match(/verify-android-apk-signature\.mjs/g) || []).length, 6)
   assert.doesNotMatch(configureWorkflowText, /certificate SHA-256 digest.*awk/)
   assert.match(workflowText, /aapt dump badging/)
 })
