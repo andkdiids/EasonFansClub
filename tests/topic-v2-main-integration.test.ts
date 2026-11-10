@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { before, test } from 'node:test'
@@ -90,6 +91,8 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
     .trim().split('\n').filter(path => !intentionallyReviewedReleaseControlPaths.has(path))
   assert.equal(paths.length, 35, 'all other main diagnostic/release-policy files remain unchanged')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
+  const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
+  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), '9468d781dc997db14b80859bb6310aa7e0841e9be87c934a4a2c75d082ff053d', 'reviewed Android staging workflow must not change without updating this guard')
 })
 
 test('Ecenter conflict retains GET/PATCH request-auth plus generic identity regression guard', () => {
