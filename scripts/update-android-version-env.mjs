@@ -343,9 +343,31 @@ function validateCurrentRc12(metadata) {
   requireThat(Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT || '')), 'ROLLBACK_CURRENT_PUBLISHED_AT_INVALID')
 }
 
-export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode, code30BackupObjectKey, expectedCurrentMetadata, expectedCurrentObjectKey, rc13Pin, now = new Date() }) {
+function validateCode33RollbackBaseline(metadata) {
+  requireThat(metadata.ANDROID_VERSION_NAME === '1.0.0-beta.21', 'ROLLBACK_SOURCE_VERSION_NAME_MISMATCH')
+  requireThat(metadata.ANDROID_VERSION_CODE === '33', 'ROLLBACK_SOURCE_VERSION_CODE_MISMATCH')
+  requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === '19', 'ROLLBACK_SOURCE_MINIMUM_VERSION_MISMATCH')
+  requireThat(metadata.ANDROID_FORCE_UPDATE === 'false', 'ROLLBACK_SOURCE_FORCE_UPDATE_MISMATCH')
+  requireThat(metadata.ANDROID_APK_SHA256?.toUpperCase() === RC13_APK_SHA256, 'ROLLBACK_SOURCE_APK_SHA256_MISMATCH')
+  requireThat(metadata.ANDROID_APK_SIZE === String(RC13_APK_SIZE), 'ROLLBACK_SOURCE_APK_SIZE_MISMATCH')
+  requireThat(metadata.ANDROID_APK_COS_KEY === CODE33_ROLLBACK_OBJECT_KEY, 'ROLLBACK_SOURCE_OBJECT_KEY_MISMATCH')
+  let notes
+  try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('ROLLBACK_SOURCE_RELEASE_NOTES_INVALID') }
+  const expectedNotes = [
+    '基于 RC11 候选源码恢复 Beta21 原有移动端功能',
+    '恢复广场、好友动态、活动及处方相关入口与交互',
+    '恢复 EasMUSIC、「还有什么可以送给你」及勋章展览馆体验',
+    '改进被访问用户主页背景显示与勋章展览馆交互',
+    '保留 Native Bearer、多账号隔离及反馈上传认证修复',
+    'Beta.21 RC13 内测版本',
+  ]
+  requireThat(JSON.stringify(notes) === JSON.stringify(expectedNotes), 'ROLLBACK_SOURCE_RELEASE_NOTES_INVALID')
+  requireThat(Date.parse(metadata.ANDROID_PUBLISHED_AT || '') === Date.parse('2026-11-04T20:42:23.000Z'), 'ROLLBACK_SOURCE_PUBLISHED_AT_INVALID')
+}
+
+export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode, code30BackupObjectKey, expectedCurrentMetadata, expectedCurrentObjectKey, rc13Pin, rc14Pin, now = new Date() }) {
   const rollbackVersionCode = targetVersionCode
-  requireThat(rollbackVersionCode === 30 || rollbackVersionCode === 31 || rollbackVersionCode === 32, 'INVALID_ROLLBACK_TARGET')
+  requireThat(rollbackVersionCode === 30 || rollbackVersionCode === 31 || rollbackVersionCode === 32 || rollbackVersionCode === 33, 'INVALID_ROLLBACK_TARGET')
   requireThat(rollbackVersionCode === 30
     ? typeof code30BackupObjectKey === 'string'
     : !code30BackupObjectKey, 'INVALID_ROLLBACK_TARGET')
@@ -369,7 +391,22 @@ export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backup
   requireThat(envStat.isFile() && !envStat.isSymbolicLink() && envStat.size > 0, 'UNSAFE_ENV_FILE')
   const currentContents = readFileSync(envPath)
   const currentMetadata = parseEnvMetadata(currentContents.toString('utf8'), 'ROLLBACK_CURRENT_METADATA_MISSING')
-  if (rollbackVersionCode === 32) {
+  if (rollbackVersionCode === 33) {
+    requireThat(expectedCurrentMetadata && expectedCurrentMetadata.ANDROID_VERSION_CODE === 34, 'RC14_ROLLBACK_CAS_BASELINE_REQUIRED')
+    requireThat(typeof expectedCurrentObjectKey === 'string'
+      && /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc14-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/.test(expectedCurrentObjectKey), 'RC14_ROLLBACK_OBJECT_KEY_INVALID')
+    validateExpectedCurrentMetadata(currentContents.toString('utf8'), expectedCurrentMetadata)
+    requireThat(currentMetadata.ANDROID_APK_COS_KEY === expectedCurrentObjectKey, 'ANDROID_BASELINE_MISMATCH:ANDROID_APK_COS_KEY')
+    const candidate = {
+      ...currentMetadata,
+      ANDROID_VERSION_CODE: Number(currentMetadata.ANDROID_VERSION_CODE),
+      ANDROID_MINIMUM_VERSION_CODE: Number(currentMetadata.ANDROID_MINIMUM_VERSION_CODE),
+      ANDROID_FORCE_UPDATE: currentMetadata.ANDROID_FORCE_UPDATE === 'true' ? true : currentMetadata.ANDROID_FORCE_UPDATE === 'false' ? false : null,
+      ANDROID_APK_SIZE: Number(currentMetadata.ANDROID_APK_SIZE),
+    }
+    validateMetadata(candidate, undefined, rc14Pin)
+    requireThat(candidate.ANDROID_VERSION_CODE === 34, 'ROLLBACK_CURRENT_VERSION_CODE_MISMATCH')
+  } else if (rollbackVersionCode === 32) {
     requireThat(expectedCurrentMetadata && expectedCurrentMetadata.ANDROID_VERSION_CODE === 33, 'RC13_ROLLBACK_CAS_BASELINE_REQUIRED')
     requireThat(typeof expectedCurrentObjectKey === 'string'
       && /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc13-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/.test(expectedCurrentObjectKey), 'RC13_ROLLBACK_OBJECT_KEY_INVALID')
@@ -399,7 +436,8 @@ export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backup
     requireThat(backupStat.uid === envStat.uid, 'ROLLBACK_BACKUP_OWNER_MISMATCH')
   }
   const originalMetadata = parseEnvMetadata(readFileSync(backupPath).toString('utf8'), 'ROLLBACK_SOURCE_METADATA_MISSING')
-  if (rollbackVersionCode === 32) {
+  if (rollbackVersionCode === 33) validateCode33RollbackBaseline(originalMetadata)
+  else if (rollbackVersionCode === 32) {
     validateCurrentRc12(originalMetadata)
     requireThat(originalMetadata.ANDROID_APK_COS_KEY === CODE32_ROLLBACK_OBJECT_KEY, 'ROLLBACK_SOURCE_OBJECT_KEY_MISMATCH')
   } else if (rollbackVersionCode === 31) validateCode31RollbackBaseline(originalMetadata)
@@ -411,8 +449,8 @@ export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backup
   restoredMetadata.ANDROID_MINIMUM_VERSION_CODE = 19
   restoredMetadata.ANDROID_FORCE_UPDATE = false
   restoredMetadata.ANDROID_APK_COS_KEY = rollbackVersionCode === 30 ? code30BackupObjectKey : originalMetadata.ANDROID_APK_COS_KEY
-  restoredMetadata.ANDROID_APK_SHA256 = rollbackVersionCode === 32 ? RC12_APK_SHA256 : rollbackVersionCode === 31 ? RC11_APK_SHA256 : CODE30_APK_SHA256
-  restoredMetadata.ANDROID_APK_SIZE = rollbackVersionCode === 32 ? RC12_APK_SIZE : rollbackVersionCode === 31 ? RC11_APK_SIZE : CODE30_APK_SIZE
+  restoredMetadata.ANDROID_APK_SHA256 = rollbackVersionCode === 33 ? RC13_APK_SHA256 : rollbackVersionCode === 32 ? RC12_APK_SHA256 : rollbackVersionCode === 31 ? RC11_APK_SHA256 : CODE30_APK_SHA256
+  restoredMetadata.ANDROID_APK_SIZE = rollbackVersionCode === 33 ? RC13_APK_SIZE : rollbackVersionCode === 32 ? RC12_APK_SIZE : rollbackVersionCode === 31 ? RC11_APK_SIZE : CODE30_APK_SIZE
   restoredMetadata.ANDROID_RELEASE_NOTES = originalMetadata.ANDROID_RELEASE_NOTES
   restoredMetadata.ANDROID_PUBLISHED_AT = originalMetadata.ANDROID_PUBLISHED_AT
 
@@ -435,6 +473,20 @@ function main() {
   requireThat(process.env.APP_DIR === PRODUCTION_APP_DIR, 'UNEXPECTED_PRODUCTION_APP_DIR')
   const expectedProductionSha = process.env.EXPECTED_PRODUCTION_SHA ?? ''
   const operation = process.env.ANDROID_RELEASE_OPERATION ?? 'publish'
+  if (operation === 'rollback-code33') {
+    const encoded = process.env.ANDROID_RELEASE_ROLLBACK_B64 ?? ''
+    requireThat(/^[A-Za-z0-9+/]+={0,2}$/.test(encoded), 'INVALID_ROLLBACK_METADATA_ENCODING')
+    let rollback
+    try { rollback = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) } catch { throw new Error('INVALID_ROLLBACK_METADATA_ENCODING') }
+    const result = restoreAndroidVersionEnv({ appDir: PRODUCTION_APP_DIR, expectedProductionSha,
+      backupName: rollback.backupName, targetVersionCode: 33,
+      expectedCurrentMetadata: rollback.expectedCurrentMetadata, expectedCurrentObjectKey: rollback.expectedCurrentObjectKey, rc14Pin: rollback.rc14Pin })
+    console.log('PRODUCTION_SHA_VERIFIED=' + expectedProductionSha)
+    console.log('ANDROID_METADATA_KEYS_RESTORED=' + result.changedKeys.length)
+    console.log('CODE34_ENV_BACKUP_CREATED=' + path.basename(result.backupPath))
+    console.log('ANDROID_METADATA_ROLLBACK_TO_CODE33_ATOMIC=YES')
+    return
+  }
   if (operation === 'rollback-code32') {
     const encoded = process.env.ANDROID_RELEASE_ROLLBACK_B64 ?? ''
     requireThat(/^[A-Za-z0-9+/]+={0,2}$/.test(encoded), 'INVALID_ROLLBACK_METADATA_ENCODING')
