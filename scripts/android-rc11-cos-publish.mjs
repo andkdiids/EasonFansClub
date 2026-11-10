@@ -748,7 +748,7 @@ export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = conso
 export async function verifyCosReadOnly({ env = process.env, fetchImpl = fetch, cosFactory = createCosClient, log = console.log, now = Date.now } = {}) {
   const { cos } = await getCos(env, fetchImpl, { cosFactory, log, now })
   log(`CAM_ROLE=ASSUMED COS_BUCKET=${env.TENCENT_COS_BUCKET} COS_REGION=${env.TENCENT_COS_REGION}`)
-  return verifyCosReadOnlyAccess({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, log })
+  return verifyCosReadOnlyAccess({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, log, fetchImpl })
 }
 
 function runIdentifiers(env) {
