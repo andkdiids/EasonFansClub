@@ -162,6 +162,10 @@ test('read-only gate exchanges OIDC for a two-hour STS lease and never logs cred
     const url = String(input)
     calls.push(url)
     if (url.startsWith('https://pipelines.actions.githubusercontent.com/')) return new Response(JSON.stringify({ value: jwt }), { status: 200 })
+    if (url.startsWith('https://media.ecfc.fans/media/')) {
+      assert.equal(init.headers.Range, 'bytes=0-0')
+      return { ok: true, status: 206, url, headers: new Headers({ 'content-range': 'bytes 0-0/180263015', 'content-length': '1' }), body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([0])); controller.close() } }) }
+    }
     assert.equal(url, 'https://sts.tencentcloudapi.com')
     assert.equal(JSON.parse(String(init.body)).DurationSeconds, 7200)
     return new Response(JSON.stringify({ Response: {
@@ -175,14 +179,14 @@ test('read-only gate exchanges OIDC for a two-hour STS lease and never logs cred
     return {
       getBucketVersioning: async () => ({ VersioningConfiguration: {} }),
       headObject: async () => ({ statusCode: 200, headers: { 'Content-Length': '180263015' } }),
-      getObject: async ({ Headers }) => Headers?.Range === 'bytes=0-0' ? { statusCode: 206, Body: Buffer.from([0]) } : { statusCode: 200, Body: Buffer.alloc(0) },
     }
   }
   const result = await verifyCosReadOnly({ env, fetchImpl, cosFactory, log: (line) => logs.push(line), now: () => 1_800_000_000_000 })
   assert.equal(result.versioning, 'DISABLED')
-  assert.equal(calls.length, 2)
+  assert.equal(calls.length, 3)
   assert.ok(calls[0].startsWith('https://pipelines.actions.githubusercontent.com/request?audience=sts.tencentcloudapi.com'))
   assert.equal(calls[1], 'https://sts.tencentcloudapi.com')
+  assert.ok(calls[2].startsWith('https://media.ecfc.fans/media/'))
   assert.match(logs.join('\n'), /TENCENT_STS_EXPIRED_TIME=2030-03-17T17:46:40\.000Z/)
   assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
   assert.match(logs.join('\n'), /CAM_ROLE=ASSUMED COS_BUCKET=ecfc-1306412725 COS_REGION=ap-guangzhou/)

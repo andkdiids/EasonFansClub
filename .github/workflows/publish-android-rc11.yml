@@ -16,6 +16,7 @@ on:
           - rc11
           - rc12
           - rc13
+          - rc14
         default: rc11
 
 permissions:
@@ -161,6 +162,7 @@ jobs:
           if ($branch.commit.sha -ne $env:EXPECTED_MAIN_SHA) { throw 'MAIN_BRANCH_MOVED_OR_SHA_INVALID' }
 
           $releaseCandidate = $env:RELEASE_CANDIDATE
+          $expectedVersionName = '1.0.0-beta.21'
           if ($releaseCandidate -eq 'rc11') {
             $sourcePath = 'E:\Eason\build-cache\ECFC-Release-Artifacts\Beta21-Auth-Blockers\ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
             $expectedCode = '31'
@@ -175,6 +177,15 @@ jobs:
             $env:EXPECTED_SHA256 = $pin.sha256
             $env:EXPECTED_SIZE = [string]$pin.size
             $expectedCode = '33'
+          } elseif ($releaseCandidate -eq 'rc14') {
+            & node (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.mjs') validate
+            if ($LASTEXITCODE -ne 0) { throw 'RC14_ARTIFACT_PIN_NOT_READY' }
+            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.json') -Raw | ConvertFrom-Json
+            $sourcePath = $pin.sourcePath
+            $env:EXPECTED_SHA256 = $pin.sha256
+            $env:EXPECTED_SIZE = [string]$pin.size
+            $expectedCode = '34'
+            $expectedVersionName = '1.0.0-beta.21'
           } else { throw 'RELEASE_CANDIDATE_INVALID' }
           if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'RC11_APK_SOURCE_MISSING' }
           $source = Get-Item -LiteralPath $sourcePath
@@ -204,11 +215,11 @@ jobs:
             }
           }
           if (-not $apksigner -or -not $aapt) { throw 'ANDROID_APK_VALIDATION_TOOLS_UNAVAILABLE' }
-          $signatureOutput = if ($releaseCandidate -eq 'rc13') {
+          $signatureOutput = if ($releaseCandidate -in @('rc13', 'rc14')) {
             & $apksigner verify --verbose --print-certs $sourcePath 2>&1
           } else { & $apksigner verify --print-certs $sourcePath 2>&1 }
           if ($LASTEXITCODE -ne 0) { throw 'RC11_APK_SIGNATURE_INVALID' }
-          if ($releaseCandidate -eq 'rc13') {
+          if ($releaseCandidate -in @('rc13', 'rc14')) {
             $signatureFile = Join-Path $env:RUNNER_TEMP "rc13-apksigner-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.txt"
             [IO.File]::WriteAllText($signatureFile, [string]::Join("`n", $signatureOutput), [Text.UTF8Encoding]::new($false))
             $signer = '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
@@ -223,7 +234,8 @@ jobs:
           $badging = & $aapt dump badging $sourcePath 2>&1
           if ($LASTEXITCODE -ne 0) { throw 'RC11_APK_METADATA_UNAVAILABLE' }
           $badgingText = [string]::Join("`n", $badging)
-          $packageMatches = $badgingText -match "package: name='fans\.ecfc\.app' versionCode='$expectedCode' versionName='1\.0\.0-beta\.21'"
+          $escapedVersionName = [regex]::Escape($expectedVersionName)
+          $packageMatches = $badgingText -match "package: name='fans\.ecfc\.app' versionCode='$expectedCode' versionName='$escapedVersionName'"
           $minSdkMatches = $badgingText -match "sdkVersion:'24'"
           $targetSdkMatches = $badgingText -match "targetSdkVersion:'36'"
           if (-not $packageMatches -or -not $minSdkMatches -or -not $targetSdkMatches) {
@@ -247,7 +259,7 @@ jobs:
             size = $source.Length
             application_id = 'fans.ecfc.app'
             version_code = [int]$expectedCode
-            version_name = '1.0.0-beta.21'
+            version_name = $expectedVersionName
             signer_sha256 = $signer
             run_id = $env:GITHUB_RUN_ID
             run_attempt = $env:GITHUB_RUN_ATTEMPT
@@ -291,6 +303,8 @@ jobs:
       rc12_cdn_url: ${{ steps.rc12.outputs.RC12_CDN_URL }}
       rc13_object_key: ${{ steps.rc13.outputs.RC13_OBJECT_KEY }}
       rc13_cdn_url: ${{ steps.rc13.outputs.RC13_CDN_URL }}
+      rc14_object_key: ${{ steps.rc14.outputs.RC14_OBJECT_KEY }}
+      rc14_cdn_url: ${{ steps.rc14.outputs.RC14_CDN_URL }}
     steps:
       - name: Check out the exact protected-main workflow revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -380,12 +394,37 @@ jobs:
           TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
         run: node scripts/android-rc11-cos-publish.mjs publish-rc13
 
+      - name: Upload the immutable RC14 candidate and verify CDN readback
+        if: inputs.release_candidate == 'rc14'
+        id: rc14
+        env:
+          RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs publish-rc14
+
       - name: Preserve the verified code32 Version API baseline
         if: inputs.release_candidate == 'rc13'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-beta21-rc13-version-api-code32-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/android-version-api-code32-baseline.json
+          if-no-files-found: error
+          retention-days: 90
+
+
+
+      - name: Preserve the verified code33 Version API baseline
+        if: inputs.release_candidate == 'rc14'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta21-rc14-version-api-code33-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-version-api-code33-baseline.json
           if-no-files-found: error
           retention-days: 90
 

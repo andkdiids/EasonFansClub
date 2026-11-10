@@ -35,6 +35,14 @@ on:
       - 'scripts/assert-native-bearer-rollback-result.mjs'
       - 'scripts/assert-release-main.d.mts'
       - 'scripts/assert-release-main.mjs'
+      # RC14 scheduled-post route and release-control files require
+      # explicit skip-db/app-only dispatch; never start default full-DB push.
+      - 'app/api/posts/*/schedule/route.ts'
+      - 'scripts/android-rc14-release.json'
+      - 'scripts/android-rc14-release.mjs'
+      - 'tests/android-rc14-release.test.mjs'
+      - 'tests/android-rc14-staging.test.mjs'
+      - 'tests/post-scheduling.test.ts'
       # RC11 signer verification is release infrastructure, not app runtime.
       - 'scripts/verify-android-apk-signature.d.mts'
       - 'scripts/verify-android-apk-signature.mjs'

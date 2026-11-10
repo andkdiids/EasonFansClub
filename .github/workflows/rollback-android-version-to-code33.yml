@@ -1,0 +1,253 @@
+name: Roll back Android Version API to verified code33
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_production_sha:
+        description: Exact currently deployed production SHA
+        required: true
+        type: string
+      env_backup_name:
+        description: ENV_BACKUP_CREATED name recorded by the RC14 configure workflow
+        required: true
+        type: string
+      expected_rc14_object_key:
+        description: Exact RC14 object key recorded by the completed release run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main'
+    name: Restore only the verified Android code33 metadata
+    runs-on: ubuntu-22.04
+    environment: Production
+    timeout-minutes: 45
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Require protected current main before Production rollback
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
+
+      - name: Verify live RC14 and the original immutable code33 release
+        env:
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          ENV_BACKUP_NAME: ${{ inputs.env_backup_name }}
+          EXPECTED_RC14_OBJECT_KEY: ${{ inputs.expected_rc14_object_key }}
+          CODE33_ROLLBACK_OBJECT_KEY: android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-203019-run41906858324-attempt1.apk
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_PRODUCTION_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo 'EXPECTED_PRODUCTION_SHA_INVALID'; exit 1; }
+          [[ "${ENV_BACKUP_NAME}" =~ ^android-release-[A-Za-z0-9T.-]+-[0-9a-f-]{36}\.env$ ]] || { echo 'ENV_BACKUP_NAME_INVALID'; exit 1; }
+          [[ "${EXPECTED_RC14_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.21-release-beta21-rc14-[0-9]{8}-[0-9]{6}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'RC14_ROLLBACK_OBJECT_KEY_INVALID'; exit 1; }
+          [[ "${CODE33_ROLLBACK_OBJECT_KEY}" == 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-203019-run41906858324-attempt1.apk' ]] || { echo 'CODE33_ROLLBACK_SOURCE_INVALID'; exit 1; }
+
+          node scripts/android-rc14-release.mjs validate
+          rc14_sha="$(jq -r '.sha256' scripts/android-rc14-release.json)"
+          rc14_size="$(jq -r '.size' scripts/android-rc14-release.json)"
+          code33_sha='5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7'
+          code33_size='183811739'
+          api_json="${RUNNER_TEMP}/android-version-api-before-rollback.json"
+          curl --fail --silent --show-error --location --max-time 30 \
+            'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          jq -e --arg sha "${rc14_sha}" --argjson size "${rc14_size}" --slurpfile pin scripts/android-rc14-release.json '
+            .platform == "android" and .versionName == "1.0.0-beta.21" and .versionCode == 34
+            and .minimumVersionCode == 19 and .forceUpdate == false
+            and (.apkSha256 | ascii_upcase) == $sha and .size == $size
+            and .downloadUrl == "https://ecfc.fans/api/app/download/android"
+            and .releaseNotes == $pin[0].releaseNotes and (.publishedAt | type == "string")
+          ' "${api_json}" >/dev/null || { echo 'PRODUCTION_VERSION_API_NOT_RC14'; exit 1; }
+          live_redirect="$(curl --fail --silent --show-error --max-time 30 --output /dev/null --write-out '%{redirect_url}' 'https://ecfc.fans/api/app/download/android')"
+          [[ "${live_redirect}" == "https://media.ecfc.fans/media/${EXPECTED_RC14_OBJECT_KEY}" ]] || { echo 'RC14_LIVE_OBJECT_MISMATCH'; exit 1; }
+
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" && -x "${aapt}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+          rollback_apk="${RUNNER_TEMP}/ecfc-beta21-code33-rollback.apk"
+          curl --fail --silent --show-error --location --max-time 2400 \
+            --output "${rollback_apk}" "https://media.ecfc.fans/media/${CODE33_ROLLBACK_OBJECT_KEY}"
+          [[ "$(stat -c '%s' "${rollback_apk}")" == "${code33_size}" ]] || { echo 'CODE33_ROLLBACK_SOURCE_SIZE_MISMATCH'; exit 1; }
+          [[ "$(sha256sum "${rollback_apk}" | awk '{print toupper($1)}')" == "${code33_sha}" ]] || { echo 'CODE33_ROLLBACK_SOURCE_SHA256_MISMATCH'; exit 1; }
+          node scripts/verify-android-apk-signature.mjs "${apksigner}" "${rollback_apk}" '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          badging="$("${aapt}" dump badging "${rollback_apk}" | head -n 3)"
+          [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='33' versionName='1.0.0-beta.21'"* ]] || { echo 'CODE33_ROLLBACK_SOURCE_PACKAGE_VERSION_MISMATCH'; exit 1; }
+          [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo 'CODE33_ROLLBACK_SOURCE_SDK_METADATA_MISMATCH'; exit 1; }
+          cp "${api_json}" "${RUNNER_TEMP}/android-version-api-before-rollback-artifact.json"
+          echo 'PRODUCTION_VERSION_API_CODE34=VERIFIED'
+          echo 'CODE33_ORIGINAL_ROLLBACK_SOURCE_VERIFIED=YES'
+
+      - name: Preserve the pre-rollback Version API response
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta21-rollback-before
+          path: ${{ runner.temp }}/android-version-api-before-rollback-artifact.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Validate pinned production SSH settings
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOST_KEY_SHA256: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          for name in SERVER_HOST SERVER_USER SERVER_PORT SERVER_SSH_KEY PINNED_HOST_KEY_SHA256 EXPECTED_PRODUCTION_SHA; do
+            [[ -n "${!name:-}" ]] || { echo "::error::Required protected setting ${name} is missing."; exit 1; }
+          done
+          [[ "${SERVER_HOST}" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "${SERVER_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+          [[ "${SERVER_PORT}" =~ ^[0-9]{1,5}$ ]]
+          (( 10#${SERVER_PORT} >= 1 && 10#${SERVER_PORT} <= 65535 ))
+          [[ "${PINNED_HOST_KEY_SHA256}" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]]
+          [[ "${EXPECTED_PRODUCTION_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${SERVER_SSH_KEY}" | tr -d '\r' > "${RUNNER_TEMP}/easonfansclub_deploy_key"
+          chmod 600 "${RUNNER_TEMP}/easonfansclub_deploy_key"
+          scan_file="${RUNNER_TEMP}/host-scan"
+          verified_file="${RUNNER_TEMP}/known-hosts"
+          key_line_file="${RUNNER_TEMP}/key-line"
+          timeout 30s ssh-keyscan -T 15 -p "${SERVER_PORT}" -H "${SERVER_HOST}" > "${scan_file}" 2>/dev/null
+          : > "${verified_file}"
+          while IFS= read -r entry; do
+            [[ -n "${entry}" && "${entry}" != \#* ]] || continue
+            printf '%s\n' "${entry}" > "${key_line_file}"
+            fingerprint="$(ssh-keygen -lf "${key_line_file}" -E sha256 | awk 'NR == 1 {print $2}')"
+            if [[ "${fingerprint}" == "${PINNED_HOST_KEY_SHA256}" ]]; then printf '%s\n' "${entry}" >> "${verified_file}"; fi
+          done < "${scan_file}"
+          [[ -s "${verified_file}" ]] || { echo '::error::Production SSH host key fingerprint mismatch.'; exit 1; }
+          ssh-keygen -lf "${verified_file}" -E sha256 | awk '{print $2}' | grep -Fx -- "${PINNED_HOST_KEY_SHA256}" >/dev/null
+          install -m 600 "${verified_file}" "${HOME}/.ssh/known_hosts"
+          echo 'PRODUCTION_SSH_HOST_PIN=VERIFIED'
+
+      - name: Recheck Version API and restore protected code33 metadata
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          ENV_BACKUP_NAME: ${{ inputs.env_backup_name }}
+          EXPECTED_RC14_OBJECT_KEY: ${{ inputs.expected_rc14_object_key }}
+        run: |
+          set -euo pipefail
+          health_file="${RUNNER_TEMP}/android-code33-rollback-health-before.json"
+          curl --fail --silent --show-error --max-time 30 'https://ecfc.fans/api/health/live' --output "${health_file}"
+          jq -e --arg sha "${EXPECTED_PRODUCTION_SHA}" '.ok == true and .release == $sha' "${health_file}" >/dev/null || { echo 'PRODUCTION_HEALTH_MISMATCH'; exit 1; }
+          current_file="${RUNNER_TEMP}/android-version-api-before-rollback-final-gate.json"
+          curl --fail --silent --show-error --location --max-time 30 \
+            'https://ecfc.fans/api/app/version?platform=android' --output "${current_file}"
+          diff -u \
+            <(jq -S . "${RUNNER_TEMP}/android-version-api-before-rollback.json") \
+            <(jq -S . "${current_file}") >/dev/null || { echo 'VERSION_API_CHANGED_BEFORE_ROLLBACK'; exit 1; }
+          live_redirect="$(curl --fail --silent --show-error --max-time 30 --output /dev/null --write-out '%{redirect_url}' 'https://ecfc.fans/api/app/download/android')"
+          [[ "${live_redirect}" == "https://media.ecfc.fans/media/${EXPECTED_RC14_OBJECT_KEY}" ]] || { echo 'RC14_LIVE_OBJECT_MISMATCH'; exit 1; }
+          rollback_json="$(jq -cn --arg backup "${ENV_BACKUP_NAME}" --arg objectKey "${EXPECTED_RC14_OBJECT_KEY}" --slurpfile api "${current_file}" --slurpfile pin scripts/android-rc14-release.json '{backupName:$backup,expectedCurrentObjectKey:$objectKey,rc14Pin:($pin[0]|{sha256,size}),expectedCurrentMetadata:($api[0]|{ANDROID_VERSION_NAME:.versionName,ANDROID_VERSION_CODE:.versionCode,ANDROID_MINIMUM_VERSION_CODE:.minimumVersionCode,ANDROID_FORCE_UPDATE:.forceUpdate,ANDROID_APK_SHA256:(.apkSha256|ascii_upcase),ANDROID_APK_SIZE:.size,ANDROID_RELEASE_NOTES:.releaseNotes,ANDROID_PUBLISHED_AT:.publishedAt})}')"
+          rollback_b64="$(printf '%s' "${rollback_json}" | base64 -w0)"
+          [[ "${rollback_b64}" =~ ^[A-Za-z0-9+/]+=*$ ]] || { echo 'ROLLBACK_METADATA_ENCODING_INVALID'; exit 1; }
+          remote_host="${SERVER_USER}@${SERVER_HOST}"
+          printf -v remote_command 'flock -n %q env APP_DIR=%q EXPECTED_PRODUCTION_SHA=%q ANDROID_RELEASE_OPERATION=rollback-code33 ANDROID_RELEASE_ROLLBACK_B64=%q node --input-type=module -' \
+            '/home/apps/easonfansclub/.deploy.lock' '/home/apps/easonfansclub' "${EXPECTED_PRODUCTION_SHA}" "${rollback_b64}"
+          ssh_options=(
+            -T -p "${SERVER_PORT}" -i "${RUNNER_TEMP}/easonfansclub_deploy_key"
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10
+          )
+          timeout --foreground --signal=TERM --kill-after=10s 90s \
+            ssh "${ssh_options[@]}" "${remote_host}" "${remote_command}" \
+            < scripts/update-android-version-env.mjs
+
+      - name: Reload only the web process and verify code33 restored
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          remote_host="${SERVER_USER}@${SERVER_HOST}"
+          printf -v remote_command 'flock -n %q bash -s -- %q %q' \
+            '/home/apps/easonfansclub/.deploy.lock' '/home/apps/easonfansclub' "${EXPECTED_PRODUCTION_SHA}"
+          ssh_options=(
+            -T -p "${SERVER_PORT}" -i "${RUNNER_TEMP}/easonfansclub_deploy_key"
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10
+          )
+          timeout --foreground --signal=TERM --kill-after=10s 180s \
+            ssh "${ssh_options[@]}" "${remote_host}" "${remote_command}" <<'REMOTE'
+          set -euo pipefail
+          APP_DIR="$1"
+          EXPECTED_SHA="$2"
+          [[ "${APP_DIR}" == /home/apps/easonfansclub ]]
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          current_target="$(readlink -f -- "${APP_DIR}/current")"
+          case "${current_target}" in "${APP_DIR}/releases/"*) ;; *) echo 'PRODUCTION_CURRENT_OUTSIDE_RELEASES'; exit 1 ;; esac
+          [[ "$(cat "${current_target}/.deployed-sha")" == "${EXPECTED_SHA}" ]] || { echo 'PRODUCTION_SHA_MISMATCH'; exit 1; }
+          shared_env="$(readlink -f -- "${APP_DIR}/shared/.env")"
+          release_env="$(readlink -f -- "${current_target}/.env")"
+          [[ "${shared_env}" == "${release_env}" ]] || { echo 'PRODUCTION_ENV_LINK_MISMATCH'; exit 1; }
+          pm2 reload easonfansclub --update-env
+          node - <<'NODE'
+          (async () => {
+            const response = await fetch('http://127.0.0.1:3000/api/app/version?platform=android', { signal: AbortSignal.timeout(10000) });
+            const body = await response.json();
+            if (!response.ok || body.platform !== 'android' || body.versionName !== '1.0.0-beta.21'
+              || Number(body.versionCode) !== 33 || Number(body.minimumVersionCode) !== 19
+              || body.forceUpdate !== false || String(body.size) !== '183811739'
+              || String(body.apkSha256).toUpperCase() !== '5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7') {
+              throw new Error('PRODUCTION_VERSION_API_CODE33_NOT_RESTORED');
+            }
+            process.stdout.write('VERSION_API_CODE33_RESTORED=VERIFIED\n');
+          })().catch((error) => { process.stderr.write(String(error?.message || error) + '\n'); process.exitCode = 1; });
+          NODE
+          REMOTE
+
+      - name: Verify public code33 download after rollback
+        env:
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          api_json="${RUNNER_TEMP}/android-version-api-after-rollback.json"
+          curl --fail --silent --show-error --location --max-time 30 \
+            'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          jq -e --slurpfile pin scripts/android-rc13-release.json '.releaseNotes == $pin[0].releaseNotes and .publishedAt == "2026-11-04T20:42:23.000Z" and .platform == "android" and .versionName == "1.0.0-beta.21" and .versionCode == 33 and .minimumVersionCode == 19 and .forceUpdate == false and .downloadUrl == "https://ecfc.fans/api/app/download/android" and (.apkSha256 | ascii_upcase) == "5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7" and .size == 183811739' "${api_json}" >/dev/null || { echo 'PUBLIC_VERSION_API_CODE33_NOT_RESTORED'; exit 1; }
+          download_url="$(jq -r '.downloadUrl' "${api_json}")"
+          apk="${RUNNER_TEMP}/ecfc-beta21-code33-after-rollback.apk"
+          curl --fail --silent --show-error --location --max-time 2400 --output "${apk}" "${download_url}"
+          [[ "$(stat -c '%s' "${apk}")" == '183811739' ]] || { echo 'PUBLIC_CODE33_APK_SIZE_MISMATCH'; exit 1; }
+          [[ "$(sha256sum "${apk}" | awk '{print toupper($1)}')" == '5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7' ]] || { echo 'PUBLIC_CODE33_APK_SHA256_MISMATCH'; exit 1; }
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+          node scripts/verify-android-apk-signature.mjs "${apksigner}" "${apk}" '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          health_json="${RUNNER_TEMP}/android-code33-rollback-health.json"
+          curl --fail --silent --show-error --max-time 30 'https://ecfc.fans/api/health/live' --output "${health_json}"
+          jq -e --arg sha "${EXPECTED_PRODUCTION_SHA}" '.ok == true and .release == $sha' "${health_json}" >/dev/null || { echo 'PRODUCTION_HEALTH_MISMATCH'; exit 1; }
+          echo 'PUBLIC_VERSION_API_CODE33_RESTORED=VERIFIED'
+
+      - name: Preserve the post-rollback Version API response
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta21-rollback-after
+          path: ${{ runner.temp }}/android-version-api-after-rollback.json
+          if-no-files-found: error
+          retention-days: 90

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
-import { hasAdminPermission } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { requireRequestUser } from '@/lib/security'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
@@ -12,7 +11,6 @@ export async function DELETE(request: Request, { params }: Params) {
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { postId } = await params
-  const canManagePosts = await hasAdminPermission(guard.user, 'post_manage')
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -22,7 +20,7 @@ export async function DELETE(request: Request, { params }: Params) {
         select: { id: true, authorId: true, moderationStatus: true, publicationStatus: true, status: true },
       })
       if (!post) throw new Error('POST_NOT_FOUND')
-      if (post.authorId !== guard.user.id && !canManagePosts) throw new Error('POST_CANCEL_FORBIDDEN')
+      if (post.authorId !== guard.user.id) throw new Error('POST_CANCEL_FORBIDDEN')
       if (!isCancellableApprovedSchedule({ ...post, isDeleted: false })) throw new Error('POST_NOT_WAITING_FOR_SCHEDULE')
 
       const now = new Date()

@@ -351,6 +351,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
+      || /^\/api\/posts\/[^/]+\/schedule$/.test(pathname)
       || pathname === '/api/users/me/badge/equip'
       || /^\/api\/stickers\/store\/[^/]+\/add$/.test(pathname)
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)

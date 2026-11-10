@@ -1,0 +1,22 @@
+{
+  "applicationId": "fans.ecfc.app",
+  "versionName": "1.0.0-beta.21",
+  "versionCode": 34,
+  "sha256": "450AA28BD98D614C61B18A3BF981F36EEE4C168459EAEF74D1665A54221692AB",
+  "size": 183849255,
+  "signerSha256": "12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B",
+  "sourceFile": "ECFC-1.0.0-beta.21-release-RC14-code34.apk",
+  "sourcePath": "E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta21-RC14\\ECFC-1.0.0-beta.21-release-RC14-code34.apk",
+  "mobileCommit": "a7243f666f9febb4b528ab1af10fa3b8f62eb62c",
+  "buildRunId": null,
+  "buildRunAttempt": null,
+  "buildType": "local-windows-release-incremental",
+  "buildCompletedAt": "2026-11-11T06:52:11+08:00",
+  "provenance": "Local incremental build; the output matched the pinned initial local release build byte for byte. No GitHub Actions build run or independent build attestation.",
+  "releaseNotes": [
+    "支持查看与取消本人定时发布的帖子",
+    "完善活动中心报名、话题参与和开奖结果体验",
+    "改进通知跳转、列表刷新和多账号状态处理",
+    "Beta.21 RC14 版本"
+  ]
+}
