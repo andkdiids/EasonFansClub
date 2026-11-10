@@ -162,6 +162,7 @@ jobs:
             Authorization = "Bearer $env:GITHUB_TOKEN"
             'X-GitHub-Api-Version' = '2022-11-28'
           }
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
           $proxy = 'http://127.0.0.1:7890'
           try { $branch = Invoke-RestMethod -Method Get -Uri $api -Headers $headers -Proxy $proxy -UseBasicParsing -TimeoutSec 15 }
           catch { throw 'MAIN_BRANCH_PROTECTION_LOOKUP_FAILED' }
@@ -181,7 +182,7 @@ jobs:
           } elseif ($releaseCandidate -eq 'rc13') {
             & node (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc13-release.mjs') validate
             if ($LASTEXITCODE -ne 0) { throw 'RC13_ARTIFACT_PIN_NOT_READY' }
-            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc13-release.json') -Raw | ConvertFrom-Json
+            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc13-release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             $sourcePath = $pin.sourcePath
             $env:EXPECTED_SHA256 = $pin.sha256
             $env:EXPECTED_SIZE = [string]$pin.size
@@ -189,7 +190,7 @@ jobs:
           } elseif ($releaseCandidate -eq 'rc14') {
             & node (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.mjs') validate
             if ($LASTEXITCODE -ne 0) { throw 'RC14_ARTIFACT_PIN_NOT_READY' }
-            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.json') -Raw | ConvertFrom-Json
+            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             $sourcePath = $pin.sourcePath
             $env:EXPECTED_SHA256 = $pin.sha256
             $env:EXPECTED_SIZE = [string]$pin.size
@@ -280,7 +281,7 @@ jobs:
           [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
           Write-Output "$($releaseCandidate)_SOURCE_SHA256=VERIFIED"
           Write-Output "$($releaseCandidate)_SOURCE_SIZE=VERIFIED"
-          Write-Output "RC11_INGRESS_DIRECTORY=$stage" >> $env:GITHUB_OUTPUT
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "RC11_INGRESS_DIRECTORY=$stage`n", [Text.UTF8Encoding]::new($false))
 
       - name: Store the verified bytes as a same-run, short-lived Actions artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
