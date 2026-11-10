@@ -44,3 +44,13 @@ test('draft metadata verification retains immutable code33 and signed candidate 
   const options = workflow.slice(workflow.indexOf('release_candidate:'), workflow.indexOf('apk_object_key:'))
   assert.doesNotMatch(options, /- rc14/, 'RC14 must not be selectable before complete release and rollback gates are wired')
 })
+
+test('code33 rollback is protected, verifies the immutable APK and uses code34 CAS', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/rollback-android-version-to-code33.yml', import.meta.url), 'utf8')
+  for (const text of ['workflow_dispatch:', 'production-deploy', 'cancel-in-progress: false', 'environment: Production',
+    'assert-release-main.mjs', 'android-rc14-release.mjs validate', 'CODE33_ROLLBACK_SOURCE_SHA256_MISMATCH',
+    'verify-android-apk-signature.mjs', 'RC14_LIVE_OBJECT_MISMATCH', 'expectedCurrentMetadata:',
+    'ANDROID_RELEASE_OPERATION=rollback-code33', 'PRODUCTION_VERSION_API_CODE33_NOT_RESTORED',
+    'PUBLIC_CODE33_APK_SHA256_MISMATCH', 'PRODUCTION_HEALTH_MISMATCH']) assert.ok(workflow.includes(text), text)
+  assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|cos:DeleteObject|continue-on-error:\s*true/i)
+})
