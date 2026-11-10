@@ -674,6 +674,52 @@ jobs:
           NODE
           REMOTE
 
+      - name: Verify the live RC14 Version API and complete download
+        if: inputs.release_candidate == 'rc14'
+        env:
+          APK_OBJECT_KEY: ${{ inputs.apk_object_key }}
+          EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
+          EXPECTED_SIZE: ${{ inputs.apk_size }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/android-rc14-release.mjs validate "${EXPECTED_SHA256}" "${EXPECTED_SIZE}"
+          api_json="${RUNNER_TEMP}/android-version-api-after-release.json"
+          curl --fail --silent --show-error --max-time 30 'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          jq -e --arg sha "${EXPECTED_SHA256}" --argjson size "${EXPECTED_SIZE}" --slurpfile pin scripts/android-rc14-release.json '
+            .platform == "android" and .versionName == "1.0.0-beta.21" and .versionCode == 34
+            and .minimumVersionCode == 19 and .forceUpdate == false
+            and (.apkSha256 | ascii_upcase) == $sha and .size == $size
+            and .downloadUrl == "https://ecfc.fans/api/app/download/android"
+            and .releaseNotes == $pin[0].releaseNotes and (.publishedAt | type == "string")
+          ' "${api_json}" >/dev/null || { echo 'PRODUCTION_VERSION_API_RC14_MISMATCH'; exit 1; }
+          live="${RUNNER_TEMP}/ecfc-beta21-rc14-live.apk"
+          actual_url="$(curl --fail --silent --show-error --location --max-time 2400 --write-out '%{url_effective}' --output "${live}" 'https://ecfc.fans/api/app/download/android')"
+          [[ "${actual_url}" == "https://media.ecfc.fans/media/${APK_OBJECT_KEY}" ]] || { echo 'LIVE_RC14_OBJECT_MISMATCH'; exit 1; }
+          [[ "$(stat -c '%s' "${live}")" == "${EXPECTED_SIZE}" ]] || { echo 'LIVE_RC14_SIZE_MISMATCH'; exit 1; }
+          [[ "$(sha256sum "${live}" | awk '{print toupper($1)}')" == "${EXPECTED_SHA256}" ]] || { echo 'LIVE_RC14_SHA256_MISMATCH'; exit 1; }
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" && -x "${aapt}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+          node scripts/verify-android-apk-signature.mjs "${apksigner}" "${live}" '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          badging="$("${aapt}" dump badging "${live}")"
+          [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='34' versionName='1.0.0-beta.21'"* ]] || { echo 'LIVE_RC14_PACKAGE_VERSION_MISMATCH'; exit 1; }
+          [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo 'LIVE_RC14_SDK_MISMATCH'; exit 1; }
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do [[ "${badging}" == *"'${abi}'"* ]] || { echo 'LIVE_RC14_ABI_MISSING'; exit 1; }; done
+          health="$(curl --fail --silent --show-error --max-time 30 'https://ecfc.fans/api/health/live')"
+          [[ "$(jq -r '.release' <<< "${health}")" == "${EXPECTED_PRODUCTION_SHA}" ]] || { echo 'PRODUCTION_HEALTH_MISMATCH'; exit 1; }
+          echo 'LIVE_RC14_DOWNLOAD=VERIFIED'
+
+      - name: Preserve RC14 post-release snapshot
+        if: inputs.release_candidate == 'rc14'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta21-rc14-release-after
+          path: ${{ runner.temp }}/android-version-api-after-release.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Verify the live RC11 Version API and authenticated download chain
         if: inputs.release_candidate == 'rc11'
         env:
