@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { win32 } from 'node:path'
+import { resolve, win32 } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const RC13_BASELINE = Object.freeze({
   applicationId: 'fans.ecfc.app',
@@ -52,4 +53,17 @@ export function loadRc14Pin() {
   try { pin = JSON.parse(readFileSync(new URL('./android-rc14-release.json', import.meta.url), 'utf8')) }
   catch { throw new Error('RC14_ARTIFACT_PIN_NOT_READY') }
   return validateRc14Pin(pin)
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  try {
+    if (process.argv[2] !== 'validate') throw new Error('RC14_PIN_COMMAND_INVALID')
+    const pin = loadRc14Pin()
+    if (process.argv[3] && process.argv[3] !== pin.sha256) throw new Error('RC14_PIN_SHA_MISMATCH')
+    if (process.argv[4] && process.argv[4] !== String(pin.size)) throw new Error('RC14_PIN_SIZE_MISMATCH')
+    console.log('RC14_ARTIFACT_PIN=VERIFIED')
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : 'RC14_ARTIFACT_PIN_NOT_READY')
+    process.exitCode = 1
+  }
 }
