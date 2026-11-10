@@ -13,6 +13,8 @@ $secretNames = @('ANDROID_RELEASE_KEYSTORE_BASE64','ANDROID_RELEASE_STORE_PASSWO
 $gradleNames = @('ECFC_ANDROID_KEYSTORE_FILE','ECFC_ANDROID_KEYSTORE_PASSWORD','ECFC_ANDROID_KEY_ALIAS','ECFC_ANDROID_KEY_PASSWORD')
 $workDir = $null
 $keyFile = $null
+$ownsWorkDir = $false
+$ownsKeyFile = $false
 $keyBytes = $null
 $gradleExit = $null
 $lockFile = $null
@@ -37,6 +39,7 @@ try {
   $workDir = Join-Path $root ('ecfc-sign-' + [guid]::NewGuid().ToString('N'))
   if ([IO.Directory]::Exists($workDir) -or [IO.File]::Exists($workDir)) { throw 'SIGNING_TEMP_COLLISION' }
   $directory = New-Item -ItemType Directory -Path $workDir -ErrorAction Stop
+  $ownsWorkDir = $true
   if (($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $directory.Parent.FullName -ne $root) { throw 'SIGNING_TEMP_UNSAFE' }
 
   # The directory is empty while ACLs are changed; key bytes are written only
@@ -54,6 +57,7 @@ try {
   if ($keyBytes.Length -lt 128 -or $keyBytes.Length -gt 1048576) { throw 'SIGNING_KEYSTORE_INVALID' }
   $keyFile = Join-Path $workDir 'release.jks'
   $stream = [IO.File]::Open($keyFile, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+  $ownsKeyFile = $true
   try { $stream.Write($keyBytes, 0, $keyBytes.Length); $stream.Flush($true) }
   finally { $stream.Dispose(); [Array]::Clear($keyBytes, 0, $keyBytes.Length); $keyBytes = $null }
 
@@ -85,8 +89,8 @@ try {
 } finally {
   if ($null -ne $keyBytes) { [Array]::Clear($keyBytes, 0, $keyBytes.Length) }
   foreach ($name in ($gradleNames + $secretNames)) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
-  if ($keyFile -and [IO.File]::Exists($keyFile)) { Remove-Item -LiteralPath $keyFile -Force -ErrorAction Stop }
-  if ($workDir -and [IO.Directory]::Exists($workDir)) { Remove-Item -LiteralPath $workDir -Force -ErrorAction Stop }
+  if ($ownsKeyFile -and $keyFile -and [IO.File]::Exists($keyFile)) { Remove-Item -LiteralPath $keyFile -Force -ErrorAction Stop }
+  if ($ownsWorkDir -and $workDir -and [IO.Directory]::Exists($workDir)) { Remove-Item -LiteralPath $workDir -Force -ErrorAction Stop }
   if ($lockStream) {
     $lockStream.Dispose()
     if ($lockFile -and [IO.File]::Exists($lockFile)) { Remove-Item -LiteralPath $lockFile -Force -ErrorAction Stop }
