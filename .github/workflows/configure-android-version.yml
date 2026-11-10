@@ -305,6 +305,59 @@ jobs:
           printf 'CODE32_ROLLBACK_OBJECT_KEY=%s\n' "${CODE32_ROLLBACK_OBJECT_KEY}" >> "${GITHUB_OUTPUT}"
           echo 'CODE32_ROLLBACK_SOURCE_VERIFIED=YES'
 
+      - name: Validate RC14 signer and the immutable code33 rollback source
+        if: inputs.release_candidate == 'rc14'
+        id: rc14-baseline
+        env:
+          EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
+          EXPECTED_SIZE: ${{ inputs.apk_size }}
+          CODE33_ROLLBACK_OBJECT_KEY: android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-203019-run41906858324-attempt1.apk
+        run: |
+          set -euo pipefail
+          node scripts/android-rc14-release.mjs validate "${EXPECTED_SHA256}" "${EXPECTED_SIZE}"
+          expected_signer='12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          code33_sha='5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7'
+          code33_size='183811739'
+          [[ "${CODE33_ROLLBACK_OBJECT_KEY}" == 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-203019-run41906858324-attempt1.apk' ]] || { echo 'CODE33_ROLLBACK_SOURCE_INVALID'; exit 1; }
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          [[ -n "${sdk_root}" && -d "${sdk_root}/build-tools" ]] || { echo 'ANDROID_BUILD_TOOLS_NOT_AVAILABLE'; exit 1; }
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" && -x "${aapt}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+          verify_apk() {
+            local apk_path="$1" expected_code="$2" expected_sha="$3" expected_size="$4" label="$5"
+            [[ "$(sha256sum "${apk_path}" | awk '{print toupper($1)}')" == "${expected_sha}" ]] || { echo "${label}_SHA256_MISMATCH"; exit 1; }
+            [[ "$(stat -c '%s' "${apk_path}")" == "${expected_size}" ]] || { echo "${label}_SIZE_MISMATCH"; exit 1; }
+            node scripts/verify-android-apk-signature.mjs "${apksigner}" "${apk_path}" "${expected_signer}"
+            badging="$("${aapt}" dump badging "${apk_path}" | head -n 3)"
+            [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='${expected_code}' versionName='1.0.0-beta.21'"* ]] || { echo "${label}_PACKAGE_VERSION_MISMATCH"; exit 1; }
+            [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo "${label}_SDK_METADATA_MISMATCH"; exit 1; }
+          }
+          rc14_apk="${RUNNER_TEMP}/ecfc-beta21-rc14.apk"
+          verify_apk "${rc14_apk}" 34 "${EXPECTED_SHA256}" "${EXPECTED_SIZE}" RC14
+          api_json="${RUNNER_TEMP}/ecfc-version-api-before.json"
+          curl --fail --silent --show-error --location --max-time 30 \
+            'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          jq -e --arg sha "${code33_sha}" --argjson size "${code33_size}" '
+            .platform == "android" and .versionName == "1.0.0-beta.21" and .versionCode == 33
+            and .minimumVersionCode == 19 and .forceUpdate == false
+            and (.apkSha256 | ascii_upcase) == $sha and .size == $size
+            and .downloadUrl == "https://ecfc.fans/api/app/download/android"
+            and (.releaseNotes | type == "array" and length == 6)
+            and .releaseNotes[5] == "Beta.21 RC13 内测版本" and .publishedAt != null
+          ' "${api_json}" >/dev/null || { echo 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE33'; exit 1; }
+          code33_source="${RUNNER_TEMP}/ecfc-beta21-code33-rollback-source.apk"
+          source_url="$(jq -r '.downloadUrl' "${api_json}")"
+          expected_rollback_url="https://media.ecfc.fans/media/${CODE33_ROLLBACK_OBJECT_KEY}"
+          actual_source_url="$(curl --fail --silent --show-error --location --max-time 2400 \
+            --write-out '%{url_effective}' --output "${code33_source}" "${source_url}")"
+          [[ "${actual_source_url}" == "${expected_rollback_url}" ]] || { echo 'CODE33_ROLLBACK_SOURCE_URL_MISMATCH'; exit 1; }
+          verify_apk "${code33_source}" 33 "${code33_sha}" "${code33_size}" CODE33_ROLLBACK_SOURCE
+          [[ "$(realpath "${code33_source}")" != "$(realpath "${rc14_apk}")" ]]
+          cp "${api_json}" "${RUNNER_TEMP}/android-version-api-before.json"
+          printf 'CODE33_ROLLBACK_OBJECT_KEY=%s\n' "${CODE33_ROLLBACK_OBJECT_KEY}" >> "${GITHUB_OUTPUT}"
+          echo 'CODE33_ROLLBACK_SOURCE_VERIFIED=YES'
+
       - name: Preserve RC13 release baseline snapshot
         if: inputs.release_candidate == 'rc13'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
