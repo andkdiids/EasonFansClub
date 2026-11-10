@@ -3,10 +3,10 @@ import test from 'node:test'
 import { RC13_BASELINE, validateRc14Pin, validateCode33VersionApi } from '../scripts/android-rc14-release.mjs'
 
 const candidate = {
-  applicationId: 'fans.ecfc.app', versionName: '1.0.0-beta.22', versionCode: 34,
+  applicationId: 'fans.ecfc.app', versionName: '1.0.0-beta.21', versionCode: 34,
   signerSha256: RC13_BASELINE.signerSha256, sha256: 'A'.repeat(64), size: 180000000,
-  sourceFile: 'ECFC-1.0.0-beta.22-release-RC14-code34-test.apk',
-  sourcePath: String.raw`E:\Eason\build-cache\ECFC-Release-Artifacts\Beta22-RC14\ECFC-1.0.0-beta.22-release-RC14-code34-test.apk`,
+  sourceFile: 'ECFC-1.0.0-beta.21-release-RC14-code34-test.apk',
+  sourcePath: String.raw`E:\Eason\build-cache\ECFC-Release-Artifacts\Beta21-RC14\ECFC-1.0.0-beta.21-release-RC14-code34-test.apk`,
   releaseNotes: ['fixture'],
 }
 
@@ -14,7 +14,7 @@ test('RC14 artifact pin fails closed on missing or mismatched evidence', () => {
   assert.equal(validateRc14Pin(candidate), candidate)
   for (const changes of [
     { sha256: null }, { size: null }, { signerSha256: 'B'.repeat(64) },
-    { versionCode: 33 }, { versionName: '1.0.0-beta.21' }, { applicationId: 'other' },
+    { versionCode: 33 }, { versionName: '1.0.0-beta.22' }, { applicationId: 'other' },
     { sourcePath: String.raw`C:\candidate.apk` }, { releaseNotes: [] },
   ]) assert.throws(() => validateRc14Pin({ ...candidate, ...changes }), /RC14_ARTIFACT_PIN_NOT_READY/)
 })
@@ -34,9 +34,9 @@ test('RC14 production baseline rejects unexpected code33 metadata', () => {
 })
 
 test('RC14 rejects alternate Windows paths and filenames', () => {
-  const directory = "E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta22-RC14"
+  const directory = "E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta21-RC14"
   const invalidPaths = [
-    directory + "\\..\\Beta22-RC14\\" + candidate.sourceFile,
+    directory + "\\..\\Beta21-RC14\\" + candidate.sourceFile,
     directory + "\\sub\\" + candidate.sourceFile,
     directory + '/' + candidate.sourceFile,
     directory + "\\\\" + candidate.sourceFile,
