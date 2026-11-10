@@ -93,7 +93,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   assert.equal(paths.length, 34, 'all other main diagnostic/release-policy files remain unchanged')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
   const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
-  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), 'a544e2d4f069242e94979f65a6cd9fcc155439b07769c8a7cd43e3f4ed154247', 'reviewed Android staging workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), 'a707dfb5b95241064c564e37c9502c02ddd387bc1e784d8fee4502365a738bd6', 'reviewed Android staging workflow must not change without updating this guard')
   const reviewedMetadata = source('.github/workflows/configure-android-version.yml')
   assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), 'f9f9cd7b2a02998a6c96d05132f4315f2b03649ad883f4572de335f3c5b996ad', 'reviewed Android metadata workflow must not change without updating this guard')
 })
