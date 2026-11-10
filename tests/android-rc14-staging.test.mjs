@@ -42,7 +42,8 @@ test('draft metadata verification retains immutable code33 and signed candidate 
   const step = workflow.slice(start, end)
   for (const text of ['android-rc14-release.mjs', 'CODE33_ROLLBACK_OBJECT_KEY', 'verify-android-apk-signature.mjs', 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE33', 'CODE33_ROLLBACK_SOURCE_URL_MISMATCH', 'verify_apk "\${code33_source}" 33', 'verify_apk "\${rc14_apk}" 34']) assert.ok(step.includes(text), text)
   const options = workflow.slice(workflow.indexOf('release_candidate:'), workflow.indexOf('apk_object_key:'))
-  assert.doesNotMatch(options, /- rc14/, 'RC14 must not be selectable before complete release and rollback gates are wired')
+  assert.match(options, /- rc14/)
+  for (const text of ['ANDROID_RC14_ARTIFACT_PIN_B64', 'VERSION_API_BASELINE_CHANGED', 'CODE33_ROLLBACK_SOURCE_NOT_VERIFIED', 'LIVE_RC14_SHA256_MISMATCH', 'LIVE_RC14_OBJECT_MISMATCH']) assert.ok(workflow.includes(text), text)
 })
 
 test('code33 rollback is protected, verifies the immutable APK and uses code34 CAS', () => {
