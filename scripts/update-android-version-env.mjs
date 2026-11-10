@@ -26,6 +26,9 @@ const CODE30_APK_SHA256 = 'D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF493
 const CODE30_APK_SIZE = 184246197
 const RC12_APK_SHA256 = '50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271'
 const RC12_APK_SIZE = 180263015
+const RC13_APK_SHA256 = '5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7'
+const RC13_APK_SIZE = 183811739
+const CODE33_ROLLBACK_OBJECT_KEY = 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-203019-run41906858324-attempt1.apk'
 const CODE31_ROLLBACK_OBJECT_KEY = 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc11-20261102-205722-run41523510243-attempt1.apk'
 const CODE32_ROLLBACK_OBJECT_KEY = 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc12-20261103-185753-run41698377689-attempt1.apk'
 
@@ -33,11 +36,11 @@ function requireThat(condition, code) {
   if (!condition) throw new Error(code)
 }
 
-function validateMetadata(metadata, rc13Pin) {
+function validateMetadata(metadata, rc13Pin, rc14Pin) {
   requireThat(metadata && typeof metadata === 'object' && !Array.isArray(metadata), 'INVALID_METADATA')
   const actualKeys = Object.keys(metadata).sort()
   requireThat(JSON.stringify(actualKeys) === JSON.stringify([...METADATA_KEYS].sort()), 'INVALID_METADATA_KEYS')
-  requireThat(/^1\.0\.0-beta\.21$/.test(metadata.ANDROID_VERSION_NAME), 'INVALID_VERSION_NAME')
+  requireThat(metadata.ANDROID_VERSION_NAME === (metadata.ANDROID_VERSION_CODE === 34 ? '1.0.0-beta.22' : '1.0.0-beta.21'), 'INVALID_VERSION_NAME')
   const releaseCandidate = metadata.ANDROID_VERSION_CODE === 23 ? 'rc3'
     : metadata.ANDROID_VERSION_CODE === 24 ? 'rc4'
       : metadata.ANDROID_VERSION_CODE === 25 ? 'rc5'
@@ -48,11 +51,14 @@ function validateMetadata(metadata, rc13Pin) {
               : metadata.ANDROID_VERSION_CODE === 30 ? 'rc10'
                 : metadata.ANDROID_VERSION_CODE === 31 ? 'rc11'
                   : metadata.ANDROID_VERSION_CODE === 32 ? 'rc12'
-                    : metadata.ANDROID_VERSION_CODE === 33 ? 'rc13' : null
+                    : metadata.ANDROID_VERSION_CODE === 33 ? 'rc13'
+                      : metadata.ANDROID_VERSION_CODE === 34 ? 'rc14' : null
   requireThat(releaseCandidate !== null, 'INVALID_VERSION_CODE')
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')
-  const objectKeyPattern = releaseCandidate === 'rc11' || releaseCandidate === 'rc12' || releaseCandidate === 'rc13'
+  const objectKeyPattern = releaseCandidate === 'rc14'
+    ? /^android\/releases\/ECFC-1\.0\.0-beta\.22-release-beta22-rc14-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
+    : releaseCandidate === 'rc11' || releaseCandidate === 'rc12' || releaseCandidate === 'rc13'
     ? new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}-run\\d+-attempt[1-9]\\d*\\.apk$`)
     : new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}\\.apk$`)
 
@@ -68,7 +74,7 @@ function validateMetadata(metadata, rc13Pin) {
   try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('INVALID_RELEASE_NOTES') }
   requireThat(Array.isArray(notes) && notes.length === 6
     && notes.every((note) => typeof note === 'string' && note.length > 0 && note.length <= 500), 'INVALID_RELEASE_NOTES')
-  requireThat(notes[5] === `Beta.21 ${releaseCandidate.toUpperCase()} 内测版本`, 'INVALID_RELEASE_NOTES')
+  requireThat(notes[5] === `Beta.${releaseCandidate === 'rc14' ? '22' : '21'} ${releaseCandidate.toUpperCase()} 内测版本`, 'INVALID_RELEASE_NOTES')
   requireThat(typeof metadata.ANDROID_PUBLISHED_AT === 'string'
     && Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT)), 'INVALID_PUBLISHED_AT')
   if (releaseCandidate === 'rc11') {
@@ -87,6 +93,15 @@ function validateMetadata(metadata, rc13Pin) {
     'RC13_ARTIFACT_PIN_NOT_READY')
     requireThat(metadata.ANDROID_APK_SHA256 === rc13Pin.sha256, 'INVALID_RC13_APK_SHA256')
     requireThat(metadata.ANDROID_APK_SIZE === rc13Pin.size, 'INVALID_RC13_APK_SIZE')
+  }
+  if (releaseCandidate === 'rc14') {
+    requireThat(rc14Pin && typeof rc14Pin === 'object' && !Array.isArray(rc14Pin)
+      && JSON.stringify(Object.keys(rc14Pin).sort()) === JSON.stringify(['sha256', 'size']), 'RC14_ARTIFACT_PIN_NOT_READY')
+    requireThat(typeof rc14Pin.sha256 === 'string' && /^[A-F0-9]{64}$/.test(rc14Pin.sha256)
+      && Number.isSafeInteger(rc14Pin.size) && rc14Pin.size >= 10000000 && rc14Pin.size <= 500000000,
+    'RC14_ARTIFACT_PIN_NOT_READY')
+    requireThat(metadata.ANDROID_APK_SHA256 === rc14Pin.sha256, 'INVALID_RC14_APK_SHA256')
+    requireThat(metadata.ANDROID_APK_SIZE === rc14Pin.size, 'INVALID_RC14_APK_SIZE')
   }
 }
 
@@ -232,12 +247,17 @@ function createProtectedBackup(sharedDir, envPath, originalStat, originalContent
   return backupPath
 }
 
-export function configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, expectedCurrentMetadata, rc13Pin, now = new Date() }) {
-  validateMetadata(metadata, rc13Pin)
+export function configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, expectedCurrentMetadata, rc13Pin, rc14Pin, now = new Date() }) {
+  validateMetadata(metadata, rc13Pin, rc14Pin)
   if (metadata.ANDROID_VERSION_CODE === 33) {
     requireThat(expectedCurrentMetadata && expectedCurrentMetadata.ANDROID_VERSION_CODE === 32
       && String(expectedCurrentMetadata.ANDROID_APK_SHA256).toUpperCase() === RC12_APK_SHA256
       && expectedCurrentMetadata.ANDROID_APK_SIZE === RC12_APK_SIZE, 'RC13_CODE32_CAS_BASELINE_REQUIRED')
+  }
+  if (metadata.ANDROID_VERSION_CODE === 34) {
+    requireThat(expectedCurrentMetadata && expectedCurrentMetadata.ANDROID_VERSION_CODE === 33
+      && String(expectedCurrentMetadata.ANDROID_APK_SHA256).toUpperCase() === RC13_APK_SHA256
+      && expectedCurrentMetadata.ANDROID_APK_SIZE === RC13_APK_SIZE, 'RC14_CODE33_CAS_BASELINE_REQUIRED')
   }
   validateProductionRelease(appDir, expectedProductionSha)
   const root = path.resolve(appDir)
@@ -248,6 +268,9 @@ export function configureAndroidVersionEnv({ appDir, expectedProductionSha, meta
   const envStat = lstatSync(envPath)
   requireThat(envStat.isFile() && !envStat.isSymbolicLink() && envStat.size > 0, 'UNSAFE_ENV_FILE')
   const original = readFileSync(envPath)
+  if (metadata.ANDROID_VERSION_CODE === 34) {
+    requireThat(dotenv.parse(original).ANDROID_APK_COS_KEY === CODE33_ROLLBACK_OBJECT_KEY, 'RC14_CODE33_ROLLBACK_SOURCE_MISMATCH')
+  }
   validateExpectedCurrentMetadata(original.toString('utf8'), expectedCurrentMetadata)
   const updated = replaceMetadataLines(original.toString('utf8'), metadata)
   const backupPath = createProtectedBackup(sharedDir, envPath, envStat, original, now)
@@ -479,12 +502,20 @@ function main() {
     try { rc13Pin = JSON.parse(Buffer.from(pinEncoded, 'base64').toString('utf8')) }
     catch { throw new Error('RC13_ARTIFACT_PIN_NOT_READY') }
   }
+  let rc14Pin
+  if (metadata?.ANDROID_VERSION_CODE === 34) {
+    const pinEncoded = process.env.ANDROID_RC14_ARTIFACT_PIN_B64 ?? ''
+    requireThat(/^[A-Za-z0-9+/]+={0,2}$/.test(pinEncoded), 'RC14_ARTIFACT_PIN_NOT_READY')
+    try { rc14Pin = JSON.parse(Buffer.from(pinEncoded, 'base64').toString('utf8')) }
+    catch { throw new Error('RC14_ARTIFACT_PIN_NOT_READY') }
+  }
   const result = configureAndroidVersionEnv({
     appDir: PRODUCTION_APP_DIR,
     expectedProductionSha,
     metadata,
     expectedCurrentMetadata,
     rc13Pin,
+    rc14Pin,
   })
   console.log(`PRODUCTION_SHA_VERIFIED=${expectedProductionSha}`)
   console.log(`ANDROID_METADATA_KEYS_UPDATED=${result.changedKeys.length}`)
