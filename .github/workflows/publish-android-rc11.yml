@@ -135,7 +135,7 @@ jobs:
           persist-credentials: false
 
       - name: Require protected current main and the fixed RC11 source file
-        shell: pwsh
+        shell: powershell
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: ${{ github.sha }}
@@ -143,6 +143,7 @@ jobs:
           EXPECTED_SIZE: ${{ inputs.release_candidate == 'rc11' && '183802143' || inputs.release_candidate == 'rc12' && '180263015' || '' }}
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
           EXPECTED_WORKFLOW_REF: andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main
+          ANDROID_SDK_ROOT: 'E:\\Eason\\build-cache\\android-sdk'
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_EVENT_NAME -ne 'workflow_dispatch' -or $env:GITHUB_REF -ne 'refs/heads/main') {
@@ -161,7 +162,8 @@ jobs:
             Authorization = "Bearer $env:GITHUB_TOKEN"
             'X-GitHub-Api-Version' = '2022-11-28'
           }
-          try { $branch = Invoke-RestMethod -Method Get -Uri $api -Headers $headers -TimeoutSec 15 }
+          $proxy = 'http://127.0.0.1:7890'
+          try { $branch = Invoke-RestMethod -Method Get -Uri $api -Headers $headers -Proxy $proxy -UseBasicParsing -TimeoutSec 15 }
           catch { throw 'MAIN_BRANCH_PROTECTION_LOOKUP_FAILED' }
           if ($branch.name -ne 'main' -or $branch.protected -ne $true) {
             throw 'MAIN_BRANCH_PROTECTION_REQUIRED'
