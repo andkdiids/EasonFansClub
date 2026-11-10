@@ -53,10 +53,12 @@ try {
   foreach ($file in @($gradle, $ApkSigner, $SignerVerifier)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'SIGNING_BUILD_TOOL_MISSING' }
   }
+  if (Test-Path -LiteralPath $apk) { throw 'RELEASE_OUTPUT_ALREADY_EXISTS' }
   $env:ECFC_ANDROID_KEYSTORE_FILE = $keyFile
   $env:ECFC_ANDROID_KEYSTORE_PASSWORD = $env:ANDROID_RELEASE_STORE_PASSWORD
   $env:ECFC_ANDROID_KEY_ALIAS = $env:ANDROID_RELEASE_KEY_ALIAS
   $env:ECFC_ANDROID_KEY_PASSWORD = $env:ANDROID_RELEASE_KEY_PASSWORD
+  foreach ($name in $secretNames) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
 
   # Suppress all untrusted native output: it may contain credentials.
   $preference = $ErrorActionPreference
