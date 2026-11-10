@@ -878,12 +878,12 @@ test('RC14 metadata update requires a pinned artifact and exact code33 CAS', (t)
   const pin = { sha256: 'A'.repeat(64), size: 181000000 }
   const code34: AndroidReleaseMetadata = {
     ...code33,
-    ANDROID_VERSION_NAME: '1.0.0-beta.22',
+    ANDROID_VERSION_NAME: '1.0.0-beta.21',
     ANDROID_VERSION_CODE: 34,
-    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.22-release-beta22-rc14-20261110-120000-run123-attempt1.apk',
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc14-20261110-120000-run123-attempt1.apk',
     ANDROID_APK_SHA256: pin.sha256,
     ANDROID_APK_SIZE: pin.size,
-    ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.22 RC14 内测版本']),
+    ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.21 RC14 内测版本']),
     ANDROID_PUBLISHED_AT: '2026-11-10T12:00:00.000Z',
   }
   const { ANDROID_APK_COS_KEY: rollbackKey, ...expected33 } = code33
