@@ -50,7 +50,7 @@ try {
   $rule = New-Object Security.AccessControl.FileSystemAccessRule(
     $identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
   $acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $workDir -AclObject $acl
+  [IO.Directory]::SetAccessControl($workDir, $acl)
 
   try { $keyBytes = [Convert]::FromBase64String($env:ANDROID_RELEASE_KEYSTORE_BASE64) }
   catch { throw 'SIGNING_KEYSTORE_INVALID' }
