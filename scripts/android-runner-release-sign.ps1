@@ -19,6 +19,9 @@ try {
   foreach ($name in $secretNames) {
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) { throw 'SIGNING_SECRET_MISSING' }
   }
+  # Built-in shared service identities are not an isolation boundary for signing.
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User
+  if ($null -eq $identity -or @('S-1-5-18', 'S-1-5-19', 'S-1-5-20').Contains($identity.Value)) { throw 'SHARED_SERVICE_IDENTITY_FORBIDDEN' }
   $tempValue = [Environment]::GetEnvironmentVariable('RUNNER_TEMP', 'Process')
   if ([string]::IsNullOrWhiteSpace($tempValue)) { throw 'RUNNER_TEMP_MISSING' }
   $temp = Get-Item -LiteralPath $tempValue -Force
@@ -31,7 +34,6 @@ try {
 
   # The directory is empty while ACLs are changed; key bytes are written only
   # after inherited access is removed and the service identity is granted access.
-  $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User
   $acl = New-Object Security.AccessControl.DirectorySecurity
   $acl.SetOwner($identity)
   $acl.SetAccessRuleProtection($true, $false)
