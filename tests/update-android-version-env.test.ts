@@ -886,7 +886,8 @@ test('RC14 metadata update requires a pinned artifact and exact code33 CAS', (t)
     ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.22 RC14 内测版本']),
     ANDROID_PUBLISHED_AT: '2026-11-10T12:00:00.000Z',
   }
-  const { ANDROID_APK_COS_KEY: _key, ...expected33 } = code33
+  const { ANDROID_APK_COS_KEY: rollbackKey, ...expected33 } = code33
+  assert.match(rollbackKey, /rc13/)
   const { appDir, envPath, sharedDir } = fixture(t, `DATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code33)}\n`)
   const before = readFileSync(envPath, 'utf8')
   assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, expectedCurrentMetadata: expected33 }), /RC14_ARTIFACT_PIN_NOT_READY/)
