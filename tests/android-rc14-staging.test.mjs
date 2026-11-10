@@ -28,8 +28,8 @@ test('RC14 missing reviewed artifact pin fails before any upload', async () => {
 
 test('RC14 staging requires protected ingress, same-run pin, production and OIDC', () => {
   const workflow = readFileSync(new URL('../.github/workflows/publish-android-rc11.yml', import.meta.url), 'utf8')
-  for (const expected of [/- rc14/, /android-rc14-release\\.mjs.*validate/, /android-rc14-release\\.json/,
-    /assert-release-main\\.mjs/, /publish-rc14/, /id-token:\\s*write/, /name:\\s*Production/,
-    /verify-android-apk-signature\\.mjs/, /EXPECTED_SHA256/, /EXPECTED_SIZE/]) assert.match(workflow, expected)
-  assert.doesNotMatch(workflow, /continue-on-error:\\s*true/)
+  for (const expected of [/- rc14/, /android-rc14-release\.mjs.*validate/, /android-rc14-release\.json/,
+    /assert-release-main\.mjs/, /publish-rc14/, /id-token:\s*write/, /name:\s*Production/,
+    /verify-android-apk-signature\.mjs/, /EXPECTED_SHA256/, /EXPECTED_SIZE/]) assert.match(workflow, expected)
+  assert.doesNotMatch(workflow, /continue-on-error:\s*true/)
 })
