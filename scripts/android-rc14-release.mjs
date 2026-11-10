@@ -13,16 +13,16 @@ export const RC13_BASELINE = Object.freeze({
 })
 
 /** A proposed release remains unavailable until a verified artifact is pinned. */
-const RC14_SOURCE_DIRECTORY = String.raw`E:\Eason\build-cache\ECFC-Release-Artifacts\Beta22-RC14`
+const RC14_SOURCE_DIRECTORY = String.raw`E:\Eason\build-cache\ECFC-Release-Artifacts\Beta21-RC14`
 
 export function validateRc14Pin(pin) {
   if (!pin || pin.applicationId !== RC13_BASELINE.applicationId
-    || pin.versionName !== '1.0.0-beta.22' || pin.versionCode !== 34
+    || pin.versionName !== '1.0.0-beta.21' || pin.versionCode !== 34
     || pin.signerSha256 !== RC13_BASELINE.signerSha256
     || typeof pin.sha256 !== 'string' || !/^[A-F0-9]{64}$/.test(pin.sha256)
     || !Number.isSafeInteger(pin.size) || pin.size < 10000000 || pin.size > 500000000
     || typeof pin.sourceFile !== 'string'
-    || !/^ECFC-1\.0\.0-beta\.22-release-RC14-code34(?:-[A-Za-z0-9-]+)?\.apk$/.test(pin.sourceFile)
+    || !/^ECFC-1\.0\.0-beta\.21-release-RC14-code34(?:-[A-Za-z0-9-]+)?\.apk$/.test(pin.sourceFile)
     || typeof pin.sourcePath !== 'string'
     || !win32.isAbsolute(pin.sourcePath)
     || pin.sourcePath !== win32.join(RC14_SOURCE_DIRECTORY, pin.sourceFile)
