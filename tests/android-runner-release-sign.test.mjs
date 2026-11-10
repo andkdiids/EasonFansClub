@@ -10,7 +10,7 @@ const script = new URL('../scripts/android-runner-release-sign.ps1', import.meta
 const source = readFileSync(script, 'utf8')
 
 test('runner signing removes inherited ACLs before writing and never prints native output', () => {
-  const acl = source.indexOf('Set-Acl -LiteralPath $workDir')
+  const acl = source.indexOf('[IO.Directory]::SetAccessControl($workDir')
   const write = source.indexOf('[IO.File]::Open($keyFile')
   assert.ok(acl > 0 && write > acl)
   for (const pattern of [/SetAccessRuleProtection\(\$true, \$false\)/, /FileMode\]::CreateNew/,
