@@ -40,7 +40,7 @@ function validateMetadata(metadata, rc13Pin, rc14Pin) {
   requireThat(metadata && typeof metadata === 'object' && !Array.isArray(metadata), 'INVALID_METADATA')
   const actualKeys = Object.keys(metadata).sort()
   requireThat(JSON.stringify(actualKeys) === JSON.stringify([...METADATA_KEYS].sort()), 'INVALID_METADATA_KEYS')
-  requireThat(metadata.ANDROID_VERSION_NAME === (metadata.ANDROID_VERSION_CODE === 34 ? '1.0.0-beta.22' : '1.0.0-beta.21'), 'INVALID_VERSION_NAME')
+  requireThat(metadata.ANDROID_VERSION_NAME === '1.0.0-beta.21', 'INVALID_VERSION_NAME')
   const releaseCandidate = metadata.ANDROID_VERSION_CODE === 23 ? 'rc3'
     : metadata.ANDROID_VERSION_CODE === 24 ? 'rc4'
       : metadata.ANDROID_VERSION_CODE === 25 ? 'rc5'
@@ -57,7 +57,7 @@ function validateMetadata(metadata, rc13Pin, rc14Pin) {
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')
   const objectKeyPattern = releaseCandidate === 'rc14'
-    ? /^android\/releases\/ECFC-1\.0\.0-beta\.22-release-beta22-rc14-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
+    ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc14-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
     : releaseCandidate === 'rc11' || releaseCandidate === 'rc12' || releaseCandidate === 'rc13'
     ? new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}-run\\d+-attempt[1-9]\\d*\\.apk$`)
     : new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}\\.apk$`)
@@ -74,7 +74,7 @@ function validateMetadata(metadata, rc13Pin, rc14Pin) {
   try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('INVALID_RELEASE_NOTES') }
   requireThat(Array.isArray(notes) && notes.length === 6
     && notes.every((note) => typeof note === 'string' && note.length > 0 && note.length <= 500), 'INVALID_RELEASE_NOTES')
-  requireThat(notes[5] === `Beta.${releaseCandidate === 'rc14' ? '22' : '21'} ${releaseCandidate.toUpperCase()} 内测版本`, 'INVALID_RELEASE_NOTES')
+  requireThat(notes[5] === `Beta.21 ${releaseCandidate.toUpperCase()} 内测版本`, 'INVALID_RELEASE_NOTES')
   requireThat(typeof metadata.ANDROID_PUBLISHED_AT === 'string'
     && Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT)), 'INVALID_PUBLISHED_AT')
   if (releaseCandidate === 'rc11') {
