@@ -84,10 +84,11 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   const intentionallyReviewedReleaseControlPaths = new Set([
     '.github/workflows/deploy.yml',
     '.github/workflows/android-release-infra-ci.yml',
+    '.github/workflows/publish-android-rc11.yml', // separately guarded by Android release infrastructure tests
   ])
   const paths = execFileSync('git', ['ls-tree', '-r', '--name-only', '80b62a5938aba4d2b50075ed0ed55da169c94f4d', '.github'], { encoding: 'utf8' })
     .trim().split('\n').filter(path => !intentionallyReviewedReleaseControlPaths.has(path))
-  assert.equal(paths.length, 36, 'all other main diagnostic/release-policy files remain unchanged')
+  assert.equal(paths.length, 35, 'all other main diagnostic/release-policy files remain unchanged')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
 })
 
