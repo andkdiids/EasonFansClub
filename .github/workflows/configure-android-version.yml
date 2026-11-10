@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 || "${RELEASE_CANDIDATE}" == rc9 || "${RELEASE_CANDIDATE}" == rc10 || "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 || "${RELEASE_CANDIDATE}" == rc14 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
-          if [[ "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 ]]; then
+          if [[ "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 || "${RELEASE_CANDIDATE}" == rc14 ]]; then
             key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}-run[0-9]+-attempt[1-9][0-9]*\\.apk$"
           else
             key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
@@ -513,7 +513,7 @@ jobs:
           esac
           expected_current_b64=''
           expected_current_b64=''
-          if [[ "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 ]]; then
+          if [[ "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 || "${RELEASE_CANDIDATE}" == rc14 ]]; then
             baseline_file="${RUNNER_TEMP}/android-version-api-before.json"
             [[ -s "${baseline_file}" ]] || { echo 'VERSION_API_BASELINE_MISSING'; exit 1; }
             current_file="${RUNNER_TEMP}/android-version-api-final-gate.json"
