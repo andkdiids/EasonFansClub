@@ -6,7 +6,7 @@ import { RC13_BASELINE } from '../scripts/android-rc14-release.mjs'
 
 test('RC14 staging object key is scoped to release and unique run', () => {
   const key = createVersionedObjectKey('rc14', { date: new Date('2026-11-10T12:34:56Z'), runId: '123', runAttempt: '2' })
-  assert.equal(key, 'android/releases/ECFC-1.0.0-beta.22-release-beta22-rc14-20261110-123456-run123-attempt2.apk')
+  assert.equal(key, 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc14-20261110-123456-run123-attempt2.apk')
   assert.equal(validateVersionedObjectKey(key, 'rc14', { runId: '123', runAttempt: '2' }), key)
   assert.throws(() => validateVersionedObjectKey(key, 'rc14', { runId: '124', runAttempt: '2' }), /COS_OBJECT_KEY_RUN_MISMATCH/)
   assert.throws(() => validateVersionedObjectKey(key, 'rc13'), /COS_OBJECT_KEY_INVALID/)
