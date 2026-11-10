@@ -29,6 +29,7 @@ export function configureAndroidVersionEnv(input: {
   metadata: AndroidReleaseMetadata
   expectedCurrentMetadata?: AndroidVersionApiBaseline
   rc13Pin?: AndroidArtifactPin
+  rc14Pin?: AndroidArtifactPin
   now?: Date
 }): { backupPath: string; changedKeys: string[]; envSha256: string }
 
