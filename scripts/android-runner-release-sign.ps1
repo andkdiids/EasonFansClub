@@ -15,6 +15,8 @@ $workDir = $null
 $keyFile = $null
 $keyBytes = $null
 $gradleExit = $null
+$lockFile = $null
+$lockStream = $null
 try {
   foreach ($name in $secretNames) {
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) { throw 'SIGNING_SECRET_MISSING' }
@@ -27,6 +29,11 @@ try {
   $temp = Get-Item -LiteralPath $tempValue -Force
   if (-not $temp.PSIsContainer -or ($temp.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'RUNNER_TEMP_UNSAFE' }
   $root = [IO.Path]::GetFullPath($temp.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar)
+  $lockFile = Join-Path $root 'ecfc-signing.lock'
+  try { $lockStream = [IO.File]::Open($lockFile, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None) }
+  catch { throw 'SIGNING_LOCK_UNAVAILABLE' }
+  $orphan = Get-ChildItem -LiteralPath $root -Filter 'ecfc-sign-*' -Force -ErrorAction Stop | Select-Object -First 1
+  if ($null -ne $orphan) { throw 'SIGNING_ORPHAN_REQUIRES_MANUAL_REVIEW' }
   $workDir = Join-Path $root ('ecfc-sign-' + [guid]::NewGuid().ToString('N'))
   if ([IO.Directory]::Exists($workDir) -or [IO.File]::Exists($workDir)) { throw 'SIGNING_TEMP_COLLISION' }
   $directory = New-Item -ItemType Directory -Path $workDir -ErrorAction Stop
@@ -80,4 +87,8 @@ try {
   foreach ($name in ($gradleNames + $secretNames)) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
   if ($keyFile -and [IO.File]::Exists($keyFile)) { Remove-Item -LiteralPath $keyFile -Force -ErrorAction Stop }
   if ($workDir -and [IO.Directory]::Exists($workDir)) { Remove-Item -LiteralPath $workDir -Force -ErrorAction Stop }
+  if ($lockStream) {
+    $lockStream.Dispose()
+    if ($lockFile -and [IO.File]::Exists($lockFile)) { Remove-Item -LiteralPath $lockFile -Force -ErrorAction Stop }
+  }
 }
