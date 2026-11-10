@@ -135,7 +135,7 @@ jobs:
           persist-credentials: false
 
       - name: Require protected current main and the fixed RC11 source file
-        shell: powershell
+        shell: powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -Command ". '{0}'"
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: ${{ github.sha }}
