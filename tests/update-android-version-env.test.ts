@@ -825,7 +825,7 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.doesNotMatch(workflow, /code(?:30|31)_backup_object_key|CODE(?:30|31)_BACKUP_OBJECT_KEY/)
   assert.match(workflow, /VERSION_API_BASELINE_CHANGED/)
   assert.match(workflow, /ANDROID_EXPECTED_CURRENT_B64/)
-  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\)\$/)
+  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\)\$/)
   assert.ok(workflow.indexOf('Update only Android version variables') < workflow.indexOf('Reload only the web process'))
   assert.match(workflow, /pm2 reload easonfansclub --update-env/)
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)
