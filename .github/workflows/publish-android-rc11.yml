@@ -135,7 +135,7 @@ jobs:
           persist-credentials: false
 
       - name: Require protected current main and the fixed RC11 source file
-        shell: pwsh
+        shell: powershell
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: ${{ github.sha }}
@@ -143,6 +143,7 @@ jobs:
           EXPECTED_SIZE: ${{ inputs.release_candidate == 'rc11' && '183802143' || inputs.release_candidate == 'rc12' && '180263015' || '' }}
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
           EXPECTED_WORKFLOW_REF: andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main
+          ANDROID_SDK_ROOT: 'E:\Eason\build-cache\android-sdk'
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_EVENT_NAME -ne 'workflow_dispatch' -or $env:GITHUB_REF -ne 'refs/heads/main') {
@@ -161,7 +162,9 @@ jobs:
             Authorization = "Bearer $env:GITHUB_TOKEN"
             'X-GitHub-Api-Version' = '2022-11-28'
           }
-          try { $branch = Invoke-RestMethod -Method Get -Uri $api -Headers $headers -TimeoutSec 15 }
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $proxy = 'http://127.0.0.1:7890'
+          try { $branch = Invoke-RestMethod -Method Get -Uri $api -Headers $headers -Proxy $proxy -UseBasicParsing -TimeoutSec 15 }
           catch { throw 'MAIN_BRANCH_PROTECTION_LOOKUP_FAILED' }
           if ($branch.name -ne 'main' -or $branch.protected -ne $true) {
             throw 'MAIN_BRANCH_PROTECTION_REQUIRED'
@@ -179,7 +182,7 @@ jobs:
           } elseif ($releaseCandidate -eq 'rc13') {
             & node (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc13-release.mjs') validate
             if ($LASTEXITCODE -ne 0) { throw 'RC13_ARTIFACT_PIN_NOT_READY' }
-            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc13-release.json') -Raw | ConvertFrom-Json
+            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc13-release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             $sourcePath = $pin.sourcePath
             $env:EXPECTED_SHA256 = $pin.sha256
             $env:EXPECTED_SIZE = [string]$pin.size
@@ -187,7 +190,7 @@ jobs:
           } elseif ($releaseCandidate -eq 'rc14') {
             & node (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.mjs') validate
             if ($LASTEXITCODE -ne 0) { throw 'RC14_ARTIFACT_PIN_NOT_READY' }
-            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.json') -Raw | ConvertFrom-Json
+            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-rc14-release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             $sourcePath = $pin.sourcePath
             $env:EXPECTED_SHA256 = $pin.sha256
             $env:EXPECTED_SIZE = [string]$pin.size
@@ -278,7 +281,7 @@ jobs:
           [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
           Write-Output "$($releaseCandidate)_SOURCE_SHA256=VERIFIED"
           Write-Output "$($releaseCandidate)_SOURCE_SIZE=VERIFIED"
-          Write-Output "RC11_INGRESS_DIRECTORY=$stage" >> $env:GITHUB_OUTPUT
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "RC11_INGRESS_DIRECTORY=$stage`n", [Text.UTF8Encoding]::new($false))
 
       - name: Store the verified bytes as a same-run, short-lived Actions artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
