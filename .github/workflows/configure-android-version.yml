@@ -329,9 +329,10 @@ jobs:
             [[ "$(sha256sum "${apk_path}" | awk '{print toupper($1)}')" == "${expected_sha}" ]] || { echo "${label}_SHA256_MISMATCH"; exit 1; }
             [[ "$(stat -c '%s' "${apk_path}")" == "${expected_size}" ]] || { echo "${label}_SIZE_MISMATCH"; exit 1; }
             node scripts/verify-android-apk-signature.mjs "${apksigner}" "${apk_path}" "${expected_signer}"
-            badging="$("${aapt}" dump badging "${apk_path}" | head -n 3)"
+            badging="$("${aapt}" dump badging "${apk_path}")"
             [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='${expected_code}' versionName='1.0.0-beta.21'"* ]] || { echo "${label}_PACKAGE_VERSION_MISMATCH"; exit 1; }
             [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo "${label}_SDK_METADATA_MISMATCH"; exit 1; }
+            for abi in arm64-v8a armeabi-v7a; do [[ "${badging}" == *"'${abi}'"* ]] || { echo "${label}_ABI_MISSING"; exit 1; }; done
           }
           rc14_apk="${RUNNER_TEMP}/ecfc-beta21-rc14.apk"
           verify_apk "${rc14_apk}" 34 "${EXPECTED_SHA256}" "${EXPECTED_SIZE}" RC14
