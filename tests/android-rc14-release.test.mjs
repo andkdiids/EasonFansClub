@@ -32,3 +32,14 @@ test('RC14 production baseline rejects unexpected code33 metadata', () => {
     { minimumVersionCode: 20 }, { size: 1 }, { downloadUrl: 'https://example.invalid/app.apk' },
   ]) assert.throws(() => validateCode33VersionApi({ ...baseline, ...changes }), /PRODUCTION_VERSION_API_NOT_EXPECTED_CODE33/)
 })
+
+test('RC14 rejects alternate Windows paths and filenames', () => {
+  const prefixes = ["E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta22-RC14\\..\\Beta22-RC14\\","E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta22-RC14\\sub\\","E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta22-RC14/","E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta22-RC14\\\\","E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta22-RC14\\"]
+  for (const prefix of prefixes) {
+    const suffix = prefix.endsWith('\\\\') ? candidate.sourceFile : candidate.sourceFile + '.tmp'
+    assert.throws(() => validateRc14Pin({ ...candidate, sourcePath: prefix + suffix }), /RC14_ARTIFACT_PIN_NOT_READY/)
+  }
+  for (const sourceFile of ['../other.apk', 'other.apk']) {
+    assert.throws(() => validateRc14Pin({ ...candidate, sourceFile }), /RC14_ARTIFACT_PIN_NOT_READY/)
+  }
+})
