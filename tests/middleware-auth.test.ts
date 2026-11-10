@@ -10,6 +10,16 @@ import { normalizeStoredInternalPath } from '../lib/url-safety'
 const TEST_SECRET = 'middleware-test-secret'
 process.env.JWT_SECRET = TEST_SECRET
 
+test('scheduled post cancellation reaches the route guard for Bearer only', async () => {
+  const path = '/api/posts/post12345/schedule'
+  const bearer = await middleware(makeMutationRequest(path, 'DELETE', { bearer: 'test-token' }))
+  assert.equal(bearer.status, 200)
+  const anonymous = await middleware(makeMutationRequest(path, 'DELETE'))
+  assert.equal(anonymous.status, 401)
+  const unrelated = await middleware(makeMutationRequest('/api/posts/post12345/other', 'DELETE', { bearer: 'test-token' }))
+  assert.equal(unrelated.status, 401)
+})
+
 let middleware: typeof import('../middleware').middleware
 before(async () => {
   ({ middleware } = await import('../middleware'))
