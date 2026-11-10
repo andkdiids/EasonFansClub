@@ -15,7 +15,7 @@ test('RC14 checks the original RC13 rollback source and its precise size', async
   const result = await verifyRollbackSourceRange('rc14', async (url, options) => {
     assert.ok(url.endsWith(RC13_BASELINE.objectKey))
     assert.equal(options.headers.Range, 'bytes=0-0')
-    return { ok: true, status: 206, url, headers: new Headers({ 'content-range': `bytes 0-0/${RC13_BASELINE.size}` }), arrayBuffer: async () => new Uint8Array([0]).buffer }
+    return { ok: true, status: 206, url, headers: new Headers({ 'content-range': `bytes 0-0/${RC13_BASELINE.size}` }), body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([0])); controller.close() } }) }
   })
   assert.equal(result.code, 33)
   await assert.rejects(verifyRollbackSourceRange('rc14', async () => ({ ok: false, status: 403 })), /CODE33_ROLLBACK_SOURCE_UNAVAILABLE/)
