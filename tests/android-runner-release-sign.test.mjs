@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 const script = new URL('../scripts/android-runner-release-sign.ps1', import.meta.url)
@@ -22,7 +23,7 @@ test('missing signing secrets fail before Gradle is called', () => {
   const env = { ...process.env }
   for (const name of ['ANDROID_RELEASE_KEYSTORE_BASE64', 'ANDROID_RELEASE_STORE_PASSWORD', 'ANDROID_RELEASE_KEY_ALIAS', 'ANDROID_RELEASE_KEY_PASSWORD']) delete env[name]
   const command = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
-  const result = spawnSync(command, ['-NoProfile', '-NonInteractive', '-File', script.pathname, '-AndroidProjectRoot', 'missing', '-ApkSigner', 'missing', '-SignerVerifier', 'missing'], { env, encoding: 'utf8' })
+  const result = spawnSync(command, ['-NoProfile', '-NonInteractive', '-File', fileURLToPath(script), '-AndroidProjectRoot', 'missing', '-ApkSigner', 'missing', '-SignerVerifier', 'missing'], { env, encoding: 'utf8' })
   assert.ifError(result.error)
   assert.notEqual(result.status, 0)
   assert.match(result.stderr + result.stdout, /SIGNING_SECRET_MISSING/)
