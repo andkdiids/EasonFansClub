@@ -232,3 +232,11 @@ test('the server derives next-day access from post_manage and the form refreshes
   assert.match(createForm, /setInterval\(\(\) => setScheduleNow\(new Date\(\)\), 15_000\)/)
   assert.match(createForm, /getScheduledPostValidationError\(scheduledPublishAt, canScheduleNextDay, new Date\(\)\)/)
 })
+
+
+test('scheduled cancellation is author-only, including for users with post management permissions', () => {
+  const cancel = read('app/api/posts/[postId]/schedule/route.ts')
+  assert.match(cancel, /if \(post\.authorId !== guard\.user\.id\) throw new Error\('POST_CANCEL_FORBIDDEN'\)/)
+  assert.doesNotMatch(cancel, /hasAdminPermission/)
+  assert.doesNotMatch(cancel, /canManagePosts/)
+})
