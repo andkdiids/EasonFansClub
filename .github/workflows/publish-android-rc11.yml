@@ -185,7 +185,7 @@ jobs:
             $env:EXPECTED_SHA256 = $pin.sha256
             $env:EXPECTED_SIZE = [string]$pin.size
             $expectedCode = '34'
-            $expectedVersionName = '1.0.0-beta.22'
+            $expectedVersionName = '1.0.0-beta.21'
           } else { throw 'RELEASE_CANDIDATE_INVALID' }
           if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'RC11_APK_SOURCE_MISSING' }
           $source = Get-Item -LiteralPath $sourcePath
@@ -423,7 +423,7 @@ jobs:
         if: inputs.release_candidate == 'rc14'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: android-beta22-rc14-version-api-code33-${{ github.run_id }}-${{ github.run_attempt }}
+          name: android-beta21-rc14-version-api-code33-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/android-version-api-code33-baseline.json
           if-no-files-found: error
           retention-days: 90
