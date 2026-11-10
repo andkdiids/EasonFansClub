@@ -302,7 +302,7 @@ test('RC12 publication pins code32 and reuses the original immutable code31 roll
     on: { workflow_dispatch: { inputs: Record<string, { default?: string; options?: string[] }> } }
     jobs: Record<string, { environment?: { name?: string } | string; steps: Array<{ name?: string; if?: string; run?: string; env?: Record<string, string> }> }>
   }
-  assert.deepEqual(stage.on.workflow_dispatch.inputs.release_candidate.options, ['rc11', 'rc12', 'rc13'])
+  assert.deepEqual(stage.on.workflow_dispatch.inputs.release_candidate.options, ['rc11', 'rc12', 'rc13', 'rc14'])
   assert.equal(stage.on.workflow_dispatch.inputs.release_candidate.default, 'rc11')
   assert.equal(stage.concurrency.group, 'production-deploy')
   assert.equal(stage.concurrency['cancel-in-progress'], false)
