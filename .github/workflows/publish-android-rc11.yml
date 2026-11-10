@@ -41,15 +41,8 @@ jobs:
     steps:
       - name: Check out the exact main workflow revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        # The ingress runner's approved local proxy is scoped to this checkout
-        # step only; no global Git or runner proxy configuration is changed.
-        env:
-          http_proxy: http://127.0.0.1:7890
-          https_proxy: http://127.0.0.1:7890
         with:
           ref: ${{ github.sha }}
-          # Never let checkout clean or hard-reset pre-existing runner files.
-          clean: false
           fetch-depth: 1
           persist-credentials: false
 
@@ -129,8 +122,15 @@ jobs:
     steps:
       - name: Check out the exact reviewed main for the RC13 artifact pin
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        # The ingress runner's approved local proxy is scoped to this checkout
+        # step only; no global Git or runner proxy configuration is changed.
+        env:
+          http_proxy: http://127.0.0.1:7890
+          https_proxy: http://127.0.0.1:7890
         with:
           ref: ${{ github.sha }}
+          # Never let checkout clean or hard-reset pre-existing runner files.
+          clean: false
           fetch-depth: 1
           persist-credentials: false
 
