@@ -864,3 +864,39 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
     assert.ok(deployWorkflow.includes(`      - '${file}'`), `${file} must not start the default full database deployment`)
   }
 })
+
+test('RC14 metadata update requires a pinned artifact and exact code33 CAS', (t) => {
+  const code33: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 33,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-203019-run41906858324-attempt1.apk',
+    ANDROID_APK_SHA256: '5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7',
+    ANDROID_APK_SIZE: 183811739,
+    ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.21 RC13 内测版本']),
+    ANDROID_PUBLISHED_AT: '2026-11-04T20:42:23.000Z',
+  }
+  const pin = { sha256: 'A'.repeat(64), size: 181000000 }
+  const code34: AndroidReleaseMetadata = {
+    ...code33,
+    ANDROID_VERSION_NAME: '1.0.0-beta.22',
+    ANDROID_VERSION_CODE: 34,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.22-release-beta22-rc14-20261110-120000-run123-attempt1.apk',
+    ANDROID_APK_SHA256: pin.sha256,
+    ANDROID_APK_SIZE: pin.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.22 RC14 内测版本']),
+    ANDROID_PUBLISHED_AT: '2026-11-10T12:00:00.000Z',
+  }
+  const { ANDROID_APK_COS_KEY: _key, ...expected33 } = code33
+  const { appDir, envPath, sharedDir } = fixture(t, `DATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code33)}\n`)
+  const before = readFileSync(envPath, 'utf8')
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, expectedCurrentMetadata: expected33 }), /RC14_ARTIFACT_PIN_NOT_READY/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, rc14Pin: pin }), /RC14_CODE33_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, expectedCurrentMetadata: { ...expected33, ANDROID_APK_SHA256: 'B'.repeat(64) }, rc14Pin: pin }), /RC14_CODE33_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: { ...code34, ANDROID_APK_SHA256: 'B'.repeat(64) }, expectedCurrentMetadata: expected33, rc14Pin: pin }), /INVALID_RC14_APK_SHA256/)
+  assert.equal(readFileSync(envPath, 'utf8'), before)
+  assert.equal(existsSync(path.join(sharedDir, '.env-backups')), false)
+  const result = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, expectedCurrentMetadata: expected33, rc14Pin: pin })
+  assert.equal(readFileSync(result.backupPath, 'utf8'), before)
+  assert.equal(dotenv.parse(readFileSync(envPath)).ANDROID_VERSION_CODE, '34')
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code34, expectedCurrentMetadata: expected33, rc14Pin: pin }), /RC14_CODE33_ROLLBACK_SOURCE_MISMATCH/)
+})
