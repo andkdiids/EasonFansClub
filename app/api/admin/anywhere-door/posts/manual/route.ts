@@ -5,7 +5,8 @@ import { ANYWHERE_DOOR_TARGET, getAnywhereDoorConfig, getAnywhereDoorStorageMode
 import { buildManualPostMediaRecords, verifyManualPostMediaReceipt } from '@/lib/anywhere-door/manual-media'
 import { MANUAL_POST_MAX_MEDIA } from '@/lib/anywhere-door/manual-media-policy'
 import { isRecoverableManualPostMatch, MANUAL_POST_CREATE_RATE_LIMIT_POLICY, MANUAL_POST_RECORDS_PAGE_SIZE } from '@/lib/anywhere-door/manual-post-policy'
-import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease } from '@/lib/instagram/sync-state'
+import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
+import { withInstagramWorkerAdmission } from '@/lib/instagram/maintenance-protocol'
 import { buildInstagramPostIdentityFilters, buildManualSocialPostExternalId, canonicalizeInstagramSourceUrl, resolveManualSocialPostMediaType } from '@/lib/instagram/source-identity'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
@@ -107,14 +108,18 @@ export async function POST(request: Request) {
     authorUsername: ANYWHERE_DOOR_TARGET,
   })
 
+  return withInstagramWorkerAdmission(prisma, ANYWHERE_DOOR_TARGET, async () => {
   let leaseToken: string | null = null
+  let leaseGeneration: bigint | null = null
   let creatingPost = false
   let invalidatedUploadIds: string[] = []
   try {
     await getInstagramSyncState(ANYWHERE_DOOR_TARGET)
     const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
     if (!lease.acquired) return NextResponse.json({ code: 'SYNC_BUSY', message: '自动同步正在处理，请稍后重试' }, { status: 409 })
+    if (lease.generation === null) throw new Error('INSTAGRAM_LEASE_GENERATION_MISSING')
     leaseToken = lease.token
+    leaseGeneration = lease.generation
 
     const matches = await prisma.socialPost.findMany({
       where: { platform: 'INSTAGRAM', OR: identityFilters },
@@ -146,7 +151,7 @@ export async function POST(request: Request) {
       if (isRecoverableManualPostMatch({ status: duplicate.status, mediaCount: duplicate._count.media })) {
         creatingPost = true
         const recoveredAt = new Date()
-        await prisma.$transaction(async (tx) => {
+        await withInstagramLeaseTransaction({ target: ANYWHERE_DOOR_TARGET, token: lease.token, generation: lease.generation }, async (tx) => {
           const updated = await tx.socialPost.updateMany({
             where: {
               id: duplicate.id,
@@ -226,7 +231,7 @@ export async function POST(request: Request) {
     }
 
     creatingPost = true
-    const post = await prisma.$transaction(async (tx) => {
+    const post = await withInstagramLeaseTransaction({ target: ANYWHERE_DOOR_TARGET, token: lease.token, generation: lease.generation }, async (tx) => {
       const created = await tx.socialPost.create({
         data: {
           platform: 'INSTAGRAM',
@@ -302,8 +307,9 @@ export async function POST(request: Request) {
     console.error('[admin.anywhere-door.manual.create]', { errorName: error instanceof Error ? error.name : 'unknown' })
     return NextResponse.json({ code: 'MANUAL_POST_CREATE_FAILED', invalidatedUploadIds, message: '随意门内容保存失败；表单内容仍可重试' }, { status: 503 })
   } finally {
-    if (leaseToken) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken).catch(() => false)
+    if (leaseToken && leaseGeneration !== null) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken, leaseGeneration).catch(() => false)
   }
+  })
 }
 
 export async function GET(request: Request) {

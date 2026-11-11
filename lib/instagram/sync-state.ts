@@ -8,7 +8,16 @@ import {
   getAnywhereDoorConfig,
 } from '@/lib/anywhere-door/config'
 
-export type SyncStateDb = Pick<PrismaClient, 'socialSyncState' | 'socialSyncLog'>
+export type SyncStateDb = Pick<PrismaClient, 'socialSyncState' | 'socialSyncLog' | '$transaction'>
+export type InstagramLeaseExecutionContext = {
+  target: string
+  token: string
+  generation: bigint
+  db?: Pick<PrismaClient, '$transaction'>
+  signal?: AbortSignal
+  isLost?: () => boolean
+  assertActive: () => void
+}
 
 export type SyncStateRecord = Awaited<ReturnType<typeof getInstagramSyncState>>
 
@@ -36,12 +45,26 @@ export async function getInstagramSyncState(target = ANYWHERE_DOOR_TARGET, db: S
   }
 }
 
-export async function requestInstagramSync(target = ANYWHERE_DOOR_TARGET, requestedAt = new Date(), db: SyncStateDb = prisma) {
-  const state = await getInstagramSyncState(target, db)
-  return db.socialSyncState.update({
-    where: { id: state.id },
-    data: { syncRequestedAt: requestedAt },
-  })
+export async function requestInstagramSync(input: {
+  target?: string
+  requestedAt?: Date
+  lease: InstagramLeaseExecutionContext
+  db?: Pick<PrismaClient, '$transaction'>
+}) {
+  const target = input.target || ANYWHERE_DOOR_TARGET
+  if (input.lease.target !== target) throw new Error('INSTAGRAM_LEASE_TARGET_MISMATCH')
+  return withInstagramLeaseTransaction({
+    target,
+    token: input.lease.token,
+    generation: input.lease.generation,
+    signal: input.lease.signal,
+    isLost: input.lease.isLost,
+    assertActive: input.lease.assertActive,
+    db: input.db || input.lease.db,
+  }, (tx) => tx.socialSyncState.update({
+    where: { platform_target: { platform: 'INSTAGRAM', target } },
+    data: { syncRequestedAt: input.requestedAt || new Date() },
+  }))
 }
 
 /**
@@ -57,23 +80,38 @@ export async function acquireInstagramSyncLease(input: {
   db?: SyncStateDb
 }) {
   const target = input.target || ANYWHERE_DOOR_TARGET
-  const now = input.now || new Date()
-  const leaseMs = input.leaseMs || 5 * 60 * 1000
-  const token = input.token || randomUUID()
+  const leaseMs = input.leaseMs ?? 5 * 60 * 1000
+  const token = input.token ?? randomUUID()
+  if (!target.trim() || target.length > 191) throw new TypeError('INVALID_INSTAGRAM_LEASE_TARGET')
+  if (!Number.isSafeInteger(leaseMs) || leaseMs <= 0 || !Number.isSafeInteger(leaseMs * 1000)) throw new TypeError('INVALID_INSTAGRAM_LEASE_TTL')
+  if (!token || token.length > 64) throw new TypeError('INVALID_INSTAGRAM_LEASE_TOKEN')
   const db = input.db || prisma
   const state = await getInstagramSyncState(target, db)
-  const result = await db.socialSyncState.updateMany({
-    where: {
-      id: state.id,
-      OR: [{ lockUntil: null }, { lockUntil: { lt: now } }],
-    },
-    data: { lockToken: token, lockUntil: new Date(now.getTime() + leaseMs) },
+  const generation = await db.$transaction(async (tx) => {
+    const changed = await tx.$executeRaw`
+      UPDATE SocialSyncState
+      SET lockToken = ${token},
+          lockUntil = TIMESTAMPADD(MICROSECOND, ${leaseMs * 1000}, UTC_TIMESTAMP(3)),
+          leaseGeneration = leaseGeneration + 1
+      WHERE id = ${state.id}
+        AND (lockUntil IS NULL OR lockUntil <= UTC_TIMESTAMP(3))
+    `
+    if (changed !== 1) return null
+    const rows = await tx.$queryRaw<Array<{ leaseGeneration: bigint; lockUntil: Date }>>`
+      SELECT leaseGeneration, lockUntil FROM SocialSyncState
+      WHERE id = ${state.id} AND lockToken = ${token}
+      FOR UPDATE
+    `
+    if (rows.length === 1) return { generation: rows[0].leaseGeneration, lockUntil: rows[0].lockUntil }
+    await tx.$executeRaw`UPDATE SocialSyncState SET lockToken = NULL, lockUntil = NULL WHERE id = ${state.id} AND lockToken = ${token}`
+    return null
   })
   return {
-    acquired: result.count === 1,
+    acquired: generation !== null,
     token,
+    generation: generation?.generation ?? null,
     lockKey: buildInstagramSyncLockKey(target),
-    lockUntil: new Date(now.getTime() + leaseMs),
+    lockUntil: generation?.lockUntil ?? null,
   }
 }
 
@@ -86,9 +124,13 @@ export async function withInstagramLeaseTransaction<T>(input: {
   target: string
   token: string
   generation: bigint
+  signal?: AbortSignal
+  isLost?: () => boolean
+  assertActive?: () => void
   db?: Pick<PrismaClient, '$transaction'>
 }, write: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   if (!input.target || !input.token || typeof input.generation !== 'bigint' || input.generation < BigInt(1)) throw new Error('INSTAGRAM_LEASE_INVALID')
+  input.assertActive?.()
   const db = input.db || prisma
   return db.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -99,6 +141,7 @@ export async function withInstagramLeaseTransaction<T>(input: {
       FOR UPDATE
     `
     if (rows.length !== 1) throw new Error('INSTAGRAM_LEASE_LOST')
+    input.assertActive?.()
     return write(tx)
   })
 }
@@ -107,26 +150,34 @@ export async function withInstagramLeaseTransaction<T>(input: {
 export async function renewInstagramSyncLease(input: {
   target: string
   token: string
+  generation: bigint
   now: Date
   leaseMs: number
   db?: SyncStateDb
 }) {
-  if (!input.token || !Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0 || !Number.isFinite(input.now.getTime())) return false
+  if (!input.token || typeof input.generation !== 'bigint' || input.generation < BigInt(1) || !Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0 || !Number.isFinite(input.now.getTime())) return false
   const db = input.db || prisma
-  const result = await db.socialSyncState.updateMany({
-    where: { platform: 'INSTAGRAM', target: input.target, lockToken: input.token, lockUntil: { gt: input.now } },
-    data: { lockUntil: new Date(input.now.getTime() + input.leaseMs) },
-  })
-  return result.count === 1
+  const changed = await db.$transaction((tx) => tx.$executeRaw`
+    UPDATE SocialSyncState
+    SET lockUntil = TIMESTAMPADD(MICROSECOND, ${input.leaseMs * 1000}, UTC_TIMESTAMP(3))
+    WHERE platform = 'INSTAGRAM' AND target = ${input.target}
+      AND lockToken = ${input.token} AND leaseGeneration = ${input.generation}
+      AND lockUntil > UTC_TIMESTAMP(3)
+  `
+  )
+  return changed === 1
 }
 
-export async function releaseInstagramSyncLease(target = ANYWHERE_DOOR_TARGET, token: string, db: SyncStateDb = prisma) {
-  if (!token) return false
-  const result = await db.socialSyncState.updateMany({
-    where: { platform: 'INSTAGRAM', target, lockToken: token },
-    data: { lockToken: null, lockUntil: null },
-  })
-  return result.count === 1
+export async function releaseInstagramSyncLease(target = ANYWHERE_DOOR_TARGET, token: string, generation: bigint, db: SyncStateDb = prisma) {
+  if (!token || token.length > 64 || typeof generation !== 'bigint' || generation < BigInt(1)) return false
+  const changed = await db.$transaction((tx) => tx.$executeRaw`
+    UPDATE SocialSyncState
+    SET lockToken = NULL, lockUntil = NULL
+    WHERE platform = 'INSTAGRAM' AND target = ${target}
+      AND lockToken = ${token} AND leaseGeneration = ${generation}
+      AND lockUntil > UTC_TIMESTAMP(3)
+  `)
+  return changed === 1
 }
 
 export async function countProviderRunsSince(target: string, start: Date, db: SyncStateDb = prisma) {

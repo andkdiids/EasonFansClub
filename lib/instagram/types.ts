@@ -68,7 +68,7 @@ export type InstagramProviderDiagnostics = {
 export interface InstagramProvider {
   readonly name: InstagramProviderName
   readonly proxyUrl: string | null
-  getLatestPosts(username: string, limit: number): Promise<InstagramPost[]>
+  getLatestPosts(username: string, limit: number, signal?: AbortSignal): Promise<InstagramPost[]>
   getTrace?(): InstagramProviderTrace | null
   getDiagnostics?(): InstagramProviderDiagnostics | null
 }

@@ -63,10 +63,12 @@ export function shouldRunScheduledSync(state: SyncScheduleState, now = new Date(
   return state.nextAllowedSyncAt <= now
 }
 
-export function withTimeout<T>(promise: Promise<T>, timeoutMs = WORKER_TIMEOUT_MS, error = new Error('SYNC_TIMEOUT')) {
+export function withTimeout<T>(promise: Promise<T>, timeoutMs = WORKER_TIMEOUT_MS, error = new Error('SYNC_TIMEOUT'), onTimeout?: () => void) {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => reject(error), timeoutMs)
+    timer = setTimeout(() => {
+      try { onTimeout?.() } finally { reject(error) }
+    }, timeoutMs)
   })
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer)
@@ -74,9 +76,9 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs = WORKER_TIMEOUT_M
 }
 
 /** A timeout does not cancel a Promise: keep the caller alive until work settles. */
-export async function withTimeoutAndDrain<T>(promise: Promise<T>, timeoutMs = WORKER_TIMEOUT_MS): Promise<T> {
+export async function withTimeoutAndDrain<T>(promise: Promise<T>, timeoutMs = WORKER_TIMEOUT_MS, onTimeout?: () => void): Promise<T> {
   try {
-    return await withTimeout(promise, timeoutMs)
+    return await withTimeout(promise, timeoutMs, new Error('SYNC_TIMEOUT'), onTimeout)
   } catch (error) {
     if (error instanceof Error && error.message === 'SYNC_TIMEOUT') {
       await promise.catch(() => undefined)

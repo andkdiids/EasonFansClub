@@ -26,6 +26,13 @@ test('Worker restart requires its graceful-shutdown configuration and an eight-m
   assert.match(deploy, /deploy_run_pm2_reload "\$\{app_name\}" "\$\{pm2_timeout\}" pm2/)
 })
 
+test('full database deployment stops legacy Web writes and can restart the stopped app from the selected release', () => {
+  assert.match(deploy, /LEGACY_WEB_APP_STOPPED=YES/)
+  assert.match(deploy, /Stopping the legacy Web app so its unfenced Instagram admin routes cannot write during migration/)
+  assert.match(deploy, /case "\$\{pm2_status\}" in[\s\S]*?stopped[\s\S]*?pm2_action=restart[\s\S]*?online[\s\S]*?pm2_action=reload/)
+  assert.match(deploy, /legacy_web_stopped[\s\S]*?reload_pm2 "\$\{PM2_APP_NAME\}" "\$\{legacy_sha\}"[\s\S]*?check_web_health "\$\{previous_target\}" "\$\{legacy_sha\}"/)
+})
+
 test('post-switch and rollback health require actual PM2 release SHA and process cwd checks', () => {
   assert.match(deploy, /pm2_deploy_sha\}.*release_sha/)
   assert.match(deploy, /readlink "\/proc\/\$\{pm2_pid\}\/cwd"/)

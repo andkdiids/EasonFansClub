@@ -9,7 +9,8 @@ import {
 } from '@/lib/anywhere-door/manual-media'
 import { isManualPostImageMimeType, MANUAL_POST_MAX_VIDEO_BYTES } from '@/lib/anywhere-door/manual-media-policy'
 import { prisma } from '@/lib/prisma'
-import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease } from '@/lib/instagram/sync-state'
+import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
+import { withInstagramWorkerAdmission } from '@/lib/instagram/maintenance-protocol'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { deleteFromCos, getCosUrl, uploadToCos } from '@/lib/tencent-cos'
 
@@ -123,20 +124,29 @@ export async function DELETE(request: Request) {
   if (!receipt) return NextResponse.json({ code: 'MEDIA_RECEIPT_INVALID', message: '媒体上传凭证无效或已过期，请重新选择文件' }, { status: 400 })
 
   const storageUrl = getCosUrl(receipt.key)
+  return withInstagramWorkerAdmission(prisma, ANYWHERE_DOOR_TARGET, async () => {
   let leaseToken: string | null = null
+  let leaseGeneration: bigint | null = null
   try {
     await getInstagramSyncState(ANYWHERE_DOOR_TARGET)
     const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
     if (!lease.acquired) return NextResponse.json({ code: 'SYNC_BUSY', message: '自动同步或补录正在处理，请稍后重试' }, { status: 409 })
+    if (lease.generation === null) throw new Error('INSTAGRAM_LEASE_GENERATION_MISSING')
     leaseToken = lease.token
-    const referenced = await prisma.socialPostMedia.findFirst({ where: { storageUrl }, select: { id: true } })
+    leaseGeneration = lease.generation
+    const referenced = await withInstagramLeaseTransaction({ target: ANYWHERE_DOOR_TARGET, token: lease.token, generation: lease.generation }, async (tx) => {
+      const row = await tx.socialPostMedia.findFirst({ where: { storageUrl }, select: { id: true } })
+      if (row) return true
+      await deleteFromCos(receipt.key)
+      return false
+    })
     if (referenced) return NextResponse.json({ code: 'MEDIA_ALREADY_ATTACHED', message: '媒体已关联动态，不能从存储中删除' }, { status: 409 })
-    await deleteFromCos(receipt.key)
     return NextResponse.json({ deleted: true }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
     console.error('[admin.anywhere-door.manual.media.delete]', { errorName: error instanceof Error ? error.name : 'unknown' })
     return NextResponse.json({ code: 'MEDIA_DELETE_FAILED', message: '暂时无法清理该上传文件，请稍后重试' }, { status: 503 })
   } finally {
-    if (leaseToken) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken).catch(() => false)
+    if (leaseToken && leaseGeneration !== null) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken, leaseGeneration).catch(() => false)
   }
+  })
 }

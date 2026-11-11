@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { Prisma } from '@prisma/client'
 import { createManyNotificationsWithDb } from '@/lib/notification-write'
 import { prisma } from '@/lib/prisma'
 import { isAnywhereDoorNotificationEnabled, isAnywhereDoorSyncEnabled } from '@/lib/anywhere-door/config'
@@ -8,12 +9,14 @@ import { createInstagramMediaLocalizer, assertProductionMediaLocalizer } from '@
 import { dedupeAndSortInstagramPosts, normalizeInstagramPost } from '@/lib/instagram/normalize'
 import { InstagramProviderError, normalizeInstagramUsername, normalizeProviderLimit, type InstagramMedia, type InstagramPost, type InstagramProvider, type InstagramProviderDiagnostics, type InstagramProviderTrace } from '@/lib/instagram/types'
 import { buildInstagramPostIdentityFilters } from '@/lib/instagram/source-identity'
+import { withInstagramLeaseTransaction, type InstagramLeaseExecutionContext } from '@/lib/instagram/sync-state'
 
 const DEFAULT_TARGET = 'mreasonchan'
 const DEFAULT_LIMIT = 3
 const MAX_NOTIFY_RECIPIENTS = 1000
 
 export type SyncInstagramPostsOptions = {
+  lease?: InstagramLeaseExecutionContext
   provider?: InstagramProvider
   providerName?: string
   username?: string
@@ -24,6 +27,32 @@ export type SyncInstagramPostsOptions = {
   trace?: InstagramProviderTrace | null
   trigger?: 'manual' | 'scheduled' | 'startup'
   baselineCompleted?: boolean
+}
+
+function assertLeaseActive(lease: InstagramLeaseExecutionContext) {
+  if (lease.signal?.aborted || lease.isLost?.()) throw new Error('INSTAGRAM_LEASE_LOST')
+  lease.assertActive()
+}
+
+function isLeaseLostError(error: unknown) {
+  return error instanceof Error && error.message === 'INSTAGRAM_LEASE_LOST'
+}
+
+function withLeaseTransaction<T>(lease: InstagramLeaseExecutionContext | undefined, write: (tx: Prisma.TransactionClient) => Promise<T>) {
+  if (!lease) throw new Error('INSTAGRAM_LEASE_REQUIRED')
+  assertLeaseActive(lease)
+  return withInstagramLeaseTransaction({
+    target: lease.target,
+    token: lease.token,
+    generation: lease.generation,
+    db: lease.db,
+    signal: lease.signal,
+    isLost: lease.isLost,
+    assertActive: () => assertLeaseActive(lease),
+  }, async (tx) => {
+    assertLeaseActive(lease)
+    return write(tx)
+  })
 }
 
 export type SyncInstagramPostsResult = {
@@ -170,21 +199,23 @@ export function buildSocialPostNotificationBatch(postIds: string[], target: stri
   }))
 }
 
-async function notifyNewSocialPosts(postIds: string[], target: string) {
+async function notifyNewSocialPosts(postIds: string[], target: string, lease: InstagramLeaseExecutionContext | undefined) {
   if (!postIds.length) return 0
-  const recipients = await prisma.user.findMany({
-    where: { isDeleted: false, status: 'ACTIVE' },
-    select: { id: true },
-    take: MAX_NOTIFY_RECIPIENTS,
+  return withLeaseTransaction(lease, async (tx) => {
+    const recipients = await tx.user.findMany({
+      where: { isDeleted: false, status: 'ACTIVE' },
+      select: { id: true },
+      take: MAX_NOTIFY_RECIPIENTS,
+    })
+    if (!recipients.length) return 0
+    const data = buildSocialPostNotificationBatch(postIds, target, recipients.map((recipient) => recipient.id))
+    if (!data.length) return 0
+    const result = await createManyNotificationsWithDb(tx, { data, skipDuplicates: true }, { operation: 'social-post.sync.notify-new-post' })
+    return result.count
   })
-  if (!recipients.length) return 0
-  const data = buildSocialPostNotificationBatch(postIds, target, recipients.map((recipient) => recipient.id))
-  if (!data.length) return 0
-  const result = await createManyNotificationsWithDb(prisma, { data, skipDuplicates: true }, { operation: 'social-post.sync.notify-new-post' })
-  return result.count
 }
 
-async function upsertPost(post: InstagramPost, providerName: string, localizer: InstagramMediaLocalizer) {
+async function upsertPost(post: InstagramPost, providerName: string, localizer: InstagramMediaLocalizer, lease: InstagramLeaseExecutionContext | undefined) {
   const matches = await prisma.socialPost.findMany({
     where: {
       platform: 'INSTAGRAM',
@@ -210,7 +241,7 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
   let preparedPostId: string | null = null
 
   try {
-    const prepared = await prisma.$transaction(async (tx) => {
+    const prepared = await withLeaseTransaction(lease, async (tx) => {
       const data = {
         platform: 'INSTAGRAM' as const,
         shortcode: post.shortcode,
@@ -246,10 +277,15 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
     })
 
     if (!canReuseMedia) {
-      for (const media of post.media) localizedMedia.push(await localizer.localize(media, { postExternalId: post.externalId }))
+      for (const media of post.media) {
+        if (lease) assertLeaseActive(lease)
+        const localized = await localizer.localize(media, { postExternalId: post.externalId, signal: lease?.signal })
+        if (lease) assertLeaseActive(lease)
+        localizedMedia.push(localized)
+      }
     }
 
-    const row = await prisma.$transaction(async (tx) => {
+    const row = await withLeaseTransaction(lease, async (tx) => {
       if (!canReuseMedia) {
         await tx.socialPostMedia.deleteMany({ where: { postId: prepared.id } })
         if (localizedMedia.length) {
@@ -271,7 +307,7 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
     return { id: row.id, created: !existing, previousStatus: existing?.status || null, mediaCount: canReuseMedia ? existing?.media.length || 0 : localizedMedia.length }
   } catch (error) {
     logMediaFailure(error)
-    await prisma.socialPost.updateMany({
+    await withLeaseTransaction(lease, (tx) => tx.socialPost.updateMany({
       where: preparedPostId
         ? { id: preparedPostId }
         : { platform: 'INSTAGRAM', externalId: post.externalId },
@@ -279,7 +315,7 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
         status: existing?.status === 'READY' || existing?.status === 'HIDDEN' ? existing.status : 'FAILED',
         syncedAt: new Date(),
       },
-    }).catch(() => undefined)
+    })).catch(() => undefined)
     throw error
   }
 }
@@ -294,31 +330,37 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
       newExternalIds: [], latestExternalId: null, retryAfterSeconds: null,
     }
   }
+  const lease = options.lease
+  if (!lease) throw new Error('INSTAGRAM_LEASE_REQUIRED')
+  if (lease && lease.target !== target) throw new Error('INSTAGRAM_LEASE_TARGET_MISMATCH')
+  assertLeaseActive(lease)
   const provider = options.provider || createInstagramProvider({ provider: options.providerName })
   const localizer = assertProductionMediaLocalizer(options.localizer || createInstagramMediaLocalizer(target))
   const startedAt = new Date()
   const initialTrace = options.trace || provider.getTrace?.() || null
-  const syncLog = await prisma.socialSyncLog.create({
+  const syncLog = await withLeaseTransaction(lease, (tx) => tx.socialSyncLog.create({
     data: { provider: provider.name, target, startedAt, status: 'RUNNING', baselineImport: Boolean(options.baseline), ...traceData(initialTrace) },
     select: { id: true },
-  })
+  }))
   let foundCount = 0
   let createdCount = 0
   let updatedCount = 0
   let mediaCount = 0
   let providerCompleted = false
   try {
-    const rawPosts = await provider.getLatestPosts(target, limit)
+    if (lease) assertLeaseActive(lease)
+    const rawPosts = await provider.getLatestPosts(target, limit, lease.signal)
     providerCompleted = true
     logProviderDiagnostics(provider, 'success')
     const trace = options.trace || provider.getTrace?.() || initialTrace
-    await prisma.socialSyncLog.update({ where: { id: syncLog.id }, data: traceData(trace) })
+    await withLeaseTransaction(lease, (tx) => tx.socialSyncLog.update({ where: { id: syncLog.id }, data: traceData(trace) }))
     const posts = dedupeAndSortInstagramPosts(rawPosts.map(normalizeInstagramPost), limit)
     foundCount = posts.length
     const newPostIds: string[] = []
     const newExternalIds: string[] = []
     for (const post of posts) {
-      const saved = await upsertPost(post, provider.name, localizer)
+      if (lease) assertLeaseActive(lease)
+      const saved = await upsertPost(post, provider.name, localizer, lease)
       if (saved.created) {
         createdCount += 1
         newPostIds.push(saved.id)
@@ -328,20 +370,22 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
     }
     const suppressNotification = options.suppressNotification ?? options.baseline ?? false
     const notificationsAllowed = isAnywhereDoorNotificationEnabled() && !suppressNotification && options.baselineCompleted === true
-    const notifiedCount = notificationsAllowed ? await notifyNewSocialPosts(newPostIds, target) : 0
-    await prisma.socialSyncLog.update({
+    const notifiedCount = notificationsAllowed ? await notifyNewSocialPosts(newPostIds, target, lease) : 0
+    await withLeaseTransaction(lease, (tx) => tx.socialSyncLog.update({
       where: { id: syncLog.id },
       data: {
         status: 'SUCCEEDED', foundCount, createdCount, updatedCount, mediaCount, notificationCount: notifiedCount,
         finishedAt: new Date(), durationMs: Date.now() - startedAt.getTime(),
       },
-    })
+    }))
     return { syncLogId: syncLog.id, provider: provider.name, target, status: 'SUCCEEDED', foundCount, createdCount, updatedCount, mediaCount, notifiedCount, errorCode: null, newExternalIds, latestExternalId: posts[0]?.externalId || null, retryAfterSeconds: null }
   } catch (error) {
+    if (lease && (lease.signal?.aborted || lease.isLost?.() || isLeaseLostError(error))) throw new Error('INSTAGRAM_LEASE_LOST')
+    if (lease) assertLeaseActive(lease)
     const status = syncStatusForError(error)
     const diagnostics = providerCompleted ? null : logProviderDiagnostics(provider, 'failure')
     const trace = options.trace || provider.getTrace?.() || initialTrace
-    await prisma.socialSyncLog.update({
+    await withLeaseTransaction(lease, (tx) => tx.socialSyncLog.update({
       where: { id: syncLog.id },
       data: {
         ...traceData(trace),
@@ -349,7 +393,7 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
         finishedAt: new Date(), durationMs: Date.now() - startedAt.getTime(),
         errorCode: errorCode(error), errorMessage: safeErrorMessage(error, diagnostics), baselineImport: Boolean(options.baseline),
       },
-    }).catch(() => undefined)
+    })).catch(() => undefined)
     return { syncLogId: syncLog.id, provider: provider.name, target, status, foundCount, createdCount, updatedCount, mediaCount, notifiedCount: 0, errorCode: errorCode(error), newExternalIds: [], latestExternalId: null, retryAfterSeconds: error instanceof InstagramProviderError ? error.retryAfterSeconds || null : null }
   }
 }

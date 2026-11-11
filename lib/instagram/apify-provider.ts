@@ -709,6 +709,22 @@ function cloneDiagnostics(value: ApifyProviderDiagnostics | null) {
   }
 }
 
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('INSTAGRAM_PROVIDER_ABORTED')
+}
+
+async function sleepWithAbort(sleep: (milliseconds: number) => Promise<void>, milliseconds: number, signal?: AbortSignal) {
+  throwIfAborted(signal)
+  if (!signal) return sleep(milliseconds)
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new Error('INSTAGRAM_PROVIDER_ABORTED'))
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try { await Promise.race([sleep(milliseconds), aborted]) }
+  finally { if (onAbort) signal.removeEventListener('abort', onAbort) }
+}
+
 export class ApifyInstagramProvider implements InstagramProvider {
   readonly name = 'apify' as const
   /** Apify executes the scraper in its own environment; any proxy is explicit and provider-scoped. */
@@ -762,9 +778,12 @@ export class ApifyInstagramProvider implements InstagramProvider {
           ...init.headers,
         },
         ...(dispatcher ? { dispatcher } : {}),
-        signal: init.signal ?? AbortSignal.timeout(APIFY_REQUEST_TIMEOUT_MS),
+        signal: init.signal
+          ? AbortSignal.any([init.signal, AbortSignal.timeout(APIFY_REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(APIFY_REQUEST_TIMEOUT_MS),
       } as RequestInit)
     } catch (error) {
+      if (dispatcher) await dispatcher.close().catch(() => undefined)
       const details = networkDetails(error)
       if (details.name === 'TimeoutError' || details.causeCode === 'UND_ERR_CONNECT_TIMEOUT' || details.causeCode === 'UND_ERR_HEADERS_TIMEOUT') {
         throw new InstagramProviderError('PROVIDER_TIMEOUT', 'Apify API 请求超时', { cause: error, network: details })
@@ -784,9 +803,9 @@ export class ApifyInstagramProvider implements InstagramProvider {
     }
   }
 
-  private async getRun(runId: string) {
+  private async getRun(runId: string, signal?: AbortSignal) {
     const url = new URL(`${APIFY_API_BASE_URL}/actor-runs/${encodeURIComponent(runId)}`)
-    return parseRun(await this.requestJson(url))
+    return parseRun(await this.requestJson(url, { signal }))
   }
 
   private setTrace(run: ApifyRun | null, datasetId: string | null) {
@@ -806,14 +825,14 @@ export class ApifyInstagramProvider implements InstagramProvider {
     }
   }
 
-  private async readAndNormalizeDataset(datasetId: string, target: string, requestedLimit: number, runInputTarget?: string | null) {
+  private async readAndNormalizeDataset(datasetId: string, target: string, requestedLimit: number, runInputTarget?: string | null, signal?: AbortSignal) {
     if (!/^[a-zA-Z0-9_-]{1,191}$/.test(datasetId)) throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Dataset ID 格式无效')
     const datasetUrl = new URL(`${APIFY_API_BASE_URL}/datasets/${encodeURIComponent(datasetId)}/items`)
     datasetUrl.searchParams.set('format', 'json')
     // Inspect the full bounded Dataset sample for mixed-owner safety, then
     // return only the caller's requested number of normalized posts.
     datasetUrl.searchParams.set('limit', String(Math.max(requestedLimit, APIFY_DATASET_INSPECTION_LIMIT)))
-    const rawItems = readDatasetItems(await this.requestJson(datasetUrl))
+    const rawItems = readDatasetItems(await this.requestJson(datasetUrl, { signal }))
     if (this.diagnostics) {
       this.diagnostics.datasetItems = rawItems.length
       this.diagnostics.rawItemKeys = rawItems.map((item) => Object.keys(asRecord(item) || {}).sort())
@@ -874,18 +893,19 @@ export class ApifyInstagramProvider implements InstagramProvider {
     return dedupeAndSortInstagramPosts(normalized, requestedLimit)
   }
 
-  private async waitForRun(initialRun: ApifyRun) {
+  private async waitForRun(initialRun: ApifyRun, signal?: AbortSignal) {
     let run = initialRun
     const deadline = Date.now() + this.runTimeoutMs
     while (!TERMINAL_RUN_STATUSES.has(run.status)) {
+      throwIfAborted(signal)
       if (Date.now() >= deadline) throw new InstagramProviderError('PROVIDER_TIMEOUT', 'Apify Actor Run 等待超时')
-      await this.sleep(this.pollIntervalMs)
-      run = await this.getRun(run.id)
+      await sleepWithAbort(this.sleep, this.pollIntervalMs, signal)
+      run = await this.getRun(run.id, signal)
     }
     return run
   }
 
-  async getLatestPosts(username: string, limit: number): Promise<InstagramPost[]> {
+  async getLatestPosts(username: string, limit: number, signal?: AbortSignal): Promise<InstagramPost[]> {
     const target = normalizeInstagramUsername(username)
     const requestedLimit = normalizeProviderLimit(limit)
     if (!this.token) throw new InstagramProviderError('PROVIDER_NOT_CONFIGURED', 'APIFY_API_TOKEN 未配置')
@@ -931,6 +951,7 @@ export class ApifyInstagramProvider implements InstagramProvider {
     runUrl.searchParams.set('timeout', String(Math.floor(APIFY_RUN_TIMEOUT_MS / 1000)))
     const run = await this.waitForRun(parseRun(await this.requestJson(runUrl, {
       method: 'POST',
+      signal,
       body: JSON.stringify({
         directUrls: [`https://www.instagram.com/${target}/`],
         // Keep the Actor in profile/user mode even when a task has a stale
@@ -940,7 +961,7 @@ export class ApifyInstagramProvider implements InstagramProvider {
         resultsLimit: requestedLimit,
         skipPinnedPosts: false,
       }),
-    })))
+    })), signal)
 
     this.diagnostics.runStatus = run.status
     this.diagnostics.usageTotalUsd = run.usageTotalUsd
@@ -951,11 +972,11 @@ export class ApifyInstagramProvider implements InstagramProvider {
     }
     if (!run.defaultDatasetId) throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Run 缺少 defaultDatasetId')
 
-    const normalized = await this.readAndNormalizeDataset(run.defaultDatasetId, target, requestedLimit, run.inputTarget)
+    const normalized = await this.readAndNormalizeDataset(run.defaultDatasetId, target, requestedLimit, run.inputTarget, signal)
 
     if (this.diagnostics.usageTotalUsd === null && this.costSettleDelayMs > 0) {
-      await this.sleep(this.costSettleDelayMs)
-      const finalizedRun = await this.getRun(run.id)
+      await sleepWithAbort(this.sleep, this.costSettleDelayMs, signal)
+      const finalizedRun = await this.getRun(run.id, signal)
       this.diagnostics.runStatus = finalizedRun.status
       this.diagnostics.usageTotalUsd = finalizedRun.usageTotalUsd
       this.diagnostics.billableResults = finalizedRun.billableResults

@@ -5,12 +5,11 @@ import test from 'node:test'
 const read = (path: string) => readFileSync(path, 'utf8').replaceAll('\r\n', '\n')
 
 /**
- * Guards the production-workflow behaviour change: a deployment may only start
- * after a human-verified, recoverable CynosDB backup attestation for the exact
- * release SHA. This is deliberately a separate test file so the behaviour
- * change stays auditable on its own.
+ * Guards the full-database deployment requirement for a human-verified,
+ * recoverable CynosDB backup attestation bound to the exact release SHA.
+ * App-only skip-db deployments do not consume database backup proof.
  */
-test('backup attestation gate precedes migration, atomic switch and skip-db', () => {
+test('backup attestation gate covers full database deployments but is decoupled from skip-db', () => {
   const workflow = read('.github/workflows/deploy.yml')
   const script = read('scripts/deploy-production-git.sh')
   const gate = read('scripts/production-backup-gate.mjs')
@@ -22,28 +21,37 @@ test('backup attestation gate precedes migration, atomic switch and skip-db', ()
 
   const gateBlock = workflow.slice(gateStep, deployStep)
   assert.doesNotMatch(gateBlock, /continue-on-error/, 'a failed gate must never be swallowed')
-  assert.doesNotMatch(gateBlock, /^\s*if:\s/m, 'the gate must be unconditional')
+  assert.match(gateBlock, /if: \$\{\{ github\.event_name != 'workflow_dispatch' \|\| inputs\.db_mode != 'skip-db' \}\}/,
+    'push and full database deployments keep the backup gate; explicit skip-db dispatches omit it')
   assert.match(gateBlock, /BACKUP_GATE=VERIFIED/)
   assert.match(gateBlock, /verified_sha=/)
   assert.match(gateBlock, /node --input-type=module/)
   assert.match(gateBlock, /< scripts\/production-backup-gate\.mjs/)
-  assert.match(workflow, /skip-db is not an escape hatch/)
-  assert.doesNotMatch(gateBlock, /deploy_db_mode|DEPLOY_DB_MODE|db_mode/,
-    'the gate must not be conditional on the database mode')
+  assert.doesNotMatch(gateBlock, /deploy_db_mode|DEPLOY_DB_MODE/,
+    'the gate implementation does not use server-side deploy mode to weaken proof validation')
 
-  // The approved SHA must be forwarded into the server-side deployment script
-  // and checked there for BOTH database modes, before any migration write.
+  // The approved SHA is a full-mode server-side requirement, before any
+  // migration write; skip-db does not inspect the proof or carry its env.
   assert.match(workflow, /BACKUP_GATE_VERIFIED_SHA=/)
-  const shaCheck = script.indexOf('BACKUP_GATE_VERIFIED_SHA:-')
+  const buildStep = script.indexOf('pnpm_run build')
+  const fullDbGate = script.indexOf('if [ "${db_mode}" = full ]; then', buildStep)
+  const skipDbBranch = script.indexOf('if [ "${db_mode}" = skip-db ]; then\n  log_step "6/8"', fullDbGate)
+  const shaCheck = script.indexOf('BACKUP_GATE_VERIFIED_SHA:-', fullDbGate)
   const migrateDeploy = script.indexOf('pnpm_run prisma migrate deploy')
   const atomicSwitch = script.indexOf('atomic_switch()')
-  // There is an earlier db_mode branch in the preflight section; pin the one
-  // that actually guards the migration phase.
-  const dbModeBranch = script.lastIndexOf('if [ "${db_mode}" = skip-db ]; then', migrateDeploy)
   assert.ok(shaCheck >= 0, 'the deployment script must require the gate verdict')
-  assert.ok(dbModeBranch > shaCheck, 'the gate must also apply to skip-db')
+  assert.ok(fullDbGate >= 0 && skipDbBranch > fullDbGate && shaCheck < skipDbBranch,
+    'the proof check must remain inside the full database branch')
   assert.ok(migrateDeploy > shaCheck, 'the gate must precede prisma migrate deploy')
   assert.ok(atomicSwitch > shaCheck, 'the gate must precede the atomic switch')
+  const skipDbDeployBranch = script.slice(skipDbBranch, script.indexOf('\nelse\n  log_step "5/8" "Stop the legacy Worker', skipDbBranch))
+  assert.doesNotMatch(skipDbDeployBranch, /BACKUP_GATE|backup_gate|production-backup-gate/,
+    'skip-db must not consume or require backup evidence on the server')
+  const deployBlock = workflow.slice(deployStep)
+  assert.match(deployBlock, /if \[\[ "\$\{deploy_db_mode\}" == full \]\]; then[\s\S]*?backup_gate_env=\(/)
+  assert.match(deployBlock, /BACKUP_GATE=NOT_REQUIRED_FOR_SKIP_DB/)
+  assert.doesNotMatch(deployBlock.slice(deployBlock.indexOf('else\n            echo "BACKUP_GATE=NOT_REQUIRED_FOR_SKIP_DB"'), deployBlock.indexOf('REMOTE_HOST=')), /backup_gate_(?:file|restore_mode|risk_mode)=/,
+    'skip-db must not validate an attestation path or approval mode')
 
   // The gate itself is strictly read-only and never fabricates a verified
   // backup from an UNKNOWN cloud-console state.

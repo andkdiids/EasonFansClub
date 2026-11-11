@@ -494,7 +494,9 @@ async function fetchMediaAttempt(
         response = await fetchImpl(current, {
           ...init,
           redirect: 'manual',
-          signal: init.signal || requestSignal(MEDIA_REQUEST_TIMEOUT_MS),
+          signal: init.signal
+            ? AbortSignal.any([init.signal, requestSignal(MEDIA_REQUEST_TIMEOUT_MS)])
+            : requestSignal(MEDIA_REQUEST_TIMEOUT_MS),
           ...(dispatcher ? { dispatcher } : {}),
         } as RequestInit)
       } catch (error) {
@@ -613,7 +615,7 @@ export type LocalizedInstagramMedia = {
 }
 
 export interface InstagramMediaLocalizer {
-  localize(media: InstagramMedia, context: { postExternalId: string }): Promise<LocalizedInstagramMedia>
+  localize(media: InstagramMedia, context: { postExternalId: string; signal?: AbortSignal }): Promise<LocalizedInstagramMedia>
 }
 
 /** Mock never leaves the process and therefore cannot introduce a remote URL. */
@@ -698,7 +700,7 @@ export class SafeExternalInstagramMediaLocalizer implements InstagramMediaLocali
     retrySleepImpl?: (milliseconds: number) => Promise<void>
   } = {}) {}
 
-  async localize(media: InstagramMedia, context: { postExternalId: string }) {
+  async localize(media: InstagramMedia, context: { postExternalId: string; signal?: AbortSignal }) {
     const writer = this.options.writer || createCosMediaUploadWriter()
     const storageMode = this.options.storageMode || getAnywhereDoorStorageMode()
     if (!storageMode) throw new InstagramMediaSafetyError('CONFIG_ERROR', '随意门存储模式无效')
@@ -716,7 +718,7 @@ export class SafeExternalInstagramMediaLocalizer implements InstagramMediaLocali
       sortOrder: media.sortOrder,
       stage: 'download',
     }
-    const source = await fetchMediaWithValidatedRedirects(media.sourceUrl, {}, this.options, mediaContext)
+    const source = await fetchMediaWithValidatedRedirects(media.sourceUrl, { signal: context.signal }, this.options, mediaContext)
     let storageUrl: string
     try {
       if (!source.response.ok || !source.response.body) {
@@ -735,11 +737,21 @@ export class SafeExternalInstagramMediaLocalizer implements InstagramMediaLocali
       const sourceStream = Readable.fromWeb(source.response.body as Parameters<typeof Readable.fromWeb>[0]).pipe(new ByteLimitTransform(limitForMedia(media)))
       const body = media.type === 'IMAGE' ? sourceStream.pipe(sharp().webp({ quality: 84 })) : sourceStream
       const key = buildInstagramMediaStorageKey({ username, mode: storageMode, externalId: context.postExternalId, kind: media.type === 'VIDEO' ? 'video' : 'image', sortOrder: media.sortOrder })
+      const abortUpload = () => {
+        const reason = context.signal?.reason instanceof Error ? context.signal.reason : new Error('INSTAGRAM_MEDIA_ABORTED')
+        body.destroy(reason)
+        sourceStream.destroy(reason)
+        void source.response.body?.cancel(reason).catch(() => undefined)
+      }
+      context.signal?.addEventListener('abort', abortUpload, { once: true })
       try {
+        if (context.signal?.aborted) abortUpload()
         storageUrl = await writer.upload({ key, body, contentType: media.type === 'VIDEO' ? 'video/mp4' : 'image/webp', contentLength: media.type === 'VIDEO' ? contentLength : undefined })
       } catch (error) {
         if (error instanceof InstagramMediaSafetyError) throw withMediaFailureDiagnostics(error, this.options, source.url.toString(), { ...mediaContext, stage: 'upload' }, source.redirects, source.response.status)
         throw withMediaFailureDiagnostics(error, this.options, source.url.toString(), { ...mediaContext, stage: 'upload' }, source.redirects, source.response.status, 'COS_ERROR')
+      } finally {
+        context.signal?.removeEventListener('abort', abortUpload)
       }
     } finally {
       await source.close()
@@ -747,7 +759,7 @@ export class SafeExternalInstagramMediaLocalizer implements InstagramMediaLocali
     let thumbnailUrl: string | null = null
     if (media.type === 'VIDEO' && media.thumbnailUrl) {
       const thumbnailContext: MediaFailureContext = { ...mediaContext, stage: 'thumbnail' }
-      const thumbnail = await fetchMediaWithValidatedRedirects(media.thumbnailUrl, {}, this.options, thumbnailContext)
+      const thumbnail = await fetchMediaWithValidatedRedirects(media.thumbnailUrl, { signal: context.signal }, this.options, thumbnailContext)
       try {
         if (!thumbnail.response.ok || !thumbnail.response.body) {
           throw createMediaResponseFailure(`缩略图请求状态异常: ${thumbnail.response.status}`, this.options, thumbnail.url.toString(), thumbnailContext, thumbnail.redirects, thumbnail.response.status)
@@ -758,11 +770,20 @@ export class SafeExternalInstagramMediaLocalizer implements InstagramMediaLocali
         }
         const thumbnailStream = Readable.fromWeb(thumbnail.response.body as Parameters<typeof Readable.fromWeb>[0]).pipe(new ByteLimitTransform(limitForMedia({ type: 'IMAGE' }))).pipe(sharp().webp({ quality: 82 }))
         const key = buildInstagramMediaStorageKey({ username, mode: storageMode, externalId: context.postExternalId, kind: 'thumbnail', sortOrder: media.sortOrder })
+        const abortThumbnailUpload = () => {
+          const reason = context.signal?.reason instanceof Error ? context.signal.reason : new Error('INSTAGRAM_MEDIA_ABORTED')
+          thumbnailStream.destroy(reason)
+          void thumbnail.response.body?.cancel(reason).catch(() => undefined)
+        }
+        context.signal?.addEventListener('abort', abortThumbnailUpload, { once: true })
         try {
+          if (context.signal?.aborted) abortThumbnailUpload()
           thumbnailUrl = await writer.upload({ key, body: thumbnailStream, contentType: 'image/webp' })
         } catch (error) {
           if (error instanceof InstagramMediaSafetyError) throw withMediaFailureDiagnostics(error, this.options, thumbnail.url.toString(), { ...thumbnailContext, stage: 'upload' }, thumbnail.redirects, thumbnail.response.status)
           throw withMediaFailureDiagnostics(error, this.options, thumbnail.url.toString(), { ...thumbnailContext, stage: 'upload' }, thumbnail.redirects, thumbnail.response.status, 'COS_ERROR')
+        } finally {
+          context.signal?.removeEventListener('abort', abortThumbnailUpload)
         }
       } finally {
         await thumbnail.close()

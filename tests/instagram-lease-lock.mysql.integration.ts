@@ -41,6 +41,7 @@ async function main() {
     assert.equal(staleWrite, false)
     console.log('REAL_MYSQL_ROW_LOCK_AND_STALE_OWNER=PASS')
   } finally {
+    await db.$executeRawUnsafe('DROP TABLE IF EXISTS SocialSyncState').catch(() => undefined)
     await rival.$disconnect()
     await db.$disconnect()
   }

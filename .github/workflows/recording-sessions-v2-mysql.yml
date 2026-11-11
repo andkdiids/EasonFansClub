@@ -9,6 +9,13 @@ on:
       - 'prisma/migrations/**'
       - 'tests/instagram-text-media-migration.mysql.integration.ts'
       - 'tests/recording-sessions-v2-mysql.integration.ts'
+      - 'lib/instagram/**'
+      - 'lib/mysql-advisory-lock.ts'
+      - 'tests/instagram-lease-lock.mysql.integration.ts'
+      - 'tests/instagram-maintenance-protocol.mysql.integration.ts'
+      - 'tests/instagram-worker-process.mysql.integration.ts'
+      - 'tests/instagram-lease-generation-migration.mysql.integration.ts'
+      - 'tests/fixtures/instagram-lease-child.ts'
       - '.github/workflows/recording-sessions-v2-mysql.yml'
 
 permissions:
@@ -55,6 +62,24 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm exec prisma generate
+
+      - name: Create a separate empty Worker safety database
+        shell: bash
+        run: |
+          set -euo pipefail
+          mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only \
+            -e 'CREATE DATABASE ecfc_rc14_worker_qa CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+
+      - name: Exercise real MySQL Worker fencing and maintenance protocol
+        env:
+          RC14_ISOLATED_MYSQL_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/ecfc_rc14_worker_qa
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec tsx tests/instagram-lease-lock.mysql.integration.ts
+          pnpm exec tsx tests/instagram-maintenance-protocol.mysql.integration.ts
+          pnpm exec tsx tests/instagram-worker-process.mysql.integration.ts
+          pnpm exec tsx tests/instagram-lease-generation-migration.mysql.integration.ts
 
       - name: Apply and verify the Instagram TEXT enum migration on isolated MySQL
         env:

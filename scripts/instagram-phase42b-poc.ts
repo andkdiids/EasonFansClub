@@ -115,15 +115,49 @@ async function main() {
   process.env.DATABASE_URL = database.databaseUrl
   const { SafeExternalInstagramMediaLocalizer } = await import('@/lib/instagram/media')
   const { syncInstagramPosts } = await import('@/lib/instagram/sync-service')
+  const { prisma } = await import('@/lib/prisma')
+  const { withInstagramWorkerAdmission } = await import('@/lib/instagram/maintenance-protocol')
+  const { acquireInstagramSyncLease, renewInstagramSyncLease, releaseInstagramSyncLease } = await import('@/lib/instagram/sync-state')
   const trace = traceForExistingRun()
-  const result = await syncInstagramPosts({
-    provider: fixedDatasetProvider(posts, trace, process.env.APIFY_PROXY_URL || null),
-    localizer: new SafeExternalInstagramMediaLocalizer({ proxyUrl: process.env.IG_MEDIA_PROXY_URL, keyPrefix: `social/instagram/${TARGET_USERNAME}/poc` }),
-    username: TARGET_USERNAME,
-    limit: 2,
-    suppressNotification: true,
-    trace,
-    trigger: 'manual',
+  const result = await withInstagramWorkerAdmission(prisma, TARGET_USERNAME, async () => {
+    const lease = await acquireInstagramSyncLease({ target: TARGET_USERNAME, leaseMs: 5 * 60 * 1000, db: prisma })
+    if (!lease.acquired || lease.generation === null) throw new Error('INSTAGRAM_LEASE_UNAVAILABLE')
+    const controller = new AbortController()
+    let lost = false
+    let renewalBusy = false
+    const execution = {
+      target: TARGET_USERNAME,
+      token: lease.token,
+      generation: lease.generation,
+      signal: controller.signal,
+      isLost: () => lost,
+      assertActive: () => { if (lost || controller.signal.aborted) throw new Error('INSTAGRAM_LEASE_LOST') },
+    }
+    const heartbeat = setInterval(() => {
+      if (renewalBusy || lost) return
+      renewalBusy = true
+      void renewInstagramSyncLease({ target: TARGET_USERNAME, token: lease.token, generation: lease.generation!, now: new Date(), leaseMs: 5 * 60 * 1000, db: prisma })
+        .then((ok) => { if (!ok && !lost) { lost = true; controller.abort(new Error('INSTAGRAM_LEASE_LOST')) } })
+        .catch(() => { if (!lost) { lost = true; controller.abort(new Error('INSTAGRAM_LEASE_LOST')) } })
+        .finally(() => { renewalBusy = false })
+    }, 60_000)
+    heartbeat.unref?.()
+    try {
+      return await syncInstagramPosts({
+        provider: fixedDatasetProvider(posts, trace, process.env.APIFY_PROXY_URL || null),
+        localizer: new SafeExternalInstagramMediaLocalizer({ proxyUrl: process.env.IG_MEDIA_PROXY_URL, keyPrefix: `social/instagram/${TARGET_USERNAME}/poc` }),
+        username: TARGET_USERNAME,
+        limit: 2,
+        suppressNotification: true,
+        trace,
+        trigger: 'manual',
+        lease: execution,
+      })
+    } finally {
+      clearInterval(heartbeat)
+      while (renewalBusy) await new Promise((resolve) => setTimeout(resolve, 10))
+      await releaseInstagramSyncLease(TARGET_USERNAME, lease.token, lease.generation, prisma).catch(() => false)
+    }
   })
   console.log(JSON.stringify({ actor: ACTOR, runId: RUN_ID, datasetId: DATASET_ID, posts: posts.length, hosts, media, cos: { bucket: cos.bucket, region: cos.region, environment: cos.environment }, result: { status: result.status, foundCount: result.foundCount, createdCount: result.createdCount, updatedCount: result.updatedCount, mediaCount: result.mediaCount, notifiedCount: result.notifiedCount } }, null, 2))
 }
