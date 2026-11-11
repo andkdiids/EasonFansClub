@@ -3,7 +3,7 @@ import { getAnywhereDoorConfig, isAnywhereDoorSyncEnabled, ANYWHERE_DOOR_TARGET 
 import { runAnywhereDoorProductionPreflight } from '@/lib/instagram/production-preflight'
 import { prisma } from '@/lib/prisma'
 import { syncInstagramPosts, type SyncInstagramPostsResult } from '@/lib/instagram/sync-service'
-import { acquireInstagramSyncLease, canStartProviderRun, getInstagramSyncState, releaseInstagramSyncLease, renewInstagramSyncLease, withInstagramLeaseTransaction, type InstagramLeaseExecutionContext, type SyncStateDb } from '@/lib/instagram/sync-state'
+import { acquireInstagramSyncLease, canStartProviderRun, findInstagramSyncState, getInstagramSyncState, releaseInstagramSyncLease, renewInstagramSyncLease, withInstagramLeaseTransaction, type InstagramLeaseExecutionContext, type SyncStateDb } from '@/lib/instagram/sync-state'
 import { calculateNextAllowedAfterFailure, calculateNextAllowedAfterSuccess, shouldRunScheduledSync, withTimeoutAndDrain, WORKER_TIMEOUT_MS } from '@/lib/instagram/sync-policy'
 import { withInstagramWorkerAdmission } from '@/lib/instagram/maintenance-protocol'
 
@@ -71,10 +71,11 @@ async function runInstagramSyncWorkerOnceAdmitted(input: {
     const preflight = runAnywhereDoorProductionPreflight()
     if (!preflight.ok) return { status: 'FAILED', errorCode: preflight.issues[0] || 'CONFIG_ERROR' }
   }
-  const state = await getInstagramSyncState(target, db)
-  if (!input.force && !shouldRunScheduledSync(state, now)) return { status: 'NOT_DUE' }
-  const failedBaselineNeedsRecovery = !state.baselineCompletedAt && Boolean(state.lastErrorAt)
-  if (!state.baselineCompletedAt && !state.syncRequestedAt && !failedBaselineNeedsRecovery && !input.force) {
+  const state = await findInstagramSyncState(target, db)
+  if (!state && !input.force) return { status: 'BASELINE_REQUIRED', errorCode: 'BASELINE_REQUIRED' }
+  if (state && !input.force && !shouldRunScheduledSync(state, now)) return { status: 'NOT_DUE' }
+  const failedBaselineNeedsRecovery = Boolean(state && !state.baselineCompletedAt && state.lastErrorAt)
+  if (state && !state.baselineCompletedAt && !state.syncRequestedAt && !failedBaselineNeedsRecovery && !input.force) {
     return { status: 'BASELINE_REQUIRED', errorCode: 'BASELINE_REQUIRED' }
   }
 
@@ -115,12 +116,13 @@ async function runInstagramSyncWorkerOnceAdmitted(input: {
   }
   heartbeatTimer.unref?.()
 
-  let latestState = state
+  let latestState: Awaited<ReturnType<typeof getInstagramSyncState>> | null = state
   try {
-    latestState = await getInstagramSyncState(target, db)
-    const baseline = !latestState.baselineCompletedAt
-      && (Boolean(latestState.syncRequestedAt) || Boolean(latestState.lastErrorAt))
-    const limit = baseline ? 20 : latestState.syncRequestedAt ? 5 : 1
+    const activeState = await getInstagramSyncState(target, db)
+    latestState = activeState
+    const baseline = !activeState.baselineCompletedAt
+      && (Boolean(activeState.syncRequestedAt) || Boolean(activeState.lastErrorAt))
+    const limit = baseline ? 20 : activeState.syncRequestedAt ? 5 : 1
     const run = input.runSync || ((options) => syncInstagramPosts({
       providerName: 'apify',
       username: options.username,
@@ -131,18 +133,20 @@ async function runInstagramSyncWorkerOnceAdmitted(input: {
       lease: execution,
       trigger: 'scheduled',
     }))
-    const result = await withTimeoutAndDrain(run({ username: target, limit, baseline, baselineCompleted: Boolean(latestState.baselineCompletedAt), lease: execution }), WORKER_TIMEOUT_MS, loseLease)
+    const result = await withTimeoutAndDrain(run({ username: target, limit, baseline, baselineCompleted: Boolean(activeState.baselineCompletedAt), lease: execution }), WORKER_TIMEOUT_MS, loseLease)
     execution.assertActive()
     if (result.status === 'SUCCEEDED') {
-      await recordSuccess(latestState, now, result, baseline, execution)
+      await recordSuccess(activeState, now, result, baseline, execution)
       return { status: 'SUCCEEDED', syncLogId: result.syncLogId, result }
     }
-    await recordFailure(latestState, now, result.errorCode || result.status, execution, result.retryAfterSeconds)
+    await recordFailure(activeState, now, result.errorCode || result.status, execution, result.retryAfterSeconds)
     return { status: 'FAILED', errorCode: result.errorCode || result.status, result }
   } catch (error) {
     const code = errorCode(error)
     if (lostLease || code === 'LOST_LEASE') return { status: 'LOST_LEASE', errorCode: 'LOST_LEASE' }
-    await recordFailure(latestState, now, code, execution, error && typeof error === 'object' && 'retryAfterSeconds' in error && typeof error.retryAfterSeconds === 'number' ? error.retryAfterSeconds : null)
+    if (latestState) {
+      await recordFailure(latestState, now, code, execution, error && typeof error === 'object' && 'retryAfterSeconds' in error && typeof error.retryAfterSeconds === 'number' ? error.retryAfterSeconds : null)
+    }
     return { status: 'FAILED', errorCode: code }
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer)

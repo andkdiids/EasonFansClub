@@ -5,7 +5,7 @@ import { ANYWHERE_DOOR_TARGET, getAnywhereDoorConfig, getAnywhereDoorStorageMode
 import { buildManualPostMediaRecords, verifyManualPostMediaReceipt } from '@/lib/anywhere-door/manual-media'
 import { MANUAL_POST_MAX_MEDIA } from '@/lib/anywhere-door/manual-media-policy'
 import { isRecoverableManualPostMatch, MANUAL_POST_CREATE_RATE_LIMIT_POLICY, MANUAL_POST_RECORDS_PAGE_SIZE } from '@/lib/anywhere-door/manual-post-policy'
-import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
+import { acquireInstagramSyncLease, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
 import { withInstagramWorkerAdmission } from '@/lib/instagram/maintenance-protocol'
 import { buildInstagramPostIdentityFilters, buildManualSocialPostExternalId, canonicalizeInstagramSourceUrl, resolveManualSocialPostMediaType } from '@/lib/instagram/source-identity'
 import { prisma } from '@/lib/prisma'
@@ -114,7 +114,6 @@ export async function POST(request: Request) {
   let creatingPost = false
   let invalidatedUploadIds: string[] = []
   try {
-    await getInstagramSyncState(ANYWHERE_DOOR_TARGET)
     const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
     if (!lease.acquired) return NextResponse.json({ code: 'SYNC_BUSY', message: '自动同步正在处理，请稍后重试' }, { status: 409 })
     if (lease.generation === null) throw new Error('INSTAGRAM_LEASE_GENERATION_MISSING')

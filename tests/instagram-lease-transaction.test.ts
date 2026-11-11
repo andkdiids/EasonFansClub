@@ -1,7 +1,59 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Prisma, PrismaClient } from '@prisma/client'
-import { requestInstagramSync, withInstagramLeaseTransaction } from '../lib/instagram/sync-state'
+import { acquireInstagramSyncLease, getInstagramSyncState, requestInstagramSync, withInstagramLeaseTransaction } from '../lib/instagram/sync-state'
+
+test('a missing sync state stays read-only until the lease bootstrap transaction', async () => {
+  let creates = 0
+  const db = {
+    socialSyncState: {
+      findUnique: async () => null,
+      create: async () => { creates += 1 },
+    },
+  } as never
+  await assert.rejects(getInstagramSyncState('target', db), /INSTAGRAM_SYNC_STATE_MISSING/)
+  assert.equal(creates, 0)
+})
+
+test('lease acquisition bootstraps a missing state row and atomically assigns generation one', async () => {
+  let exists = false
+  let generation = BigInt(0)
+  let token: string | null = null
+  let lockUntil: Date | null = null
+  let insertedInsideTransaction = false
+  const tx = {
+    socialSyncState: {
+      createMany: async () => {
+        assert.equal(exists, false)
+        insertedInsideTransaction = true
+        exists = true
+        return { count: 1 }
+      },
+      findUnique: async () => exists ? { id: 'lease-state' } : null,
+    },
+    $executeRaw: async (parts: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = parts.join('')
+      if (!sql.includes('leaseGeneration = leaseGeneration + 1')) return 1
+      if (token && lockUntil && lockUntil.getTime() > Date.now()) return 0
+      token = String(values[0])
+      lockUntil = new Date(Date.now() + Number(values[1]) / 1000)
+      generation += BigInt(1)
+      return 1
+    },
+    $queryRaw: async (parts: TemplateStringsArray) => parts.join('').includes('SELECT leaseGeneration, lockUntil')
+      ? token && lockUntil ? [{ leaseGeneration: generation, lockUntil }] : []
+      : [],
+  }
+  const db = {
+    $transaction: async <T>(callback: (client: typeof tx) => Promise<T>) => callback(tx),
+  } as never
+
+  const lease = await acquireInstagramSyncLease({ target: 'target', token: 'bootstrap-owner', db })
+  assert.equal(insertedInsideTransaction, true)
+  assert.equal(lease.acquired, true)
+  assert.equal(lease.generation, BigInt(1))
+  assert.equal(token, 'bootstrap-owner')
+})
 
 test('lease-guarded write runs only inside the transaction after row check', async () => {
   let exists = false

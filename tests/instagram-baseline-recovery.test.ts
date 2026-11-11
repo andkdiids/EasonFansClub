@@ -61,6 +61,8 @@ function createFakeDb(initial: Partial<FakeState> = {}, failLatestStateRead = fa
       return state.lockToken && state.lockUntil && state.lockUntil.getTime() > Date.now() ? [{ id: state.id }] : []
     },
     socialSyncState: {
+      createMany: async () => ({ count: 1 }),
+      findUnique: async () => ({ id: state.id }),
       update: async ({ data }: { data: Partial<FakeState> }) => Object.assign(state, data),
     },
   }
@@ -69,7 +71,7 @@ function createFakeDb(initial: Partial<FakeState> = {}, failLatestStateRead = fa
     socialSyncState: {
       findUnique: async () => {
         stateReads += 1
-        if (failLatestStateRead && stateReads === 3) throw new Error('simulated state read failure after lease acquisition')
+        if (failLatestStateRead && stateReads === 2) throw new Error('simulated state read failure after lease acquisition')
         return state
       },
       create: async () => state,

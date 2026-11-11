@@ -21,7 +21,7 @@ export type InstagramLeaseExecutionContext = {
 
 export type SyncStateRecord = Awaited<ReturnType<typeof getInstagramSyncState>>
 
-/** Read-only status lookup. Unlike getInstagramSyncState, this never creates a row. */
+/** Read-only status lookup. It never creates or mutates the singleton row. */
 export async function findInstagramSyncState(target = ANYWHERE_DOOR_TARGET, db: SyncStateDb = prisma) {
   return db.socialSyncState.findUnique({
     where: { platform_target: { platform: 'INSTAGRAM', target } },
@@ -29,48 +29,15 @@ export async function findInstagramSyncState(target = ANYWHERE_DOOR_TARGET, db: 
 }
 
 export async function getInstagramSyncState(target = ANYWHERE_DOOR_TARGET, db: SyncStateDb = prisma) {
-  const existing = await db.socialSyncState.findUnique({
-    where: { platform_target: { platform: 'INSTAGRAM', target } },
-  })
-  if (existing) return existing
-
-  try {
-    return await db.socialSyncState.create({ data: { platform: 'INSTAGRAM', target } })
-  } catch {
-    // Another worker may have won the create race. Read the same singleton
-    // instead of treating that harmless race as a failed sync.
-    return db.socialSyncState.findUniqueOrThrow({
-      where: { platform_target: { platform: 'INSTAGRAM', target } },
-    })
-  }
-}
-
-export async function requestInstagramSync(input: {
-  target?: string
-  requestedAt?: Date
-  lease: InstagramLeaseExecutionContext
-  db?: Pick<PrismaClient, '$transaction'>
-}) {
-  const target = input.target || ANYWHERE_DOOR_TARGET
-  if (input.lease.target !== target) throw new Error('INSTAGRAM_LEASE_TARGET_MISMATCH')
-  return withInstagramLeaseTransaction({
-    target,
-    token: input.lease.token,
-    generation: input.lease.generation,
-    signal: input.lease.signal,
-    isLost: input.lease.isLost,
-    assertActive: input.lease.assertActive,
-    db: input.db || input.lease.db,
-  }, (tx) => tx.socialSyncState.update({
-    where: { platform_target: { platform: 'INSTAGRAM', target } },
-    data: { syncRequestedAt: input.requestedAt || new Date() },
-  }))
+  const existing = await findInstagramSyncState(target, db)
+  if (!existing) throw new Error('INSTAGRAM_SYNC_STATE_MISSING')
+  return existing
 }
 
 /**
- * A database-backed lease is used instead of an in-memory boolean. The
- * conditional update is atomic in MySQL, so two worker processes cannot both
- * claim the same target. The lock key is stable for observability and tests.
+ * Acquire the lease and bootstrap the singleton in one transaction. The
+ * createMany is not externally visible until the same transaction has placed
+ * its token, expiry, and generation on the new row.
  */
 export async function acquireInstagramSyncLease(input: {
   target?: string
@@ -86,8 +53,16 @@ export async function acquireInstagramSyncLease(input: {
   if (!Number.isSafeInteger(leaseMs) || leaseMs <= 0 || !Number.isSafeInteger(leaseMs * 1000)) throw new TypeError('INVALID_INSTAGRAM_LEASE_TTL')
   if (!token || token.length > 64) throw new TypeError('INVALID_INSTAGRAM_LEASE_TOKEN')
   const db = input.db || prisma
-  const state = await getInstagramSyncState(target, db)
   const generation = await db.$transaction(async (tx) => {
+    await tx.socialSyncState.createMany({
+      data: [{ platform: 'INSTAGRAM', target }],
+      skipDuplicates: true,
+    })
+    const state = await tx.socialSyncState.findUnique({
+      where: { platform_target: { platform: 'INSTAGRAM', target } },
+      select: { id: true },
+    })
+    if (!state) throw new Error('INSTAGRAM_SYNC_STATE_MISSING_AFTER_BOOTSTRAP')
     const changed = await tx.$executeRaw`
       UPDATE SocialSyncState
       SET lockToken = ${token},
@@ -117,6 +92,28 @@ export async function acquireInstagramSyncLease(input: {
 
 export function buildInstagramSyncLockKey(target = ANYWHERE_DOOR_TARGET) {
   return `anywhere-door-instagram-sync:${target}`
+}
+
+export async function requestInstagramSync(input: {
+  target?: string
+  requestedAt?: Date
+  lease: InstagramLeaseExecutionContext
+  db?: Pick<PrismaClient, '$transaction'>
+}) {
+  const target = input.target || ANYWHERE_DOOR_TARGET
+  if (input.lease.target !== target) throw new Error('INSTAGRAM_LEASE_TARGET_MISMATCH')
+  return withInstagramLeaseTransaction({
+    target,
+    token: input.lease.token,
+    generation: input.lease.generation,
+    signal: input.lease.signal,
+    isLost: input.lease.isLost,
+    assertActive: input.lease.assertActive,
+    db: input.db || input.lease.db,
+  }, (tx) => tx.socialSyncState.update({
+    where: { platform_target: { platform: 'INSTAGRAM', target } },
+    data: { syncRequestedAt: input.requestedAt || new Date() },
+  }))
 }
 
 /** Hold the lease row lock through the write so a replacement owner cannot race it. */

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
 import { MANUAL_POST_DELETE_RATE_LIMIT_POLICY } from '@/lib/anywhere-door/manual-post-policy'
-import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
+import { acquireInstagramSyncLease, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
 import { withInstagramWorkerAdmission } from '@/lib/instagram/maintenance-protocol'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
@@ -32,7 +32,6 @@ export async function DELETE(request: Request, context: RouteContext) {
   let leaseToken: string | null = null
   let leaseGeneration: bigint | null = null
   try {
-    await getInstagramSyncState(ANYWHERE_DOOR_TARGET)
     const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
     if (!lease.acquired) return NextResponse.json({ code: 'SYNC_BUSY', message: '自动同步正在处理，请稍后再试' }, { status: 409 })
     if (lease.generation === null) throw new Error('INSTAGRAM_LEASE_GENERATION_MISSING')
