@@ -348,6 +348,30 @@ jobs:
           df -i "${APP_DIR}"
           REMOTE
 
+      - name: Read the production SHA under the deployment lock
+        id: production_sha_preflight
+        timeout-minutes: 5
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ -s "${RUNNER_TEMP}/easonfansclub_deploy_key" && -s "${HOME}/.ssh/known_hosts" ]] || exit 1
+          result="$(timeout --foreground 60s ssh -T -p "${SERVER_PORT}" \
+            -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 "${SERVER_USER}@${SERVER_HOST}" \
+            bash -s -- /home/apps/easonfansclub "${DEPLOY_SHA}" < scripts/production-sha-preflight.sh)"
+          production_sha="$(printf '%s\n' "${result}" | sed -n 's/^PRODUCTION_SHA=//p')"
+          [[ "${production_sha}" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          printf '%s\n' "${result}" | grep -Fxq "TARGET_SHA=${DEPLOY_SHA}" || exit 1
+          echo "production_sha=${production_sha}" >> "${GITHUB_OUTPUT}"
+
       # HARD GATE: no production migration and no atomic switch may start
       # unless a human has verified, on the Tencent Cloud CynosDB console,
       # that a recent automatic backup exists and PITR is enabled for THIS exact
@@ -495,7 +519,7 @@ jobs:
           # Server-side defence in depth: deploy-production-git.sh refuses any
           # migration/switch unless this exact SHA passed the backup gate.
           BACKUP_GATE_VERIFIED_SHA: ${{ steps.backup_gate.outputs.verified_sha }}
-          EXPECTED_PRODUCTION_SHA: ${{ steps.backup_gate.outputs.production_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ steps.production_sha_preflight.outputs.production_sha }}
           BACKUP_GATE_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
           BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
           BACKUP_GATE_RISK_ACCEPTANCE_MODE: ${{ inputs.risk_acceptance || 'none' }}
