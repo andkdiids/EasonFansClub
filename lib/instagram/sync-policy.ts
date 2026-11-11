@@ -72,3 +72,15 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs = WORKER_TIMEOUT_M
     if (timer) clearTimeout(timer)
   })
 }
+
+/** A timeout does not cancel a Promise: keep the caller alive until work settles. */
+export async function withTimeoutAndDrain<T>(promise: Promise<T>, timeoutMs = WORKER_TIMEOUT_MS): Promise<T> {
+  try {
+    return await withTimeout(promise, timeoutMs)
+  } catch (error) {
+    if (error instanceof Error && error.message === 'SYNC_TIMEOUT') {
+      await promise.catch(() => undefined)
+    }
+    throw error
+  }
+}

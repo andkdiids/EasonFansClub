@@ -4,7 +4,7 @@ import { runAnywhereDoorProductionPreflight } from '@/lib/instagram/production-p
 import { prisma } from '@/lib/prisma'
 import { syncInstagramPosts, type SyncInstagramPostsResult } from '@/lib/instagram/sync-service'
 import { acquireInstagramSyncLease, canStartProviderRun, getInstagramSyncState, releaseInstagramSyncLease, type SyncStateDb } from '@/lib/instagram/sync-state'
-import { calculateNextAllowedAfterFailure, calculateNextAllowedAfterSuccess, shouldRunScheduledSync, withTimeout, WORKER_TIMEOUT_MS } from '@/lib/instagram/sync-policy'
+import { calculateNextAllowedAfterFailure, calculateNextAllowedAfterSuccess, shouldRunScheduledSync, withTimeoutAndDrain, WORKER_TIMEOUT_MS } from '@/lib/instagram/sync-policy'
 
 export type InstagramWorkerResult = {
   status: 'SUCCEEDED' | 'SYNC_DISABLED' | 'SKIP_ALREADY_RUNNING' | 'NOT_DUE' | 'BASELINE_REQUIRED' | 'PROVIDER_COOLDOWN' | 'PROVIDER_DAILY_CAP' | 'FAILED'
@@ -101,7 +101,7 @@ export async function runInstagramSyncWorkerOnce(input: {
       baselineCompleted: options.baselineCompleted,
       trigger: 'scheduled',
     }))
-    const result = await withTimeout(run({ username: target, limit, baseline, baselineCompleted: Boolean(latestState.baselineCompletedAt) }), WORKER_TIMEOUT_MS)
+    const result = await withTimeoutAndDrain(run({ username: target, limit, baseline, baselineCompleted: Boolean(latestState.baselineCompletedAt) }), WORKER_TIMEOUT_MS)
     if (result.status === 'SUCCEEDED') {
       await recordSuccess(db, latestState, now, result, baseline)
       return { status: 'SUCCEEDED', syncLogId: result.syncLogId, result }
