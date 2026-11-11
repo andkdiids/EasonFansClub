@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { PrismaClient } from '@prisma/client'
+import type { Prisma, PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
   ANYWHERE_DOOR_PROVIDER,
@@ -79,6 +79,26 @@ export async function acquireInstagramSyncLease(input: {
 
 export function buildInstagramSyncLockKey(target = ANYWHERE_DOOR_TARGET) {
   return `anywhere-door-instagram-sync:${target}`
+}
+
+/** Hold the lease row lock through the write so a replacement owner cannot race it. */
+export async function withInstagramLeaseTransaction<T>(input: {
+  target: string
+  token: string
+  db?: Pick<PrismaClient, '$transaction'>
+}, write: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  if (!input.target || !input.token) throw new Error('INSTAGRAM_LEASE_INVALID')
+  const db = input.db || prisma
+  return db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM SocialSyncState
+      WHERE platform = 'INSTAGRAM' AND target = ${input.target}
+        AND lockToken = ${input.token} AND lockUntil > UTC_TIMESTAMP(3)
+      FOR UPDATE
+    `
+    if (rows.length !== 1) throw new Error('INSTAGRAM_LEASE_LOST')
+    return write(tx)
+  })
 }
 
 /** Renew only a still-live lease owned by this token; an expired lease cannot be revived. */
