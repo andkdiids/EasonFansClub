@@ -135,8 +135,9 @@ jobs:
           persist-credentials: false
 
       - name: Require protected current main and the fixed RC11 source file
-        shell: powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -Command ". '{0}'"
+        shell: powershell
         env:
+          PSExecutionPolicyPreference: RemoteSigned
           GITHUB_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: ${{ github.sha }}
           EXPECTED_SHA256: ${{ inputs.release_candidate == 'rc11' && '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C' || inputs.release_candidate == 'rc12' && '50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271' || '' }}
