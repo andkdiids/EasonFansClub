@@ -6435,6 +6435,7 @@ model SocialSyncState {
   syncRequestedAt      DateTime?
   lockToken            String?        @db.VarChar(64)
   lockUntil            DateTime?
+  leaseGeneration      BigInt         @default(0)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
 

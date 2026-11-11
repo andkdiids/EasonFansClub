@@ -85,15 +85,17 @@ export function buildInstagramSyncLockKey(target = ANYWHERE_DOOR_TARGET) {
 export async function withInstagramLeaseTransaction<T>(input: {
   target: string
   token: string
+  generation: bigint
   db?: Pick<PrismaClient, '$transaction'>
 }, write: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-  if (!input.target || !input.token) throw new Error('INSTAGRAM_LEASE_INVALID')
+  if (!input.target || !input.token || typeof input.generation !== 'bigint' || input.generation < BigInt(1)) throw new Error('INSTAGRAM_LEASE_INVALID')
   const db = input.db || prisma
   return db.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM SocialSyncState
       WHERE platform = 'INSTAGRAM' AND target = ${input.target}
-        AND lockToken = ${input.token} AND lockUntil > UTC_TIMESTAMP(3)
+        AND lockToken = ${input.token} AND leaseGeneration = ${input.generation}
+        AND lockUntil > UTC_TIMESTAMP(3)
       FOR UPDATE
     `
     if (rows.length !== 1) throw new Error('INSTAGRAM_LEASE_LOST')
