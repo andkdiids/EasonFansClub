@@ -30,8 +30,8 @@ test('FAILED posts are retried in place instead of reusing a missing media set',
 test('a failed baseline does not set baselineCompletedAt in the worker path', () => {
   const worker = readFileSync('lib/instagram/worker.ts', 'utf8')
   assert.match(worker, /baselineCompletedAt: baseline \? now : state\.baselineCompletedAt/)
-  assert.match(worker, /recordFailure\(latestState, now, result\.errorCode \|\| result\.status, execution, result\.retryAfterSeconds\)/)
+  assert.match(worker, /recordFailure\(activeState, now, result\.errorCode \|\| result\.status, execution, result\.retryAfterSeconds\)/)
   assert.match(worker, /return withInstagramLeaseTransaction\(lease, \(tx\) => tx\.socialSyncState\.update\(/)
-  assert.match(worker, /failedBaselineNeedsRecovery = !state\.baselineCompletedAt && Boolean\(state\.lastErrorAt\)/)
-  assert.match(worker, /Boolean\(latestState\.syncRequestedAt\) \|\| Boolean\(latestState\.lastErrorAt\)/)
+  assert.match(worker, /failedBaselineNeedsRecovery = Boolean\(state && !state\.baselineCompletedAt && state\.lastErrorAt\)/)
+  assert.match(worker, /Boolean\(activeState\.syncRequestedAt\) \|\| Boolean\(activeState\.lastErrorAt\)/)
 })

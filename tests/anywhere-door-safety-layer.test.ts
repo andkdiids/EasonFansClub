@@ -64,6 +64,10 @@ test('database lease prevents a second worker from running concurrently', async 
   }
   const db = {
     $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      socialSyncState: {
+        createMany: async () => ({ count: 1 }),
+        findUnique: async () => ({ id: state.id }),
+      },
       $executeRaw: async (parts: TemplateStringsArray, ...values: unknown[]) => {
         const sql = parts.join(' ')
         if (sql.includes('SET lockToken = NULL, lockUntil = NULL')) {
