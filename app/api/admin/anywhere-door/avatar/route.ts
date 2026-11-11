@@ -11,6 +11,8 @@ import {
 import { publicImageUrl } from '@/lib/images'
 import { createImageVariants, ImageNormalizeError } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
+import { InstagramAdmissionUnavailableError, withInstagramWorkerAdmission } from '@/lib/instagram/maintenance-protocol'
+import { acquireInstagramSyncLease, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { SiteMediaStorageError, uploadSiteImage } from '@/lib/site-media-storage'
@@ -128,12 +130,24 @@ export async function POST(request: Request) {
   if (!safeUrl) return NextResponse.json({ message: '头像上传结果无效，请重试' }, { status: 502 })
 
   try {
-    await prisma.siteSetting.upsert({
-      where: { key: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_KEY },
-      update: { value: safeUrl, valueType: 'TEXT', group: 'social', label: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_LABEL },
-      create: { key: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_KEY, value: safeUrl, valueType: 'TEXT', group: 'social', label: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_LABEL },
+    await withInstagramWorkerAdmission(prisma, ANYWHERE_DOOR_TARGET, async () => {
+      const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
+      if (!lease.acquired) throw new InstagramAdmissionUnavailableError()
+      if (lease.generation === null) throw new Error('INSTAGRAM_LEASE_GENERATION_MISSING')
+      try {
+        await withInstagramLeaseTransaction({ target: ANYWHERE_DOOR_TARGET, token: lease.token, generation: lease.generation }, (tx) => tx.siteSetting.upsert({
+          where: { key: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_KEY },
+          update: { value: safeUrl, valueType: 'TEXT', group: 'social', label: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_LABEL },
+          create: { key: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_KEY, value: safeUrl, valueType: 'TEXT', group: 'social', label: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_LABEL },
+        }))
+      } finally {
+        await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, lease.token, lease.generation).catch(() => false)
+      }
     })
   } catch (error) {
+    if (error instanceof InstagramAdmissionUnavailableError) {
+      return NextResponse.json({ code: 'SYNC_BUSY', message: '同步任务正在运行或系统正在维护，请稍后重试' }, { status: 409 })
+    }
     console.error('[admin.anywhere-door.avatar.save]', { errorName: error instanceof Error ? error.name : 'unknown' })
     return NextResponse.json({ message: '头像已上传，但设置保存失败，请稍后重试' }, { status: 503 })
   }
@@ -145,9 +159,23 @@ export async function DELETE(request: Request) {
   const guard = await guardAvatarRequest(request, 'DELETE')
   if (!guard.user) return guard.response
   try {
-    await prisma.siteSetting.deleteMany({ where: { key: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_KEY } })
+    await withInstagramWorkerAdmission(prisma, ANYWHERE_DOOR_TARGET, async () => {
+      const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
+      if (!lease.acquired) throw new InstagramAdmissionUnavailableError()
+      if (lease.generation === null) throw new Error('INSTAGRAM_LEASE_GENERATION_MISSING')
+      try {
+        await withInstagramLeaseTransaction({ target: ANYWHERE_DOOR_TARGET, token: lease.token, generation: lease.generation }, (tx) => tx.siteSetting.deleteMany({
+          where: { key: ANYWHERE_DOOR_MANUAL_AVATAR_SETTING_KEY },
+        }))
+      } finally {
+        await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, lease.token, lease.generation).catch(() => false)
+      }
+    })
     return NextResponse.json({ avatar: await avatarProfile() }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
   } catch (error) {
+    if (error instanceof InstagramAdmissionUnavailableError) {
+      return NextResponse.json({ code: 'SYNC_BUSY', message: '同步任务正在运行或系统正在维护，请稍后重试' }, { status: 409 })
+    }
     console.error('[admin.anywhere-door.avatar.reset]', { errorName: error instanceof Error ? error.name : 'unknown' })
     return NextResponse.json({ message: '恢复自动头像失败，请稍后重试' }, { status: 503 })
   }
