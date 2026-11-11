@@ -1,6 +1,8 @@
 import 'dotenv/config'
 import { runInstagramSyncWorkerOnce } from '@/lib/instagram/worker'
 import { prisma } from '@/lib/prisma'
+import { isDeploymentDbMaintenanceHeld } from '@/lib/deployment-db-maintenance-hold'
+import { runUnlessDeploymentHeld } from '@/lib/instagram/worker-hold'
 
 /**
  * Independent one-shot worker entrypoint. PM2 or a scheduler may invoke this
@@ -34,7 +36,13 @@ function waitOrStop(milliseconds: number) {
 async function main() {
   try {
     while (!stopping) {
-      const result = await runInstagramSyncWorkerOnce()
+      const attempt = await runUnlessDeploymentHeld(isDeploymentDbMaintenanceHeld, () => runInstagramSyncWorkerOnce())
+      if (attempt.held) {
+        console.info('[instagram-sync-worker]', { status: 'DEPLOYMENT_MAINTENANCE_HOLD' })
+        await waitOrStop(5000)
+        continue
+      }
+      const result = attempt.result
       console.info('[instagram-sync-worker]', { status: result.status, errorCode: result.errorCode || null })
       const waitMs = result.status === 'SYNC_DISABLED' ? 15 * 60 * 1000 : 60 * 1000
       await waitOrStop(waitMs)
