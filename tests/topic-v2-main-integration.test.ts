@@ -86,13 +86,21 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
     '.github/workflows/deploy.yml',
     '.github/workflows/android-release-infra-ci.yml',
     '.github/workflows/recording-sessions-v2-mysql.yml', // expanded for the RC14 isolated Worker fencing integration suite
+    '.github/workflows/unified-ci.yml', // exact Node heap override for the RC14 Next.js build OOM
     '.github/workflows/publish-android-rc11.yml', // separately guarded below and by Android release tests
     '.github/workflows/configure-android-version.yml', // separately guarded below and by Android release tests
   ])
   const paths = execFileSync('git', ['ls-tree', '-r', '--name-only', '80b62a5938aba4d2b50075ed0ed55da169c94f4d', '.github'], { encoding: 'utf8' })
     .trim().split('\n').filter(path => !intentionallyReviewedReleaseControlPaths.has(path))
-  assert.equal(paths.length, 33, 'all main diagnostic/release-policy files remain unchanged except explicitly reviewed RC14 CI paths')
+  assert.equal(paths.length, 32, 'all main diagnostic/release-policy files remain unchanged except explicitly reviewed RC14 CI paths')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
+  const mainUnifiedCi = baseSource('.github/workflows/unified-ci.yml')
+  const expectedUnifiedCi = mainUnifiedCi.replace(
+    '      - name: Next.js production build\n        shell: bash\n        run: |\n',
+    '      - name: Next.js production build\n        shell: bash\n        env:\n          NODE_OPTIONS: --max-old-space-size=6144\n        run: |\n',
+  )
+  assert.notEqual(expectedUnifiedCi, mainUnifiedCi, 'the main build step must match the reviewed insertion point')
+  assert.equal(source('.github/workflows/unified-ci.yml'), expectedUnifiedCi, 'only the reviewed build heap override may change unified release CI')
   const workerMysql = source('.github/workflows/recording-sessions-v2-mysql.yml')
   assert.match(workerMysql, /CREATE DATABASE ecfc_rc14_worker_qa/)
   assert.match(workerMysql, /tests\/instagram-worker-process\.mysql\.integration\.ts/)
