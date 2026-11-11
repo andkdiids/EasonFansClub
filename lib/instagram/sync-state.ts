@@ -81,6 +81,23 @@ export function buildInstagramSyncLockKey(target = ANYWHERE_DOOR_TARGET) {
   return `anywhere-door-instagram-sync:${target}`
 }
 
+/** Renew only a still-live lease owned by this token; an expired lease cannot be revived. */
+export async function renewInstagramSyncLease(input: {
+  target: string
+  token: string
+  now: Date
+  leaseMs: number
+  db?: SyncStateDb
+}) {
+  if (!input.token || !Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0 || !Number.isFinite(input.now.getTime())) return false
+  const db = input.db || prisma
+  const result = await db.socialSyncState.updateMany({
+    where: { platform: 'INSTAGRAM', target: input.target, lockToken: input.token, lockUntil: { gt: input.now } },
+    data: { lockUntil: new Date(input.now.getTime() + input.leaseMs) },
+  })
+  return result.count === 1
+}
+
 export async function releaseInstagramSyncLease(target = ANYWHERE_DOOR_TARGET, token: string, db: SyncStateDb = prisma) {
   if (!token) return false
   const result = await db.socialSyncState.updateMany({
