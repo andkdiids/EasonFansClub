@@ -1,0 +1,52 @@
+name: RC14 read-only directory permissions
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact current main commit
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: production-rc14-permissions-readonly
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-22.04
+    environment: Production
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify current main candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ && "$CANDIDATE_SHA" == "$GITHUB_SHA" ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$CANDIDATE_SHA" ]]
+      - name: Read fixed production directory metadata
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PIN: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ && "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SSH_PORT" =~ ^[0-9]{1,5}$ ]]
+          [[ "$PIN" =~ ^SHA256:[A-Za-z0-9+/]+=?$ && -n "$SSH_KEY" && -n "$PINNED_HOSTS" ]]
+          key="$RUNNER_TEMP/rc14-permissions.key"
+          hosts="$RUNNER_TEMP/rc14-permissions.hosts"
+          trap 'rm -f -- "$key" "$hosts"' EXIT
+          umask 077
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          [[ "$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')" == "$PIN" ]]
+          timeout 30s ssh -i "$key" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" -o GlobalKnownHostsFile=/dev/null "$SSH_USER@$SSH_HOST" 'node --input-type=module -' < .github/release/rc14-environment-forensics.mjs
