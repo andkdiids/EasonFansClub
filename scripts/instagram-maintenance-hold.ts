@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
 import { prisma } from '@/lib/prisma'
 import { withInstagramMaintenanceDrain } from '@/lib/instagram/maintenance-protocol'
+import { createMaintenanceReleaseWait } from '@/lib/instagram/maintenance-release-wait'
 
 function safeError(error: unknown) {
   const message = error instanceof Error ? error.message : 'UNKNOWN_ERROR'
@@ -16,14 +17,15 @@ async function main() {
   if (!/^[a-zA-Z0-9._-]{1,191}$/.test(target)) throw new Error('INVALID_INSTAGRAM_MAINTENANCE_TARGET')
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 60_000 || timeoutMs > 2_400_000) throw new Error('INVALID_INSTAGRAM_MAINTENANCE_TIMEOUT')
 
-  let signalRelease!: () => void
-  const released = new Promise<void>((resolve) => { signalRelease = resolve })
-  process.once('SIGUSR2', signalRelease)
-
-  await withInstagramMaintenanceDrain(prisma, target, async () => {
-    process.stdout.write('INSTAGRAM_MAINTENANCE_DRAIN_READY=YES\n')
-    await released
-  }, { timeoutMs, allowLegacyLeaseSchema })
+  const released = createMaintenanceReleaseWait(timeoutMs)
+  try {
+    await withInstagramMaintenanceDrain(prisma, target, async () => {
+      process.stdout.write('INSTAGRAM_MAINTENANCE_DRAIN_READY=YES\n')
+      await released.promise
+    }, { timeoutMs, allowLegacyLeaseSchema })
+  } finally {
+    released.dispose()
+  }
 
   process.stdout.write('INSTAGRAM_MAINTENANCE_HOLD_RELEASED=YES\n')
 }
