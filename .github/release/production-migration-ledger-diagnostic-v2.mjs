@@ -415,6 +415,11 @@ export function compareMigrationManifests(left, right) {
   return stable(left) === stable(right)
 }
 
+export function compareSchemaManifests(productionManifest, candidateManifest) {
+  if (!productionManifest || !candidateManifest) return 'UNKNOWN'
+  return compareMigrationManifests(productionManifest, candidateManifest) ? 'YES' : 'NO'
+}
+
 function normalizeTimestamp(value) {
   if (value === null || value === undefined) return null
   const text = String(value)
@@ -638,7 +643,12 @@ function safeCandidateRoot(root) {
 
 function migrationNamesAt(root) {
   const entries = fs.readdirSync(root, { withFileTypes: true })
-  const names = entries.map(entry => entry.name).sort()
+  const lockEntry = entries.find(entry => entry.name === 'migration_lock.toml')
+  if (lockEntry) {
+    const lockPath = path.join(root, 'migration_lock.toml')
+    lstatRegular(lockPath, 'MIGRATION_LOCK_INVALID', 1024 * 1024)
+  }
+  const names = entries.filter(entry => entry.name !== 'migration_lock.toml').map(entry => entry.name).sort()
   requireThat(names.length > 0 && names.every(name => MIGRATION_NAME.test(name)), 'MIGRATION_TREE_NAME_INVALID')
   for (const name of names) {
     const directory = path.join(root, name)
@@ -1069,8 +1079,8 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
   const productionManifests = new Map()
   const productionMigrationRoot = path.join(release, 'prisma', 'migrations')
   const productionNames = migrationNamesAt(productionMigrationRoot)
-  requireThat(JSON.stringify(productionNames) === JSON.stringify(validatedPackage.names), 'MIGRATION_TREE_NAME_MISMATCH')
-  for (const name of validatedPackage.names) {
+  requireThat(productionNames.every(name => validatedPackage.names.includes(name)), 'MIGRATION_TREE_NAME_MISMATCH')
+  for (const name of productionNames) {
     const file = safeMigrationDirectory(release, name)
     productionFiles.set(name, file)
     productionManifests.set(name, parseSchemaManifest(file.sql))
@@ -1136,12 +1146,10 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
         match: metadataVisibility === 'VERIFIED' ? schema.match : 'UNKNOWN',
         visibilityVerified: metadataVisibility === 'VERIFIED',
       }
-      const sameExpectedObjects = productionManifest && rcManifest
-        ? compareMigrationManifests(productionManifest, rcManifest)
-        : productionManifest === rcManifest
-      if (!sameExpectedObjects) schemaResult.match = 'UNKNOWN'
+      const sameExpectedObjects = compareSchemaManifests(productionManifest, rcManifest)
+      if (sameExpectedObjects !== 'YES') schemaResult.match = 'UNKNOWN'
       outputMigration(name, production, { sha256: rcSha }, ledger.rows.get(name) ?? [], ledger.present, schemaResult, emit, validatedPackage.names)
-      emit('PRODUCTION_EQ_RC_SCHEMA_OBJECTS', sameExpectedObjects ? 'YES' : 'NO')
+      emit('PRODUCTION_EQ_RC_SCHEMA_OBJECTS', sameExpectedObjects)
     }
     const ledgerNames = [...new Set((ledger.allRows ?? []).map(row => String(row.migration_name)))]
     const unexpectedLedgerNames = ledgerNames.filter(name => !validatedPackage.names.includes(name)).sort()

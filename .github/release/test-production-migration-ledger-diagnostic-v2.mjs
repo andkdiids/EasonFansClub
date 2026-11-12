@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -12,6 +13,7 @@ import {
   classifyMigration,
   checksumsEqual,
   compareSchema,
+  compareSchemaManifests,
   databaseIdentityMatches,
   ledgerChecksumEvidence,
   metadataVisibilityStatus,
@@ -22,6 +24,7 @@ import {
   readDatabaseContext,
   safeErrorClass,
   validateHostIdentity,
+  validateCandidateTree,
 } from './production-migration-ledger-diagnostic-v2.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -46,6 +49,29 @@ test('diagnostic accepts the current main candidate and full migration tree', ()
   assert.match(CANDIDATE_SHA, SHA)
   assert.equal(EXPECTED_PRODUCTION_SHA, CANDIDATE_SHA)
   assert.ok(MIGRATIONS.length >= 180)
+})
+
+test('complete migration tree accepts the root migration lock file', () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'ecfc-migration-tree-'))
+  try {
+    const migrationRoot = path.join(fixture, 'prisma', 'migrations')
+    const migrationName = '20261113000000_probe'
+    fs.mkdirSync(path.join(migrationRoot, migrationName), { recursive: true })
+    fs.writeFileSync(path.join(migrationRoot, migrationName, 'migration.sql'), 'CREATE TABLE `Probe` (`id` INT NOT NULL, PRIMARY KEY (`id`));\n')
+    fs.writeFileSync(path.join(migrationRoot, 'migration_lock.toml'), 'provider = "mysql"\n')
+    const result = validateCandidateTree(fixture, CANDIDATE_SHA)
+    assert.deepEqual(result.names, [migrationName])
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('schema object comparison is tri-state when either manifest is unavailable', () => {
+  const manifest = parseMigrationSql('CREATE TABLE `Probe` (`id` INT NOT NULL, PRIMARY KEY (`id`));')
+  assert.equal(compareSchemaManifests(null, null), 'UNKNOWN')
+  assert.equal(compareSchemaManifests(manifest, null), 'UNKNOWN')
+  assert.equal(compareSchemaManifests(manifest, manifest), 'YES')
+  assert.equal(compareSchemaManifests(manifest, { ...manifest, tables: ['Other'] }), 'NO')
 })
 
 test('pinned SSH identity accepts exact trusted host, key, and fingerprint', () => {
