@@ -26,7 +26,7 @@ test('only normal release resolves; termination rejects and cleanup is idempoten
     const wait = createMaintenanceReleaseWait(1_000)
     const listener = process.listeners(signal).at(-1)
     assert.ok(listener)
-    listener()
+    listener(signal)
     if (signal === 'SIGUSR2') await wait.promise
     else await assert.rejects(wait.promise, /INSTAGRAM_MAINTENANCE_TERMINATED/)
     wait.dispose()
