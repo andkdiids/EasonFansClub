@@ -306,7 +306,7 @@ jobs:
       - name: Next.js production build
         shell: bash
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           set -euo pipefail
           pnpm build
