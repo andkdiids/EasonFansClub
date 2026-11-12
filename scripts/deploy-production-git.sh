@@ -353,7 +353,8 @@ start_instagram_maintenance_drain() {
   (
     cd "${release_dir}"
     umask 077
-    exec "${release_dir}/node_modules/.bin/tsx" scripts/instagram-maintenance-hold.ts 1800000 --allow-legacy-lease-schema
+    # Keep the tracked PID identical to the process handling release signals.
+    exec node --import tsx scripts/instagram-maintenance-hold.ts 1800000 --allow-legacy-lease-schema
   ) >"${instagram_maintenance_hold_log}" 2>&1 &
   instagram_maintenance_hold_pid=$!
   instagram_maintenance_hold_started=true
