@@ -82,7 +82,19 @@ test('deployment retains main release boundary and candidate exact-SHA safety', 
 })
 
 test('main production diagnostic workflows and scripts remain unchanged', () => {
+  const reviewedDiagnostics = new Map([
+    ['.github/workflows/production-migration-ledger-diagnostic-v2.yml', '17600e7d0bb12792336e8235a0c85d89213f632ec61bffe44756af9f89cd250f'],
+    ['.github/workflows/production-strict-readonly-preflight.yml', 'a938a5d06e883f2fdb9bb39ac246e98b735a6b8dd588ec57798131f5d21da16a'],
+    ['.github/release/production-migration-ledger-diagnostic-v2.mjs', 'e7e46874378d54f90d025f1d2088b30b9bda16bb51addbcc2d68279336b5f519'],
+    ['.github/release/strict-readonly-preflight.mjs', '3d6396540ff84d8bdd6d2ce0cf39f269a932eca8719cd25aae31c227299cf9db'],
+    ['.github/release/test-production-migration-ledger-diagnostic-v2.mjs', '2853b9ce2ff0ac4d19a94d163c5c5dfa19da937ce9287b5f715ed2b35c50e668'],
+    ['.github/release/test-strict-readonly-preflight.mjs', '989ae7b601e0d67cc075c5053445a899aabef72be97bc5ac83926f2780cb6fc6'],
+  ])
+  for (const [path, digest] of reviewedDiagnostics) {
+    assert.equal(createHash('sha256').update(source(path)).digest('hex'), digest, `reviewed RC14 diagnostic: ${path}`)
+  }
   const intentionallyReviewedReleaseControlPaths = new Set([
+    ...reviewedDiagnostics.keys(),
     '.github/workflows/deploy.yml',
     '.github/workflows/android-release-infra-ci.yml',
     '.github/workflows/production-server-rc-v3.yml', // remove the manual backup attestation gate; deployment and migration guards remain covered by deploy-policy tests
@@ -93,7 +105,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   ])
   const paths = execFileSync('git', ['ls-tree', '-r', '--name-only', '80b62a5938aba4d2b50075ed0ed55da169c94f4d', '.github'], { encoding: 'utf8' })
     .trim().split('\n').filter(path => !intentionallyReviewedReleaseControlPaths.has(path))
-  assert.equal(paths.length, 31, 'all main diagnostic/release-policy files remain unchanged except explicitly reviewed backup-gate and RC14 CI paths')
+  assert.equal(paths.length, 25, 'all other diagnostic/release-policy files retain their original protection')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
   const mainUnifiedCi = baseSource('.github/workflows/unified-ci.yml')
   const expectedUnifiedCi = mainUnifiedCi.replace(
@@ -120,6 +132,23 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), 'ef9d773a69f3e84f24f68300e3b066770c39b4fed1abfe5a386db5c247fb2c8e', 'reviewed Android staging workflow must not change without updating this guard')
   const reviewedMetadata = source('.github/workflows/configure-android-version.yml')
   assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), 'f9f9cd7b2a02998a6c96d05132f4315f2b03649ad883f4572de335f3c5b996ad', 'reviewed Android metadata workflow must not change without updating this guard')
+})
+
+test('reviewed RC14 diagnostics retain exact main identity and read-only production checks', () => {
+  for (const path of ['.github/workflows/production-migration-ledger-diagnostic-v2.yml', '.github/workflows/production-strict-readonly-preflight.yml']) {
+    const body = source(path)
+    assert.match(body, /workflow_dispatch:/)
+    assert.match(body, /contents: read/)
+    assert.match(body, /refs\/heads\/main/)
+    assert.match(body, /git\/ref\/heads\/main/)
+    assert.match(body, /candidate_sha:/)
+    assert.match(body, /expected_production_sha:/)
+    assert.doesNotMatch(body, /prisma migrate deploy|pm2 restart|pm2 reload|actions: write|contents: write/)
+  }
+  const ledger = source('.github/release/production-migration-ledger-diagnostic-v2.mjs')
+  assert.match(ledger, /PRODUCTION_RELEASE_SHA_MISMATCH/)
+  assert.match(ledger, /checksum/)
+  assert.match(ledger, /\.deployed-sha/)
 })
 
 test('Ecenter conflict retains GET/PATCH request-auth plus generic identity regression guard', () => {
