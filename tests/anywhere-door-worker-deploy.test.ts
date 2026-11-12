@@ -42,3 +42,9 @@ test('post-switch and rollback health require actual PM2 release SHA and process
   assert.match(deploy, /WORKER_RELEASE_SHA=\$\{expected_sha\}/)
   assert.doesNotMatch(deploy, /pm2\s+(?:restart|reload)\s+all/)
 })
+
+test('maintenance helper failure reports liveness, exit status, and a redacted helper log before blocking deployment', () => {
+  assert.match(deploy, /print_instagram_maintenance_helper_diagnostics\(\)[\s\S]*?INSTAGRAM_MAINTENANCE_HELPER_PID_STATE=EXITED[\s\S]*?wait "\$\{instagram_maintenance_hold_pid\}"[\s\S]*?INSTAGRAM_MAINTENANCE_HELPER_EXIT_STATUS=/)
+  assert.ok(deploy.includes("sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\\1://[REDACTED]#gi'"))
+  assert.match(deploy, /print_instagram_maintenance_helper_diagnostics\r?\n[ \t]*die "Instagram maintenance helper is no longer live/)
+})
