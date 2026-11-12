@@ -21,8 +21,6 @@ env:
   ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
   FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
   AUDITED_WORKFLOW_PARENT_SHA: 061ccc26777de6697795be393d2afa2d0df6a5ca
-  DB_BACKUP_CONFIRMED: "YES"
-  BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
 jobs:
   release:
@@ -44,17 +42,6 @@ jobs:
           [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || { echo "::error::Manual dispatch only."; exit 1; }
           [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Dispatch from main only."; exit 1; }
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid workflow source SHA."; exit 1; }
-
-      - name: Require the owner-confirmed recoverable database backup
-        id: backup_gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$DB_BACKUP_CONFIRMED" == "YES" ]] || { echo "::error::Database backup prerequisite is not confirmed."; exit 1; }
-          [[ "$BACKUP_CONFIRMATION_SOURCE" == "MANUAL_OWNER_CONFIRMATION" ]] || { echo "::error::Database backup confirmation source is invalid."; exit 1; }
-          printf 'DB_BACKUP_CONFIRMED=%s\n' "$DB_BACKUP_CONFIRMED"
-          printf 'BACKUP_CONFIRMATION_SOURCE=%s\n' "$BACKUP_CONFIRMATION_SOURCE"
-          echo 'DB_BACKUP_GATE=PASS'
 
       - name: Checkout the exact workflow source from main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified checkout v4

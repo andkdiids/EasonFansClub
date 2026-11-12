@@ -85,6 +85,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   const intentionallyReviewedReleaseControlPaths = new Set([
     '.github/workflows/deploy.yml',
     '.github/workflows/android-release-infra-ci.yml',
+    '.github/workflows/production-server-rc-v3.yml', // remove the manual backup attestation gate; deployment and migration guards remain covered by deploy-policy tests
     '.github/workflows/recording-sessions-v2-mysql.yml', // expanded for the RC14 isolated Worker fencing integration suite
     '.github/workflows/unified-ci.yml', // exact Node heap override for the RC14 Next.js build OOM
     '.github/workflows/publish-android-rc11.yml', // separately guarded below and by Android release tests
@@ -92,7 +93,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   ])
   const paths = execFileSync('git', ['ls-tree', '-r', '--name-only', '80b62a5938aba4d2b50075ed0ed55da169c94f4d', '.github'], { encoding: 'utf8' })
     .trim().split('\n').filter(path => !intentionallyReviewedReleaseControlPaths.has(path))
-  assert.equal(paths.length, 32, 'all main diagnostic/release-policy files remain unchanged except explicitly reviewed RC14 CI paths')
+  assert.equal(paths.length, 31, 'all main diagnostic/release-policy files remain unchanged except explicitly reviewed backup-gate and RC14 CI paths')
   for (const path of paths) assert.equal(source(path), baseSource(path), path)
   const mainUnifiedCi = baseSource('.github/workflows/unified-ci.yml')
   const expectedUnifiedCi = mainUnifiedCi.replace(

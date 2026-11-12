@@ -49,20 +49,22 @@ on:
       - 'scripts/rollback-production-git.sh'
       - 'tests/android-rc11-publish-infrastructure.test.ts'
       - 'tests/rc11-apksigner-diagnostics.test.mjs'
+      # Retired attestation files are infra-only deletions; never auto-deploy them.
       - 'scripts/production-backup-gate.mjs'
       - 'scripts/production-backup-gate.d.mts'
-      - 'scripts/deploy-production-git.sh'
       - 'scripts/production-risk-attestation.mjs'
       - 'scripts/diagnose-production-attestation.mjs'
       - 'scripts/quarantine-invalid-production-attestation.mjs'
       - 'scripts/verify-production-quarantine-archive.mjs'
       - 'tests/production-backup-gate.test.ts'
       - 'tests/deploy-backup-gate.test.ts'
+      - 'tests/production-risk-attestation.test.mjs'
       - 'tests/production-attestation-diagnostic.test.mjs'
       - 'tests/production-attestation-quarantine.test.mjs'
       - 'tests/production-attestation-quarantine-integrity.test.mjs'
+      - 'tests/deploy-policy.test.ts'
+      - 'scripts/deploy-production-git.sh'
       - 'tests/topic-v2-main-integration.test.ts'
-      - 'tests/production-risk-attestation.test.mjs'
       - 'middleware.ts'
       - 'tests/deploy-skip-db-mode.test.ts'
       - 'tests/middleware-auth.test.ts'
@@ -84,34 +86,6 @@ on:
           - full
           - skip-db
         default: full
-      restore_drill_waiver:
-        description: >-
-          Explicit, written, one-off approval that waives ONLY the restore-drill
-          requirement (schemaVersion=2). Defaults to 'none' so a push event can
-          never take the waiver path. Requires a signed, exact-SHA, short-lived
-          host attestation; all automatic-backup/PITR checks remain strict.
-        required: false
-        type: choice
-        options:
-          - none
-          - approved
-        default: none
-      risk_acceptance:
-        description: >-
-          Explicit, written, one-off RISK ACCEPTANCE (schemaVersion=3) for a
-          release whose owner accepts, in writing, that NO independent CynosDB
-          backup/PITR verification and NO restore drill were performed. Defaults
-          to 'none' so a push event can never take this path. The attestation
-          MUST NOT assert any backup/PITR/drill fact (fabrication is rejected);
-          the gate prints BACKUP_VERIFIED=NO / BACKUP_PITR_VERIFIED=NO. Strict
-          schemaVersion 1 (and drill-only v2) paths are unchanged. This is not a
-          permanent bypass; it is a single-SHA, short-lived, audited waiver.
-        required: false
-        type: choice
-        options:
-          - none
-          - approved
-        default: none
 
 permissions:
   contents: read
@@ -372,137 +346,6 @@ jobs:
           printf '%s\n' "${result}" | grep -Fxq "TARGET_SHA=${DEPLOY_SHA}" || exit 1
           echo "production_sha=${production_sha}" >> "${GITHUB_OUTPUT}"
 
-      # HARD GATE: no production migration and no atomic switch may start
-      # unless a human has verified, on the Tencent Cloud CynosDB console,
-      # that a recent automatic backup exists and PITR is enabled for THIS exact
-      # release SHA. schemaVersion=1 ALSO requires a real restore drill.
-      # schemaVersion=2 waives ONLY that drill, and is accepted only when this
-      # workflow is explicitly re-triggered with restore_drill_waiver=approved
-      # AND the host attestation carries a named, recent, written approval
-      # bound to the exact deployed SHA. schemaVersion=3 is the narrowest door:
-      # an explicit, one-off, exact-SHA risk acceptance for a release whose owner
-      # accepts that NO independent backup/PITR verification and NO restore drill
-      # were performed (the attestation must NOT assert any backup/PITR fact).
-      # All three paths are reachable ONLY via an explicit workflow_dispatch;
-      # push events always fall back to the strict path, so the first automatic
-      # full-DB deployment after a merge is blocked until the attestation is ready.
-      # The host-side attestation is strictly read-only and contains no
-      # credentials. It gates deployments that run database migrations; an
-      # explicit skip-db deployment does not run or consume database backup proof.
-      - name: Require a verified recoverable production database backup
-        id: backup_gate
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.db_mode != 'skip-db' }}
-        timeout-minutes: 10
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT }}
-          BACKUP_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
-          DEPLOY_SHA: ${{ github.sha }}
-          RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
-          RISK_ACCEPTANCE_MODE: ${{ inputs.risk_acceptance || 'none' }}
-        run: |
-          set -euo pipefail
-
-          echo "===== [backup-gate] Hard pre-deployment gate ====="
-          gate_file="${BACKUP_ATTESTATION_FILE:-/home/apps/easonfansclub/shared/.backup-verification.json}"
-          [[ "$gate_file" =~ ^/[A-Za-z0-9._/-]+\.json$ ]] || {
-            echo "::error::Backup attestation path is invalid."
-            exit 1
-          }
-          [[ -s "${RUNNER_TEMP}/easonfansclub_deploy_key" && -s "${HOME}/.ssh/known_hosts" ]] || {
-            echo "::error::Strict deployment SSH credentials were not prepared."
-            exit 1
-          }
-          [[ -f scripts/production-backup-gate.mjs ]] || {
-            echo "::error::Backup gate script is missing from the reviewed source."
-            exit 1
-          }
-          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "::error::Invalid deploy SHA for the backup gate."
-            exit 1
-          }
-          case "${RESTORE_DRILL_WAIVER_MODE}" in
-            none) echo "RESTORE_DRILL_WAIVER_MODE=NONE (strict restore-drill requirement)" ;;
-            approved) echo "RESTORE_DRILL_WAIVER_MODE=APPROVED (one-off, exact-SHA written approval required)" ;;
-            *) echo "::error::Invalid restore drill waiver mode."; exit 1 ;;
-          esac
-          case "${RISK_ACCEPTANCE_MODE}" in
-            none) echo "RISK_ACCEPTANCE_MODE=NONE (no backup/PITR/drill verification required to be waived)" ;;
-            approved) echo "RISK_ACCEPTANCE_MODE=APPROVED (one-off, exact-SHA written risk acceptance required)" ;;
-            *) echo "::error::Invalid risk acceptance mode."; exit 1 ;;
-          esac
-          if [[ "${RISK_ACCEPTANCE_MODE}" == approved && "${RESTORE_DRILL_WAIVER_MODE}" != none ]]; then
-            echo "::error::Schema v3 risk acceptance cannot be combined with a separate restore-drill waiver."
-            exit 1
-          fi
-
-          remote_host="${SERVER_USER}@${SERVER_HOST}"
-          # Preflight is read-only. Schema v3 is consumed only inside the final
-          # deploy script after its server lock and live-SHA compare-and-swap.
-          printf -v remote_command \
-            'test -f /home/apps/easonfansclub/.deploy.lock && test ! -L /home/apps/easonfansclub/.deploy.lock || exit 1; exec 9<>/home/apps/easonfansclub/.deploy.lock; flock -n 9 || { echo SERVER_DEPLOY_LOCK_BUSY; exit 1; }; current_target="$(readlink -f -- /home/apps/easonfansclub/current)" || exit 1; case "$current_target" in /home/apps/easonfansclub/releases/*) ;; *) echo PRODUCTION_CURRENT_OUTSIDE_RELEASES; exit 1 ;; esac; test -s "$current_target/.deployed-sha" || exit 1; production_sha="$(tr -d "[:space:]" < "$current_target/.deployed-sha")"; [[ "$production_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1; echo "BACKUP_GATE_PRODUCTION_SHA=$production_sha"; node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q' \
-            "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE"
-
-          set +e
-          gate_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s \
-            ssh -T \
-              -p "${SERVER_PORT}" \
-              -i "${RUNNER_TEMP}/easonfansclub_deploy_key" \
-              -o BatchMode=yes \
-              -o IdentitiesOnly=yes \
-              -o PreferredAuthentications=publickey \
-              -o PasswordAuthentication=no \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
-              -o GlobalKnownHostsFile=/dev/null \
-              -o ConnectTimeout=10 \
-              "${remote_host}" "${remote_command}" \
-            < scripts/production-backup-gate.mjs 2>&1)"
-          gate_status=$?
-          set -e
-          printf '%s\n' "${gate_output}"
-
-          if [[ "${gate_status}" -ne 0 ]]; then
-            echo "::error::Production backup gate rejected this deployment (exit ${gate_status})."
-            exit "${gate_status}"
-          fi
-          if ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_GATE=VERIFIED'; then
-            echo "::error::Backup gate did not emit an explicit VERIFIED result."
-            exit 1
-          fi
-          if [[ "${RESTORE_DRILL_WAIVER_MODE}" == approved ]]; then
-            # A drill waiver must never be misreported as a verified restore drill.
-            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'RESTORE_DRILL_WAIVED=YES' ||
-               ! printf '%s\n' "${gate_output}" | grep -Fxq 'RESTORE_DRILL_VERIFIED=NO'; then
-              echo "::error::An approved drill waiver must explicitly report that the restore drill was NOT verified."
-              exit 1
-            fi
-          fi
-          if [[ "${RISK_ACCEPTANCE_MODE}" == approved ]]; then
-            # Risk acceptance must be an actual schema v3 proof for this exact SHA.
-            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_GATE_SCHEMA_VERSION=3' ||
-               ! printf '%s\n' "${gate_output}" | grep -Fxq "BACKUP_ATTESTATION_TARGET_SHA=${DEPLOY_SHA}" ||
-               ! printf '%s\n' "${gate_output}" | grep -Fxq 'RISK_ACCEPTED=YES' ||
-               ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_VERIFIED=NO' ||
-               ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_PITR_VERIFIED=NO'; then
-              echo "::error::Schema v3 risk acceptance must match this SHA and report unverified backup/PITR."
-              exit 1
-            fi
-            if printf '%s\n' "${gate_output}" | grep -Eq '^BACKUP_ID='; then
-              echo "::error::Risk acceptance must not assert a backup id; fabrication is rejected."
-              exit 1
-            fi
-          fi
-          production_sha="$(printf '%s\n' "${gate_output}" | sed -n 's/^BACKUP_GATE_PRODUCTION_SHA=//p' | tail -n 1)"
-          [[ "${production_sha}" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "::error::Locked preflight did not return the live production SHA."
-            exit 1
-          }
-          echo "production_sha=${production_sha}" >> "${GITHUB_OUTPUT}"
-          echo "BACKUP_GATE_STEP=PASS"
-          echo "verified_sha=${DEPLOY_SHA}" >> "${GITHUB_OUTPUT}"
-
       - name: Deploy exact commit from server Git
         id: deploy
         timeout-minutes: 45
@@ -517,14 +360,7 @@ jobs:
           PM2_APP_NAME: easonfansclub
           TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE: ${{ vars.TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE }}
           DEPLOY_DB_MODE: ${{ inputs.db_mode || 'full' }}
-          # Server-side defence in depth for full database deployments.
-          BACKUP_GATE_VERIFIED_SHA: ${{ steps.backup_gate.outputs.verified_sha }}
           EXPECTED_PRODUCTION_SHA: ${{ steps.production_sha_preflight.outputs.production_sha }}
-          BACKUP_GATE_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
-          BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
-          BACKUP_GATE_RISK_ACCEPTANCE_MODE: ${{ inputs.risk_acceptance || 'none' }}
-          BACKUP_GATE_RUN_ID: ${{ github.run_id }}
-          BACKUP_GATE_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
 
@@ -541,36 +377,6 @@ jobs:
                 "/${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}/" == *"/../"* ]]; then
             echo "::error::Lottery approval path must be a safe absolute .json path."
             exit 1
-          fi
-
-          backup_gate_env=()
-          if [[ "${deploy_db_mode}" == full ]]; then
-            backup_gate_file="${BACKUP_GATE_ATTESTATION_FILE:-/home/apps/easonfansclub/shared/.backup-verification.json}"
-            backup_gate_restore_mode="${BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE:-none}"
-            backup_gate_risk_mode="${BACKUP_GATE_RISK_ACCEPTANCE_MODE:-none}"
-            case "${backup_gate_restore_mode}" in none|approved) ;; *) echo "::error::Invalid backup-gate restore-drill mode."; exit 1 ;; esac
-            case "${backup_gate_risk_mode}" in none|approved) ;; *) echo "::error::Invalid backup-gate risk-acceptance mode."; exit 1 ;; esac
-            if [[ ! "${backup_gate_file}" =~ ^/[A-Za-z0-9._/-]+\.json$ ]]; then
-              echo "::error::Backup attestation path must be a safe absolute JSON file."
-              exit 1
-            fi
-            if [[ "${backup_gate_risk_mode}" == approved ]]; then
-              [[ "${backup_gate_file}" =~ ^/home/apps/easonfansclub/shared/[A-Za-z0-9._/-]+\.json$ &&
-                 "/${backup_gate_file}/" != *"/../"* ]] || { echo "::error::Schema v3 attestation path must stay inside the protected shared directory."; exit 1; }
-              [[ "${backup_gate_restore_mode}" == none ]] || { echo "::error::Schema v3 risk acceptance cannot be combined with a restore-drill waiver."; exit 1; }
-              [[ "${BACKUP_GATE_RUN_ID:-}" =~ ^[1-9][0-9]{0,19}$ ]] || { echo "::error::Invalid deployment run ID."; exit 1; }
-              [[ "${BACKUP_GATE_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]{0,5}$ ]] || { echo "::error::Invalid deployment run attempt."; exit 1; }
-            fi
-            backup_gate_env=(
-              "BACKUP_GATE_VERIFIED_SHA=${BACKUP_GATE_VERIFIED_SHA:-}"
-              "BACKUP_GATE_ATTESTATION_FILE=${backup_gate_file}"
-              "BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE=${backup_gate_restore_mode}"
-              "BACKUP_GATE_RISK_ACCEPTANCE_MODE=${backup_gate_risk_mode}"
-              "BACKUP_GATE_RUN_ID=${BACKUP_GATE_RUN_ID:-}"
-              "BACKUP_GATE_RUN_ATTEMPT=${BACKUP_GATE_RUN_ATTEMPT:-}"
-            )
-          else
-            echo "BACKUP_GATE=NOT_REQUIRED_FOR_SKIP_DB"
           fi
 
           REMOTE_HOST="${SERVER_USER}@${SERVER_HOST}"
@@ -605,7 +411,6 @@ jobs:
           deploy_output="$(cat scripts/deploy-safety.sh scripts/deploy-production-git.sh \
             | timeout --foreground --signal=TERM --kill-after=7m 35m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
               env "TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE=${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}" \
-                  "${backup_gate_env[@]}" \
               bash -s -- "${deploy_arguments[@]}")"
           deploy_status=$?
           set -e
