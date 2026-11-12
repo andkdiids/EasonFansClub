@@ -648,7 +648,9 @@ function migrationNamesAt(root) {
     const lockPath = path.join(root, 'migration_lock.toml')
     lstatRegular(lockPath, 'MIGRATION_LOCK_INVALID', 1024 * 1024)
   }
-  const names = entries.filter(entry => entry.name !== 'migration_lock.toml').map(entry => entry.name).sort()
+  const readme = entries.find(entry => entry.name === 'README.md')
+  if (readme) lstatRegular(path.join(root, 'README.md'), 'MIGRATION_README_INVALID', 1024 * 1024)
+  const names = entries.filter(entry => !['migration_lock.toml', 'README.md'].includes(entry.name)).map(entry => entry.name).sort()
   requireThat(names.length > 0 && names.every(name => MIGRATION_NAME.test(name)), 'MIGRATION_TREE_NAME_INVALID')
   for (const name of names) {
     const directory = path.join(root, name)
@@ -1200,6 +1202,10 @@ async function main() {
     console.log(`CANDIDATE_SHA=${process.argv[4]}`)
     console.log(`CANDIDATE_MIGRATION_SQL_COUNT=${candidate.names.length}`)
     for (const name of candidate.names) console.log(`CANDIDATE_MIGRATION_SHA256 ${name}=${candidate.hashes.get(name)}`)
+    return 0
+  }
+  if (mode === 'validate-package') {
+    validateCandidatePackage(process.argv[3], process.argv[4])
     return 0
   }
   if (mode === 'collect') {

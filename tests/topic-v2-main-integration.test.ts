@@ -83,11 +83,11 @@ test('deployment retains main release boundary and candidate exact-SHA safety', 
 
 test('main production diagnostic workflows and scripts remain unchanged', () => {
   const reviewedDiagnostics = new Map([
-    ['.github/workflows/production-migration-ledger-diagnostic-v2.yml', '17600e7d0bb12792336e8235a0c85d89213f632ec61bffe44756af9f89cd250f'],
+    ['.github/workflows/production-migration-ledger-diagnostic-v2.yml', '9c39e9ac6897953b57fe47a53ce5217d3667a6c7875db5a33f12633cecff3de0'],
     ['.github/workflows/production-strict-readonly-preflight.yml', 'a938a5d06e883f2fdb9bb39ac246e98b735a6b8dd588ec57798131f5d21da16a'],
-    ['.github/release/production-migration-ledger-diagnostic-v2.mjs', '2a0435142a2f1c1678f6c250eaa817510551601863f7c4127eb31aaddd573aea'],
+    ['.github/release/production-migration-ledger-diagnostic-v2.mjs', '724cacff167f60b77b493b32a40a8bb58ea3d7d208794d3dea4d0f88199700a2'],
     ['.github/release/strict-readonly-preflight.mjs', '3d6396540ff84d8bdd6d2ce0cf39f269a932eca8719cd25aae31c227299cf9db'],
-    ['.github/release/test-production-migration-ledger-diagnostic-v2.mjs', '05f80ab614714ccce54fcbeeb37e4eff694b1a421e9e73cdb3cb45f8567a95e5'],
+    ['.github/release/test-production-migration-ledger-diagnostic-v2.mjs', '0c14dcfe21c784f6cb0d21615e316b3859d0bcd3ec13fc2fe3d5e1006c0ec45e'],
     ['.github/release/test-strict-readonly-preflight.mjs', '989ae7b601e0d67cc075c5053445a899aabef72be97bc5ac83926f2780cb6fc6'],
   ])
   for (const [path, digest] of reviewedDiagnostics) {
