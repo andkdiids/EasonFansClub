@@ -1,6 +1,9 @@
 import 'dotenv/config'
-import { runInstagramSyncWorkerOnce } from '@/lib/instagram/worker'
+import { runInstagramSyncWorkerOnce, type InstagramWorkerResult } from '@/lib/instagram/worker'
 import { prisma } from '@/lib/prisma'
+import { isDeploymentDbMaintenanceHeld } from '@/lib/deployment-db-maintenance-hold'
+import { runUnlessDeploymentHeld } from '@/lib/instagram/worker-hold'
+import { InstagramAdmissionUnavailableError } from '@/lib/instagram/maintenance-protocol'
 
 /**
  * Independent one-shot worker entrypoint. PM2 or a scheduler may invoke this
@@ -34,7 +37,21 @@ function waitOrStop(milliseconds: number) {
 async function main() {
   try {
     while (!stopping) {
-      const result = await runInstagramSyncWorkerOnce()
+      let attempt: { held: true } | { held: false; result: InstagramWorkerResult }
+      try {
+        attempt = await runUnlessDeploymentHeld(isDeploymentDbMaintenanceHeld, () => runInstagramSyncWorkerOnce())
+      } catch (error) {
+        if (!(error instanceof InstagramAdmissionUnavailableError)) throw error
+        console.info('[instagram-sync-worker]', { status: 'ADMISSION_HELD' })
+        await waitOrStop(5000)
+        continue
+      }
+      if (attempt.held) {
+        console.info('[instagram-sync-worker]', { status: 'DEPLOYMENT_MAINTENANCE_HOLD' })
+        await waitOrStop(5000)
+        continue
+      }
+      const result = attempt.result
       console.info('[instagram-sync-worker]', { status: result.status, errorCode: result.errorCode || null })
       const waitMs = result.status === 'SYNC_DISABLED' ? 15 * 60 * 1000 : 60 * 1000
       await waitOrStop(waitMs)

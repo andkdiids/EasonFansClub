@@ -4,7 +4,7 @@ import test from 'node:test'
 import { getAnywhereDoorConfig, buildInstagramMediaStorageKey } from '@/lib/anywhere-door/config'
 import { runAnywhereDoorProductionPreflight } from '@/lib/instagram/production-preflight'
 import { calculateFailureBackoffMinutes, calculateNextAllowedAfterFailure, withTimeout } from '@/lib/instagram/sync-policy'
-import { buildSocialPostNotificationBatch } from '@/lib/instagram/sync-service'
+import { buildSocialPostNotificationBatch, syncInstagramPosts } from '@/lib/instagram/sync-service'
 import { MockInstagramMediaLocalizer } from '@/lib/instagram/media'
 import { acquireInstagramSyncLease, buildInstagramSyncLockKey, releaseInstagramSyncLease } from '@/lib/instagram/sync-state'
 import { filterEcenterFeaturesForUser, mergeEcenterFeatureSettings } from '@/lib/ecenter-features'
@@ -60,19 +60,40 @@ test('worker timeout is explicit and releases its timer', async () => {
 test('database lease prevents a second worker from running concurrently', async () => {
   const state = {
     id: 'state-1', platform: 'INSTAGRAM' as const, target: 'mreasonchan', lockToken: null as string | null,
-    lockUntil: null as Date | null,
+    lockUntil: null as Date | null, leaseGeneration: BigInt(0),
   }
   const db = {
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      socialSyncState: {
+        createMany: async () => ({ count: 1 }),
+        findUnique: async () => ({ id: state.id }),
+      },
+      $executeRaw: async (parts: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = parts.join(' ')
+        if (sql.includes('SET lockToken = NULL, lockUntil = NULL')) {
+          const ownsLiveLease = state.target === values[0] && state.lockToken === values[1]
+            && state.leaseGeneration === values[2] && state.lockUntil !== null && state.lockUntil.getTime() > Date.now()
+          if (!ownsLiveLease) return 0
+          state.lockToken = null
+          state.lockUntil = null
+          return 1
+        }
+        if (!sql.includes('leaseGeneration = leaseGeneration + 1')) return 0
+        if (state.lockUntil && state.lockUntil.getTime() > Date.now()) return 0
+        state.lockToken = String(values[0])
+        state.lockUntil = new Date(Date.now() + Number(values[1]) / 1000)
+        state.leaseGeneration += BigInt(1)
+        return 1
+      },
+      $queryRaw: async () => [{ leaseGeneration: state.leaseGeneration, lockUntil: state.lockUntil }],
+    }),
     socialSyncState: {
       findUnique: async () => state,
       create: async () => state,
       findUniqueOrThrow: async () => state,
-      updateMany: async ({ where, data }: { where: { id: string; OR?: Array<{ lockUntil: null } | { lockUntil: { lt: Date } }>; lockToken?: string }; data: { lockToken: string | null; lockUntil: Date | null } }) => {
-        const expiryCondition = where.OR?.find((condition) => typeof condition.lockUntil === 'object' && condition.lockUntil !== null)
-        const queryNow = expiryCondition && typeof expiryCondition.lockUntil === 'object' ? expiryCondition.lockUntil.lt : new Date()
-        const available = !state.lockUntil || state.lockUntil < queryNow
-        const ownsToken = !where.lockToken || state.lockToken === where.lockToken
-        if (where.OR && (!available || !ownsToken)) return { count: 0 }
+      updateMany: async ({ where, data }: { where: { lockToken: string; leaseGeneration: bigint }; data: { lockToken: string | null; lockUntil: Date | null } }) => {
+        const ownsLease = state.lockToken === where.lockToken && state.leaseGeneration === where.leaseGeneration
+        if (!ownsLease) return { count: 0 }
         state.lockToken = data.lockToken
         state.lockUntil = data.lockUntil
         return { count: 1 }
@@ -87,8 +108,23 @@ test('database lease prevents a second worker from running concurrently', async 
   const first = await acquireInstagramSyncLease({ db, now, token: 'worker-a' })
   const second = await acquireInstagramSyncLease({ db, now, token: 'worker-b' })
   assert.equal(first.acquired, true)
+  assert.equal(first.generation, BigInt(1))
   assert.equal(second.acquired, false)
-  assert.equal(await releaseInstagramSyncLease('mreasonchan', 'worker-a', db), true)
+  assert.equal(await releaseInstagramSyncLease('mreasonchan', 'worker-a', first.generation!, db), true)
+  const next = await acquireInstagramSyncLease({ db, now, token: 'worker-c' })
+  assert.equal(next.acquired, true)
+  assert.equal(next.generation, BigInt(2), 'releasing a lease never resets the monotonic generation')
+  state.lockUntil = new Date(Date.now() - 1_000)
+  assert.equal(await releaseInstagramSyncLease('mreasonchan', 'worker-c', next.generation!, db), false, 'an expired owner cannot release a lease')
+  const successor = await acquireInstagramSyncLease({ db, now, token: 'worker-d' })
+  assert.equal(successor.acquired, true)
+  assert.equal(successor.generation, BigInt(3), 'an expired lease is replaced by a higher generation')
+  assert.equal(await releaseInstagramSyncLease('mreasonchan', 'worker-c', next.generation!, db), false, 'a stale owner cannot release a successor lease')
+  assert.equal(await releaseInstagramSyncLease('mreasonchan', 'worker-d', successor.generation!, db), true)
+})
+
+test('Instagram sync refuses to persist without a fencing context', async () => {
+  await assert.rejects(syncInstagramPosts({ username: 'mreasonchan' }), /INSTAGRAM_LEASE_REQUIRED/)
 })
 
 test('production preflight rejects a Mock localizer without revealing secrets', () => {
@@ -117,6 +153,10 @@ test('navigation, admin sync and comments are guarded by the safety layer', () =
   assert.match(read('lib/ecenter-features.ts'), /isAnywhereDoorEnabled\(\)/)
   assert.doesNotMatch(read('app/api/admin/anywhere-door/sync/route.ts'), /syncInstagramPosts/)
   assert.match(read('app/api/admin/anywhere-door/sync/route.ts'), /requestInstagramSync/)
+  const avatarRoute = read('app/api/admin/anywhere-door/avatar/route.ts')
+  assert.match(avatarRoute, /withInstagramWorkerAdmission/)
+  assert.match(avatarRoute, /withInstagramLeaseTransaction\([\s\S]*?tx\.siteSetting\.upsert/)
+  assert.match(avatarRoute, /withInstagramLeaseTransaction\([\s\S]*?tx\.siteSetting\.deleteMany/)
   assert.doesNotMatch(read('app/api/anywhere-door/[postId]/comments/route.ts'), /take: 100/)
   assert.match(read('lib/social-posts.ts'), /take: take \+ 1/)
   assert.doesNotMatch(read('lib/social-posts.ts'), /sourceUrl:/)

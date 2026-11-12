@@ -120,8 +120,83 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     assert.ok(approvedFields, `approved V2 source contains ${name}`)
     for (const field of approvedFields) assert.ok(newBlocks.get(name)?.includes(field), `approved V2 field retained: ${name}.${field}`)
   }
-  const schemaChanges = execFileSync('git', ['diff', '--ignore-all-space', '--name-only', `${currentMainSha}...HEAD`, '--', 'prisma/schema.prisma'], gitOptions).trim()
-  assert.equal(schemaChanges, '', 'schema formatting is allowed, but this test change does not alter schema content')
+  const syncFields = newBlocks.get('SocialSyncState')
+  assert.ok(syncFields, 'Instagram sync state model retained')
+  assert.equal(syncFields.filter((field) => field === 'leaseGeneration BigInt @default(0)').length, 1, 'only the reviewed lease generation field is added')
+
+  const restoredHistoricalFields = new Map<string, string[]>([
+    ['CantoneseQuestion', ['learnerProgress CantoneseLearnerQuestionProgress[]']],
+    ['Post', ['ProfilePostViewHistory ProfilePostViewHistory[]']],
+    ['User', ['ProfilePostViewHistory ProfilePostViewHistory[]', 'CantoneseQuestionProgress CantoneseLearnerQuestionProgress[]']],
+    ['UserPrivacySetting', ['showFavorites Boolean @default(true)']],
+  ])
+  for (const [name, fields] of restoredHistoricalFields) {
+    for (const field of fields) {
+      assert.ok(newBlocks.get(name)?.includes(field), `restored historical schema field retained: ${name}.${field}`)
+    }
+  }
+  const restoredHistoricalModels = new Map<string, string[]>([
+    ['CantoneseLearnerQuestionProgress', [
+      'id String @id @default(cuid())',
+      'userId String',
+      'questionId String @db.VarChar(191)',
+      'attemptCount Int @default(0)',
+      'correctCount Int @default(0)',
+      'wrongCount Int @default(0)',
+      'consecutiveCorrect Int @default(0)',
+      'mastery String @default("NEW") @db.VarChar(16)',
+      'lastWrongAt DateTime?',
+      'lastCorrectAt DateTime?',
+      'lastAnsweredAt DateTime?',
+      'lastAnswerCorrect Boolean @default(false)',
+      'lastWrongAnswer Json?',
+      'createdAt DateTime @default(now())',
+      'updatedAt DateTime @updatedAt',
+      'user User @relation(fields: [userId], references: [id], onDelete: Cascade)',
+      'question CantoneseQuestion @relation(fields: [questionId], references: [externalId], onDelete: Cascade)',
+      '@@unique([userId, questionId])',
+      '@@index([userId, mastery, lastWrongAt])',
+      '@@index([questionId])',
+    ]],
+    ['ProfilePostViewHistory', [
+      'id String @id @default(cuid())',
+      'userId String',
+      'postId String',
+      'viewedAt DateTime @default(now())',
+      'User User @relation(fields: [userId], references: [id], onDelete: Cascade)',
+      'Post Post @relation(fields: [postId], references: [id], onDelete: Cascade)',
+      '@@unique([userId, postId])',
+      '@@index([userId, viewedAt])',
+      '@@index([postId])',
+    ]],
+  ])
+  for (const [name, fields] of restoredHistoricalModels) {
+    assert.deepEqual(newBlocks.get(name), fields, `restored historical model ${name} matches its recorded schema`)
+  }
+  const restoredMigrations = [
+    {
+      name: '20261022090000_profile_mobile_contract',
+      blobSha: '01f80ce19b9ae170834235bc93c46ee24b519c71',
+    },
+    {
+      name: '20261023090000_cantonese_question_progress',
+      blobSha: '7ce5b245114bb12e48969f28f21761b446f39233',
+    },
+  ]
+  for (const migration of restoredMigrations) {
+    const file = `prisma/migrations/${migration.name}/migration.sql`
+    const actualBlobSha = execFileSync('git', ['hash-object', file], gitOptions).trim()
+    assert.equal(actualBlobSha, migration.blobSha, `restored historical migration retains its recorded blob: ${migration.name}`)
+  }
+
+  const comparableBlocks = new Map(newBlocks)
+  comparableBlocks.set('SocialSyncState', syncFields.filter((field) => field !== 'leaseGeneration BigInt @default(0)'))
+  for (const [name, fields] of restoredHistoricalFields) {
+    comparableBlocks.set(name, comparableBlocks.get(name)!.filter((field) => !fields.includes(field)))
+  }
+  comparableBlocks.delete('CantoneseLearnerQuestionProgress')
+  comparableBlocks.delete('ProfilePostViewHistory')
+  assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
   for (const name of concertSchemaBlocks) assert.ok(newBlocks.has(name), `concert schema block retained: ${name}`)
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)
   const additive = read('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql')

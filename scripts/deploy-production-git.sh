@@ -92,19 +92,26 @@ if [[ "${GITHUB_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then :; el
   die "GITHUB_REPOSITORY has an unexpected format."
 fi
 
-backup_gate_restore_mode="${BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE:-none}"
-backup_gate_risk_mode="${BACKUP_GATE_RISK_ACCEPTANCE_MODE:-none}"
-backup_gate_attestation_file="${BACKUP_GATE_ATTESTATION_FILE:-/home/apps/easonfansclub/shared/.backup-verification.json}"
-backup_gate_run_id="${BACKUP_GATE_RUN_ID:-}"
-backup_gate_run_attempt="${BACKUP_GATE_RUN_ATTEMPT:-}"
-case "${backup_gate_restore_mode}" in none|approved) ;; *) die "Invalid backup-gate restore-drill mode." ;; esac
-case "${backup_gate_risk_mode}" in none|approved) ;; *) die "Invalid backup-gate risk-acceptance mode." ;; esac
-if [ "${backup_gate_risk_mode}" = approved ]; then
-  [[ "${backup_gate_restore_mode}" == none ]] || die "Schema v3 risk acceptance cannot be combined with a restore-drill waiver."
-  [[ "${backup_gate_attestation_file}" =~ ^/home/apps/easonfansclub/shared/[A-Za-z0-9._/-]+\.json$ ]] || die "Backup attestation path is outside the protected shared directory."
-  [[ "/${backup_gate_attestation_file}/" != *"/../"* ]] || die "Backup attestation path contains traversal."
-  [[ "${backup_gate_run_id}" =~ ^[1-9][0-9]{0,19}$ ]] || die "Invalid deployment run ID."
-  [[ "${backup_gate_run_attempt}" =~ ^[1-9][0-9]{0,5}$ ]] || die "Invalid deployment run attempt."
+backup_gate_restore_mode=none
+backup_gate_risk_mode=none
+backup_gate_attestation_file=""
+backup_gate_run_id=""
+backup_gate_run_attempt=""
+if [ "${db_mode}" = full ]; then
+  backup_gate_restore_mode="${BACKUP_GATE_RESTORE_DRILL_WAIVER_MODE:-none}"
+  backup_gate_risk_mode="${BACKUP_GATE_RISK_ACCEPTANCE_MODE:-none}"
+  backup_gate_attestation_file="${BACKUP_GATE_ATTESTATION_FILE:-/home/apps/easonfansclub/shared/.backup-verification.json}"
+  backup_gate_run_id="${BACKUP_GATE_RUN_ID:-}"
+  backup_gate_run_attempt="${BACKUP_GATE_RUN_ATTEMPT:-}"
+  case "${backup_gate_restore_mode}" in none|approved) ;; *) die "Invalid backup-gate restore-drill mode." ;; esac
+  case "${backup_gate_risk_mode}" in none|approved) ;; *) die "Invalid backup-gate risk-acceptance mode." ;; esac
+  if [ "${backup_gate_risk_mode}" = approved ]; then
+    [[ "${backup_gate_restore_mode}" == none ]] || die "Schema v3 risk acceptance cannot be combined with a restore-drill waiver."
+    [[ "${backup_gate_attestation_file}" =~ ^/home/apps/easonfansclub/shared/[A-Za-z0-9._/-]+\.json$ ]] || die "Backup attestation path is outside the protected shared directory."
+    [[ "/${backup_gate_attestation_file}/" != *"/../"* ]] || die "Backup attestation path contains traversal."
+    [[ "${backup_gate_run_id}" =~ ^[1-9][0-9]{0,19}$ ]] || die "Invalid deployment run ID."
+    [[ "${backup_gate_run_attempt}" =~ ^[1-9][0-9]{0,5}$ ]] || die "Invalid deployment run attempt."
+  fi
 fi
 
 releases_dir="${APP_DIR}/releases"
@@ -118,8 +125,23 @@ previous_sha=""
 rollback_target=""
 deployment_succeeded=false
 deploy_lock_acquired=false
+database_migration_started=false
+database_migration_completed=false
+release_switched=false
+safe_previous_release_verified=false
 db_maintenance_hold_file="${shared_dir}/deploy-db-maintenance.hold"
 db_maintenance_hold_owned=false
+instagram_maintenance_hold_pid=""
+instagram_maintenance_hold_log=""
+instagram_maintenance_hold_started=false
+instagram_maintenance_hold_released=false
+instagram_maintenance_hold_release_uncertain=false
+instagram_maintenance_hold_ready=false
+instagram_maintenance_hold_persisted=false
+legacy_instagram_worker_stopped=false
+legacy_instagram_worker_was_running=false
+legacy_web_stopped=false
+legacy_web_was_running=false
 PNPM_CMD=()
 
 prune_worktrees() {
@@ -225,6 +247,239 @@ recover_abandoned_releases() {
   prune_worktrees
 }
 
+read_instagram_worker_process_state() {
+  local process_json snapshot
+  process_json="$(pm2 jlist 2>/dev/null)" || return 1
+  snapshot="$(printf '%s' "${process_json}" | node -e '
+    let raw = "";
+    process.stdin.on("data", chunk => raw += chunk);
+    process.stdin.on("end", () => {
+      try {
+        const apps = JSON.parse(raw).filter(entry => entry.name === "instagram-sync-worker");
+        if (!apps.length) return process.stdout.write("ABSENT\t");
+        const stopped = apps.every(entry => (entry.pm2_env || {}).status === "stopped");
+        const pids = apps.map(entry => Number(entry.pid || (entry.pm2_env || {}).pid || 0))
+          .filter(pid => Number.isSafeInteger(pid) && pid > 0);
+        process.stdout.write((stopped ? "stopped" : "active") + "\t" + pids.join(" "));
+      } catch { process.exitCode = 2; }
+    });
+  ')" || return 1
+  IFS=$'\t' read -r legacy_worker_pm2_status legacy_worker_pm2_pids <<<"${snapshot}"
+  [ -n "${legacy_worker_pm2_status}" ]
+}
+
+legacy_instagram_worker_process_alive() {
+  local worker_pid
+  for worker_pid in ${legacy_worker_pm2_pids}; do
+    [[ "${worker_pid}" =~ ^[1-9][0-9]*$ ]] || return 2
+    if kill -0 "${worker_pid}" 2>/dev/null; then return 0; fi
+  done
+  return 1
+}
+
+read_named_pm2_process_state() {
+  local app_name="$1" process_json snapshot
+  process_json="$(pm2 jlist 2>/dev/null)" || return 1
+  snapshot="$(printf '%s' "${process_json}" | node -e '
+    let raw = "";
+    process.stdin.on("data", chunk => raw += chunk);
+    process.stdin.on("end", () => {
+      try {
+        const apps = JSON.parse(raw).filter(entry => entry.name === process.argv[1]);
+        if (!apps.length) return process.stdout.write("ABSENT\t");
+        const stopped = apps.every(entry => (entry.pm2_env || {}).status === "stopped");
+        const pids = apps.map(entry => Number(entry.pid || (entry.pm2_env || {}).pid || 0))
+          .filter(pid => Number.isSafeInteger(pid) && pid > 0);
+        process.stdout.write((stopped ? "stopped" : "active") + "\t" + pids.join(" "));
+      } catch { process.exitCode = 2; }
+    });
+  ' "${app_name}")" || return 1
+  IFS=$'\t' read -r named_pm2_status named_pm2_pids <<<"${snapshot}"
+  [ -n "${named_pm2_status}" ]
+}
+
+named_pm2_process_alive() {
+  local process_pid
+  for process_pid in ${named_pm2_pids:-}; do
+    [[ "${process_pid}" =~ ^[1-9][0-9]*$ ]] || return 2
+    if kill -0 "${process_pid}" 2>/dev/null; then return 0; fi
+  done
+  return 1
+}
+
+stop_legacy_web_app() {
+  local attempt process_alive
+  read_named_pm2_process_state "${PM2_APP_NAME}" || die "Unable to inspect the current Web process before database migration."
+  if [ "${named_pm2_status}" = ABSENT ]; then
+    echo "LEGACY_WEB_APP=ABSENT"
+    return 0
+  fi
+  if [ "${named_pm2_status}" = stopped ] && ! named_pm2_process_alive; then
+    echo "LEGACY_WEB_APP=ALREADY_STOPPED"
+    return 0
+  fi
+
+  legacy_web_was_running=true
+  echo "Stopping the legacy Web app so its unfenced Instagram admin routes cannot write during migration."
+  timeout --foreground --signal=TERM --kill-after=30s 2m pm2 stop "${PM2_APP_NAME}" \
+    || die "Unable to stop the legacy Web app safely before migration."
+  for attempt in $(seq 1 120); do
+    read_named_pm2_process_state "${PM2_APP_NAME}" || die "Unable to confirm legacy Web shutdown."
+    process_alive=false
+    if named_pm2_process_alive; then process_alive=true; fi
+    if [ "${named_pm2_status}" = stopped ] && [ "${process_alive}" = false ]; then
+      legacy_web_stopped=true
+      echo "LEGACY_WEB_APP_STOPPED=YES"
+      return 0
+    fi
+    sleep 1
+  done
+  die "Legacy Web app did not exit after PM2 stop; database migration is blocked."
+}
+
+stop_legacy_instagram_worker() {
+  local attempt process_alive
+  read_instagram_worker_process_state || die "Unable to inspect the legacy Instagram Worker before migration."
+  if [ "${legacy_worker_pm2_status}" = ABSENT ]; then
+    echo "LEGACY_INSTAGRAM_WORKER=ABSENT"
+    return 0
+  fi
+  if [ "${legacy_worker_pm2_status}" = stopped ] && ! legacy_instagram_worker_process_alive; then
+    echo "LEGACY_INSTAGRAM_WORKER=ALREADY_STOPPED"
+    return 0
+  fi
+
+  legacy_instagram_worker_was_running=true
+  echo "Stopping the pre-fencing Instagram Worker and waiting for its process to exit."
+  timeout --foreground --signal=TERM --kill-after=30s 8m pm2 stop instagram-sync-worker \
+    || die "Unable to stop the legacy Instagram Worker safely before migration."
+  for attempt in $(seq 1 480); do
+    read_instagram_worker_process_state || die "Unable to confirm legacy Worker shutdown."
+    process_alive=false
+    if legacy_instagram_worker_process_alive; then process_alive=true; fi
+    if [ "${legacy_worker_pm2_status}" = stopped ] && [ "${process_alive}" = false ]; then
+      legacy_instagram_worker_stopped=true
+      echo "LEGACY_INSTAGRAM_WORKER_STOPPED=YES"
+      return 0
+    fi
+    sleep 1
+  done
+  die "Legacy Instagram Worker did not exit after PM2 stop; database migration is blocked."
+}
+
+start_instagram_maintenance_drain() {
+  local attempt
+  instagram_maintenance_hold_log="$(mktemp "${shared_dir}/.instagram-maintenance-${DEPLOY_SHA}.XXXXXX")" \
+    || die "Unable to create a private log for the Instagram maintenance helper."
+  chmod 600 -- "${instagram_maintenance_hold_log}" || die "Unable to protect the Instagram maintenance helper log."
+  (
+    cd "${release_dir}"
+    umask 077
+    exec "${release_dir}/node_modules/.bin/tsx" scripts/instagram-maintenance-hold.ts 1800000 --allow-legacy-lease-schema
+  ) >"${instagram_maintenance_hold_log}" 2>&1 &
+  instagram_maintenance_hold_pid=$!
+  instagram_maintenance_hold_started=true
+  instagram_maintenance_hold_released=false
+  instagram_maintenance_hold_ready=false
+  instagram_maintenance_hold_persisted=false
+  instagram_maintenance_hold_release_uncertain=false
+  for attempt in $(seq 1 480); do
+    if grep -Fxq 'INSTAGRAM_MAINTENANCE_DRAIN_READY=YES' "${instagram_maintenance_hold_log}" 2>/dev/null; then
+      instagram_maintenance_hold_ready=true
+      instagram_maintenance_hold_persisted=true
+      echo "INSTAGRAM_MAINTENANCE_DRAIN_READY=YES"
+      return 0
+    fi
+    if ! kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null; then
+      cat "${instagram_maintenance_hold_log}" >&2 || true
+      return 1
+    fi
+    sleep 1
+  done
+  echo "Instagram Worker admission did not drain within eight minutes." >&2
+  cat "${instagram_maintenance_hold_log}" >&2 || true
+  return 1
+}
+
+assert_instagram_maintenance_drain_live() {
+  if [ -z "${instagram_maintenance_hold_pid}" ] ||
+     ! kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null ||
+     [ "${instagram_maintenance_hold_ready}" != true ] ||
+     ! grep -Fxq 'INSTAGRAM_MAINTENANCE_DRAIN_READY=YES' "${instagram_maintenance_hold_log}" 2>/dev/null; then
+    die "Instagram maintenance connection was lost; refusing to continue with migration or release switching."
+  fi
+}
+
+abandon_instagram_maintenance_drain() {
+  local attempt
+  [ -n "${instagram_maintenance_hold_pid}" ] || return 0
+  if kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null; then
+    kill -TERM "${instagram_maintenance_hold_pid}" 2>/dev/null || true
+    for attempt in $(seq 1 10); do
+      kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null || break
+      sleep 1
+    done
+    if kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null; then
+      kill -KILL "${instagram_maintenance_hold_pid}" 2>/dev/null || true
+    fi
+  fi
+  wait "${instagram_maintenance_hold_pid}" 2>/dev/null || true
+  instagram_maintenance_hold_pid=""
+  echo "INSTAGRAM_MAINTENANCE_HELPER_STOPPED_WITHOUT_RELEASE=YES"
+}
+
+release_instagram_maintenance_drain() {
+  local helper_status
+  [ -n "${instagram_maintenance_hold_pid}" ] || return 1
+  if ! kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null; then
+    grep -Fxq 'INSTAGRAM_MAINTENANCE_HOLD_RELEASED=YES' "${instagram_maintenance_hold_log}" 2>/dev/null
+    helper_status=$?
+    instagram_maintenance_hold_pid=""
+    if [ "${helper_status}" -eq 0 ]; then
+      rm -f -- "${instagram_maintenance_hold_log}"
+      instagram_maintenance_hold_log=""
+      instagram_maintenance_hold_released=true
+      instagram_maintenance_hold_persisted=false
+      instagram_maintenance_hold_release_uncertain=false
+      return 0
+    fi
+    instagram_maintenance_hold_release_uncertain=true
+    instagram_maintenance_hold_persisted=false
+    return 1
+  fi
+  instagram_maintenance_hold_release_uncertain=true
+  instagram_maintenance_hold_persisted=false
+  kill -USR2 "${instagram_maintenance_hold_pid}" 2>/dev/null || return 1
+  if wait "${instagram_maintenance_hold_pid}"; then helper_status=0; else helper_status=$?; fi
+  instagram_maintenance_hold_pid=""
+  if [ "${helper_status}" -eq 0 ] && grep -Fxq 'INSTAGRAM_MAINTENANCE_HOLD_RELEASED=YES' "${instagram_maintenance_hold_log}"; then
+    rm -f -- "${instagram_maintenance_hold_log}"
+    instagram_maintenance_hold_log=""
+    instagram_maintenance_hold_released=true
+    instagram_maintenance_hold_persisted=false
+    instagram_maintenance_hold_release_uncertain=false
+    echo "INSTAGRAM_MAINTENANCE_HOLD_RELEASED=YES"
+    return 0
+  fi
+  cat "${instagram_maintenance_hold_log}" >&2 || true
+  instagram_maintenance_hold_release_uncertain=true
+  return 1
+}
+
+reestablish_instagram_maintenance_hold() {
+  if [ "${instagram_maintenance_hold_started}" != true ] || [ -n "${instagram_maintenance_hold_pid}" ]; then
+    return 1
+  fi
+  [ -d "${release_dir}" ] || {
+    echo "Cannot re-establish the persistent Instagram maintenance hold without the candidate helper." >&2
+    return 1
+  }
+  start_instagram_maintenance_drain || return 1
+  abandon_instagram_maintenance_drain
+  instagram_maintenance_hold_released=false
+  echo "INSTAGRAM_MAINTENANCE_HOLD_RETAINED=YES"
+}
+
 on_exit() {
   local status=$?
   local active_target expected_target previous_normalized preserve_release=false
@@ -242,12 +497,15 @@ on_exit() {
         preserve_release=true
       fi
     fi
-
-    if [ -d "${release_dir}" ]; then
-      printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
-    fi
-    if [ "$preserve_release" != true ]; then
-      cleanup_failed_release || true
+    active_target="$(deploy_current_target "${current_link}")"
+    previous_normalized="$(deploy_normalize_path "${previous_target}")"
+    if [ -n "${previous_normalized}" ] && [ "${active_target}" = "${previous_normalized}" ] &&
+       { [ "${database_migration_started}" != true ] ||
+         { [ "${database_migration_completed}" = true ] && [ "${release_switched}" != true ]; } ||
+         [ "${safe_previous_release_verified}" = true ]; }; then
+      safe_previous_release_verified=true
+    else
+      safe_previous_release_verified=false
     fi
   fi
 
@@ -264,6 +522,80 @@ on_exit() {
     else
       echo "Candidate remains active after failed rollback; retaining the database-maintenance hold." >&2
     fi
+  fi
+
+  if [ -n "${instagram_maintenance_hold_pid}" ]; then
+    active_target="$(deploy_current_target "${current_link}")"
+    previous_normalized="$(deploy_normalize_path "${previous_target}")"
+    if [ "${instagram_maintenance_hold_ready}" = true ] &&
+       { [ "${deployment_succeeded}" = true ] || [ "${safe_previous_release_verified}" = true ]; }; then
+      if release_instagram_maintenance_drain; then
+        :
+      else
+        echo "Maintenance outcome is uncertain; preserving the database hold and leaving the legacy Worker stopped." >&2
+        abandon_instagram_maintenance_drain
+      fi
+    else
+      echo "Rollback or drain could not be verified; preserving the database hold and leaving the legacy Worker stopped." >&2
+      abandon_instagram_maintenance_drain
+    fi
+  fi
+
+  active_target="$(deploy_current_target "${current_link}")"
+  previous_normalized="$(deploy_normalize_path "${previous_target}")"
+  if [ "${deployment_succeeded}" != true ] &&
+     [ "${instagram_maintenance_hold_started}" = true ] &&
+     [ -z "${instagram_maintenance_hold_pid}" ] &&
+     { [ "${instagram_maintenance_hold_release_uncertain}" = true ] ||
+       { [ "${instagram_maintenance_hold_released}" = true ] && [ "${safe_previous_release_verified}" != true ]; }; } &&
+     [ "${instagram_maintenance_hold_persisted}" != true ]; then
+    echo "The maintenance connection ended before a safe rollback was proven; re-establishing a persistent Worker hold." >&2
+    if reestablish_instagram_maintenance_hold; then
+      legacy_instagram_worker_stopped=true
+    else
+      abandon_instagram_maintenance_drain
+      echo "Unable to prove a persistent maintenance hold; the local Worker remains stopped and operator recovery is required." >&2
+    fi
+  fi
+
+  if [ "${deployment_succeeded}" != true ] &&
+     [ "${legacy_web_stopped}" = true ] &&
+     [ "${legacy_web_was_running}" = true ] &&
+     [ -n "${previous_normalized}" ] && [ "${active_target}" = "${previous_normalized}" ] &&
+     [ "${safe_previous_release_verified}" = true ]; then
+    legacy_sha="$(tr -d '[:space:]' < "${previous_target}/.deployed-sha" 2>/dev/null || true)"
+    if [[ "${legacy_sha}" =~ ^[0-9a-f]{40}$ ]] &&
+       reload_pm2 "${PM2_APP_NAME}" "${legacy_sha}" &&
+       check_web_health "${previous_target}" "${legacy_sha}"; then
+      legacy_web_stopped=false
+      echo "LEGACY_WEB_APP_RESTORED=YES"
+    else
+      echo "Unable to restart the previous Web app after a verified safe abort." >&2
+    fi
+  fi
+
+  if [ "${deployment_succeeded}" != true ] &&
+     [ "${legacy_instagram_worker_stopped}" = true ] &&
+     [ "${legacy_instagram_worker_was_running}" = true ] &&
+     [ -n "${previous_normalized}" ] && [ "${active_target}" = "${previous_normalized}" ] &&
+     [ "${safe_previous_release_verified}" = true ] &&
+     { [ "${instagram_maintenance_hold_started}" != true ] || [ "${instagram_maintenance_hold_released}" = true ]; }; then
+    legacy_sha="$(tr -d '[:space:]' < "${previous_target}/.deployed-sha" 2>/dev/null || true)"
+    if [[ "${legacy_sha}" =~ ^[0-9a-f]{40}$ ]] &&
+       reload_pm2 instagram-sync-worker "${legacy_sha}" &&
+       check_health "${previous_target}" "${legacy_sha}"; then
+      legacy_instagram_worker_stopped=false
+      echo "LEGACY_INSTAGRAM_WORKER_RESTORED=YES"
+    else
+      echo "Unable to restart the previous Instagram Worker after a verified rollback." >&2
+    fi
+  fi
+
+  if [ -d "${release_dir}" ] && [ "${deployment_succeeded}" != true ]; then
+    printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
+  fi
+  if [ "${preserve_release}" != true ]; then
+    cleanup_failed_release || true
   fi
   return "${status}"
 }
@@ -371,6 +703,7 @@ echo "Previous release: ${previous_target}"
 
 log_step "2/8" "Fetch the exact GitHub commit into the server-side cache"
 fetch_exact_deploy_commit || die "Exact deployment commit fetch failed."
+run_database_deployment_phase() {
 if [ "${db_mode}" = skip-db ]; then
   deploy_skip_db_schema_guard "${repo_dir}" "${previous_sha}" "${DEPLOY_SHA}" \
     || die "The release is not eligible for --skip-db deployment."
@@ -484,16 +817,15 @@ test -d "${release_dir}/.next/static"
 test -d "${release_dir}/public"
 echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
-# Defence in depth: deploy.yml must have passed the read-only, host-side backup
-# attestation gate for THIS exact SHA before this script may migrate or switch.
-# This check is unconditional: --skip-db is not an escape hatch, and invoking
-# this deployment script directly (without the workflow) is also refused.
-if [ "${BACKUP_GATE_VERIFIED_SHA:-}" != "${DEPLOY_SHA}" ]; then
-  die "Backup verification gate did not approve ${DEPLOY_SHA}; refusing ALL database migration and deployment."
-fi
-echo "BACKUP_GATE_VERIFIED_SHA_CHECK=PASS"
+if [ "${db_mode}" = full ]; then
+  # A full database deployment still requires the independent attestation for
+  # this exact SHA. App-only skip-db deployments do not inspect or consume it.
+  if [ "${BACKUP_GATE_VERIFIED_SHA:-}" != "${DEPLOY_SHA}" ]; then
+    die "Backup verification gate did not approve ${DEPLOY_SHA}; refusing the full database deployment."
+  fi
+  echo "BACKUP_GATE_VERIFIED_SHA_CHECK=PASS"
 
-if [ "${backup_gate_risk_mode}" = approved ]; then
+  if [ "${backup_gate_risk_mode}" = approved ]; then
   log_step "5/8" "Consume schema v3 proof after locked production SHA compare-and-swap"
   gate_script="${release_dir}/scripts/production-backup-gate.mjs"
   [ -s "${gate_script}" ] || die "Candidate release is missing the reviewed backup-gate consumer."
@@ -528,7 +860,8 @@ if [ "${backup_gate_risk_mode}" = approved ]; then
   fi
   echo "SCHEMA_V3_CONSUMPTION=VERIFIED"
   echo "SCHEMA_V3_CONSUMED_RUN_ID=${backup_gate_run_id}"
-  echo "SCHEMA_V3_CONSUMED_RUN_ATTEMPT=${backup_gate_run_attempt}"
+    echo "SCHEMA_V3_CONSUMED_RUN_ATTEMPT=${backup_gate_run_attempt}"
+  fi
 fi
 
 if [ "${db_mode}" = skip-db ]; then
@@ -543,13 +876,24 @@ if [ "${db_mode}" = skip-db ]; then
     || die "Unable to pause automatic database maintenance for the new app process."
   db_maintenance_hold_owned=true
 else
+  log_step "5/8" "Stop legacy Web/Worker processes and establish the cross-instance maintenance drain"
+  stop_legacy_web_app
+  stop_legacy_instagram_worker
+  start_instagram_maintenance_drain \
+    || die "Instagram Worker maintenance drain could not be proven; refusing migration and release switch."
   log_step "6/8" "Apply migrations and verify database state before current switch"
+  assert_instagram_maintenance_drain_live
   pnpm_with_timeout 1m migration:check:mysql
+  pnpm_run exec tsx scripts/check-instagram-lease-generation-migration.ts before
   if ! lottery_migration_timeout_seconds="$(DEPLOY_SHA="${DEPLOY_SHA}" EXPECTED_PRODUCTION_SHA="${EXPECTED_PRODUCTION_SHA}" node scripts/check-topic-lottery-maintenance.mjs "${previous_target}" "${release_dir}")"; then
     die "Lottery migration maintenance approval is missing/invalid; refusing ALL migration execution."
   fi
   [[ "${lottery_migration_timeout_seconds}" =~ ^[0-9]+$ ]] || die "Lottery migration timeout guard returned invalid output."
+  assert_instagram_maintenance_drain_live
+  database_migration_started=true
   pnpm_run prisma migrate deploy
+  pnpm_run exec tsx scripts/check-instagram-lease-generation-migration.ts after
+  assert_instagram_maintenance_drain_live
   pnpm_run notification:integrity
   if ! migration_status_output="$(pnpm_with_timeout 2m prisma migrate status 2>&1)"; then
     printf '%s\n' "${migration_status_output}" \
@@ -562,7 +906,10 @@ else
     die "Production migrations are not explicitly up to date after the migration step."
   fi
   echo "Prisma migration status is up to date."
+  assert_instagram_maintenance_drain_live
+  database_migration_completed=true
 fi
+}
 
 atomic_switch() {
   deploy_atomic_switch "$1" "${current_link}" "${releases_dir}"
@@ -698,8 +1045,21 @@ NODE
       echo "Gracefully restarting only PM2 app ${app_name} from the selected release configuration."
       pm2_action=restart
     else
-      echo "Reloading only PM2 app ${app_name} from the selected release configuration."
-      pm2_action=reload
+      read_pm2_snapshot "${app_name}" || return 1
+      case "${pm2_status}" in
+        stopped)
+          echo "Restarting stopped PM2 app ${app_name} from the selected release configuration."
+          pm2_action=restart
+          ;;
+        online)
+          echo "Reloading only PM2 app ${app_name} from the selected release configuration."
+          pm2_action=reload
+          ;;
+        *)
+          echo "PM2 app ${app_name} is in unexpected state ${pm2_status}; refusing to reload it." >&2
+          return 1
+          ;;
+      esac
     fi
   else
     exists_status=$?
@@ -825,13 +1185,42 @@ check_health() {
   return 1
 }
 
+check_web_health() {
+  local expected_target="$1" expected_sha="$2" health_response active_target
+  for attempt in $(seq 1 10); do
+    health_response="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${APP_PORT}/api/health/live" || true)"
+    active_target="$(readlink -f -- "${current_link}" 2>/dev/null || true)"
+    if [ "${active_target}" = "${expected_target}" ] &&
+       read_pm2_snapshot "${PM2_APP_NAME}" 2>/dev/null && pm2_is_current_release "${PM2_APP_NAME}" "${expected_sha}" &&
+       printf '%s' "${health_response}" | node -e '
+         let raw = "";
+         process.stdin.on("data", (chunk) => { raw += chunk; });
+         process.stdin.on("end", () => {
+           try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+           catch { process.exit(1); }
+         });
+       ' "${expected_sha}"; then
+      echo "WEB_RELEASE_SHA=${expected_sha}"
+      return 0
+    fi
+    echo "Web health attempt ${attempt}/10 did not confirm release ${expected_sha}."
+    sleep 3
+  done
+  return 1
+}
+
 verify_restored_release() {
   local target="$1" release_sha="$2"
   export NODE_ENV=production
   export DEPLOY_SHA="${release_sha}"
   export PORT="${APP_PORT}"
-  reload_release_processes "${release_sha}" || return 1
-  check_health "${target}" "${release_sha}"
+  if [ "${db_mode}" = full ] && [ "${legacy_instagram_worker_stopped}" = true ]; then
+    reload_pm2 "${PM2_APP_NAME}" "${release_sha}" || return 1
+    check_web_health "${target}" "${release_sha}"
+  else
+    reload_release_processes "${release_sha}" || return 1
+    check_health "${target}" "${release_sha}"
+  fi
 }
 
 rollback_release() {
@@ -843,25 +1232,46 @@ rollback_release() {
   printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
   echo "Restoring previous release atomically: ${previous_target}" >&2
   previous_sha="$(tr -d '[:space:]' < "${previous_target}/.deployed-sha")"
-  deploy_rollback_if_owned \
+  if deploy_rollback_if_owned \
     "${release_dir}" "${previous_target}" "${current_link}" "${releases_dir}" \
-    "${previous_sha}" verify_restored_release
+    "${previous_sha}" verify_restored_release; then
+    safe_previous_release_verified=true
+    return 0
+  fi
+  safe_previous_release_verified=false
+  return 1
 }
 
+run_database_deployment_phase
+
 log_step "7/8" "Atomically switch current and reload PM2"
+if [ "${db_mode}" = full ]; then assert_instagram_maintenance_drain_live; fi
 atomic_switch "${release_dir}"
-if ! reload_release_processes "${DEPLOY_SHA}"; then
+release_switched=true
+if [ "${db_mode}" = full ]; then
+  reload_pm2 "${PM2_APP_NAME}" "${DEPLOY_SHA}" || {
+    print_health_diagnostics
+    rollback_release || die "Web PM2 reload failed and automatic rollback also failed."
+    die "Web PM2 reload failed; previous release was restored."
+  }
+elif ! reload_release_processes "${DEPLOY_SHA}"; then
   print_health_diagnostics
   rollback_release || die "PM2 reload failed and automatic rollback also failed."
   die "PM2 reload failed; previous release was restored."
 fi
 
 log_step "8/8" "Verify health and retain rollback releases"
-if ! check_health "${release_dir}" "${DEPLOY_SHA}"; then
+if [ "${db_mode}" = full ]; then
+  health_check_function=check_web_health
+else
+  health_check_function=check_health
+fi
+if ! "${health_check_function}" "${release_dir}" "${DEPLOY_SHA}"; then
   print_health_diagnostics
   rollback_release || die "Health check failed and automatic rollback also failed."
   die "Health check failed; previous release was restored."
 fi
+if [ "${db_mode}" = full ]; then assert_instagram_maintenance_drain_live; fi
 if ! ss -ltn 2>/dev/null | grep -Eq "[[:space:]](127\.0\.0\.1|\[::1\]):${APP_PORT}[[:space:]]"; then
   print_health_diagnostics
   rollback_release || die "Local binding check failed and automatic rollback also failed."
@@ -917,6 +1327,25 @@ while IFS= read -r release_entry; do
   fi
 done < <(find "${releases_dir}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr)
 prune_worktrees
+
+if [ "${db_mode}" = full ]; then
+  if ! release_instagram_maintenance_drain; then
+    rollback_release || die "Maintenance release failed and automatic rollback also failed. The persistent hold remains active."
+    die "Maintenance hold was not safely released; previous release was restored and the Worker remains stopped."
+  fi
+  if ! reload_pm2 instagram-sync-worker "${DEPLOY_SHA}"; then
+    print_health_diagnostics
+    rollback_release || die "Worker start failed and automatic rollback also failed."
+    die "Worker did not start on the candidate release; previous release was restored."
+  fi
+  legacy_instagram_worker_stopped=false
+  legacy_instagram_worker_was_running=false
+  if ! check_health "${release_dir}" "${DEPLOY_SHA}"; then
+    print_health_diagnostics
+    rollback_release || die "Worker health failed and automatic rollback also failed."
+    die "Worker health failed; previous release was restored."
+  fi
+fi
 
 echo "Current release: $(readlink -f -- "${current_link}")"
 echo "Previous release: ${previous_target}"

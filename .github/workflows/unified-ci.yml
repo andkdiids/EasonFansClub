@@ -305,6 +305,8 @@ jobs:
             next-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
       - name: Next.js production build
         shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: |
           set -euo pipefail
           pnpm build

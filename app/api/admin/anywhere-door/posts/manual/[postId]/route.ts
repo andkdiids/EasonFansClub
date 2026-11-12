@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
 import { MANUAL_POST_DELETE_RATE_LIMIT_POLICY } from '@/lib/anywhere-door/manual-post-policy'
-import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease } from '@/lib/instagram/sync-state'
+import { acquireInstagramSyncLease, releaseInstagramSyncLease, withInstagramLeaseTransaction } from '@/lib/instagram/sync-state'
+import { withInstagramWorkerAdmission } from '@/lib/instagram/maintenance-protocol'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 
@@ -27,12 +28,15 @@ export async function DELETE(request: Request, context: RouteContext) {
   const { postId } = await context.params
   if (!/^[a-zA-Z0-9_-]{1,191}$/.test(postId)) return NextResponse.json({ code: 'MANUAL_POST_NOT_FOUND', message: '手动补录内容不存在' }, { status: 404 })
 
+  return withInstagramWorkerAdmission(prisma, ANYWHERE_DOOR_TARGET, async () => {
   let leaseToken: string | null = null
+  let leaseGeneration: bigint | null = null
   try {
-    await getInstagramSyncState(ANYWHERE_DOOR_TARGET)
     const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
     if (!lease.acquired) return NextResponse.json({ code: 'SYNC_BUSY', message: '自动同步正在处理，请稍后再试' }, { status: 409 })
+    if (lease.generation === null) throw new Error('INSTAGRAM_LEASE_GENERATION_MISSING')
     leaseToken = lease.token
+    leaseGeneration = lease.generation
 
     const post = await prisma.socialPost.findFirst({
       where: { id: postId, platform: 'INSTAGRAM', authorUsername: ANYWHERE_DOOR_TARGET, provider: 'manual' },
@@ -46,7 +50,7 @@ export async function DELETE(request: Request, context: RouteContext) {
     })
     if (!manualAudit) return NextResponse.json({ code: 'MANUAL_POST_NOT_FOUND', message: '该动态没有可验证的手动补录记录，未删除' }, { status: 404 })
 
-    await prisma.$transaction(async (tx) => {
+    await withInstagramLeaseTransaction({ target: ANYWHERE_DOOR_TARGET, token: lease.token, generation: lease.generation }, async (tx) => {
       await createAdminActionAudit(tx, {
         operatorId: guard.user!.id,
         action: 'DELETE_POST',
@@ -76,6 +80,7 @@ export async function DELETE(request: Request, context: RouteContext) {
     console.error('[admin.anywhere-door.manual.delete]', { errorName: error instanceof Error ? error.name : 'unknown' })
     return NextResponse.json({ code: 'MANUAL_POST_DELETE_FAILED', message: '删除失败；内容状态未确认，请刷新记录后再操作' }, { status: 503 })
   } finally {
-    if (leaseToken) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken).catch(() => false)
+    if (leaseToken && leaseGeneration !== null) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken, leaseGeneration).catch(() => false)
   }
+  })
 }

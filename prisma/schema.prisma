@@ -2866,6 +2866,7 @@ model CantoneseQuestion {
   updatedAt              DateTime              @updatedAt
   reviewer               User?                 @relation("CantoneseQuestionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   LyricPrescription      LyricPrescription?    @relation(fields: [lyricPrescriptionId], references: [id], onDelete: SetNull)
+  learnerProgress        CantoneseLearnerQuestionProgress[]
 
   @@index([lessonId, stageId, questionType])
   @@index([lessonId, stageId, questionType, sortOrder])
@@ -2960,6 +2961,30 @@ model CantoneseLessonProgress {
   user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, lessonId])
+}
+
+model CantoneseLearnerQuestionProgress {
+  id                String            @id @default(cuid())
+  userId            String
+  questionId        String            @db.VarChar(191)
+  attemptCount      Int               @default(0)
+  correctCount      Int               @default(0)
+  wrongCount        Int               @default(0)
+  consecutiveCorrect Int              @default(0)
+  mastery           String            @default("NEW") @db.VarChar(16)
+  lastWrongAt       DateTime?
+  lastCorrectAt     DateTime?
+  lastAnsweredAt    DateTime?
+  lastAnswerCorrect Boolean           @default(false)
+  lastWrongAnswer   Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question          CantoneseQuestion @relation(fields: [questionId], references: [externalId], onDelete: Cascade)
+
+  @@unique([userId, questionId])
+  @@index([userId, mastery, lastWrongAt])
+  @@index([questionId])
 }
 
 model MusicAlbum {
@@ -4006,6 +4031,7 @@ model Post {
   ReviewedBy            User?                   @relation("PostReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   Board                 Board                   @relation(fields: [boardId], references: [id])
   PostFavorite          PostFavorite[]
+  ProfilePostViewHistory ProfilePostViewHistory[]
   PostMedia             PostMedia[]
   PostTopic             PostTopic[]
   PostTag               PostTag[]
@@ -4243,6 +4269,19 @@ model PostFavorite {
 
   @@unique([postId, userId])
   @@index([userId, createdAt])
+}
+
+model ProfilePostViewHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  viewedAt  DateTime @default(now())
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId, viewedAt])
+  @@index([postId])
 }
 
 model PostMedia {
@@ -5152,6 +5191,7 @@ model User {
   PostDraft                                              PostDraft?
   UserPostGroup                                          UserPostGroup[]
   PostFavorite                                           PostFavorite[]
+  ProfilePostViewHistory                                 ProfilePostViewHistory[]
   Profile                                                Profile?
   ProfileRecordPreference                                ProfileRecordPreference[]
   ProfileBackgroundLikesGiven                            ProfileBackgroundLike[]            @relation("ProfileBackgroundLikeLiker")
@@ -5212,6 +5252,7 @@ model User {
   CantoneseReviewLogs                                    CantoneseReviewLog[]               @relation("CantoneseReviewActor")
   CantoneseSpeechAssessments                             CantonesePronunciationAssessment[] @relation("CantoneseSpeechAssessmentUser")
   CantoneseLessonProgress                                CantoneseLessonProgress[]
+  CantoneseQuestionProgress                               CantoneseLearnerQuestionProgress[]
 
   @@index([createdAt])
   @@index([email])
@@ -5242,6 +5283,7 @@ model UserPrivacySetting {
   showBadgeHistory    Boolean  @default(true)
   showRatings         Boolean  @default(true)
   showSalon           Boolean  @default(true)
+  showFavorites       Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   User                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -6435,6 +6477,7 @@ model SocialSyncState {
   syncRequestedAt      DateTime?
   lockToken            String?        @db.VarChar(64)
   lockUntil            DateTime?
+  leaseGeneration      BigInt         @default(0)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
 
