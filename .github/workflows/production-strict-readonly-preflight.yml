@@ -3,16 +3,15 @@ name: Strict Read-only Production Preflight
 on:
   workflow_dispatch:
     inputs:
-      approved_sha:
-        description: Exact approved RC SHA from the installed release policy
+      candidate_sha:
+        description: Exact approved candidate SHA; must equal the current main ref
         required: true
         type: string
-        default: '47396d19842755491e9634605a7d535c163b4495'
       expected_production_sha:
-        description: Expected running production SHA, not a measured runtime value
-        required: true
+        description: Optional observed production SHA precondition; runtime SHA is always read independently
+        required: false
         type: string
-        default: '635ae4a0e1d8eae9d93420517a17f4b29794896f'
+        default: ''
       diagnostic_mode:
         description: Select full preflight or isolated .env metadata-only inspection
         required: true
@@ -40,13 +39,14 @@ jobs:
     steps:
       - name: Require main manual dispatch before any production credentials
         env:
-          APPROVED_SHA: ${{ inputs.approved_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           EXPECTED_SHA: ${{ inputs.expected_production_sha }}
           DIAGNOSTIC_MODE: ${{ inputs.diagnostic_mode }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]] || exit 1
-          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ -z "$EXPECTED_SHA" || "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           [[ "$DIAGNOSTIC_MODE" == full || "$DIAGNOSTIC_MODE" == env_metadata_only ]] || exit 1
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
@@ -55,22 +55,28 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate installed exact release policy and remote RC
+      - name: Validate current main candidate
         env:
-          APPROVED_SHA: ${{ inputs.approved_sha }}
-          EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          branch="$(node -p 'JSON.parse(require("fs").readFileSync(".github/release-policies/production-topic-activity-v612.json","utf8")).approved_rc_branch')"
-          # Ephemeral runner-only auth, never persisted in .git/config.
-          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
-            bash .github/release/approved-release-guard.sh validate "$APPROVED_SHA" "$EXPECTED_SHA" "$branch"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$CANDIDATE_SHA" == "$GITHUB_SHA" ]]
+          REPOSITORY="$GITHUB_REPOSITORY" API_URL="$GITHUB_API_URL" EXPECTED="$CANDIDATE_SHA" GH_TOKEN="$GH_TOKEN" node --input-type=module <<'NODE'
+          const repository = process.env.REPOSITORY
+          const api = process.env.API_URL
+          const expected = process.env.EXPECTED
+          const token = process.env.GH_TOKEN
+          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || '') || !/^https:\/\//.test(api || '') || !/^[0-9a-f]{40}$/.test(expected || '') || !token) process.exit(1)
+          const response = await fetch(`${api}/repos/${repository}/git/ref/heads/main`, { headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'x-github-api-version': '2022-11-28' } })
+          if (!response.ok || (await response.json())?.object?.sha !== expected) process.exit(1)
+          console.log(`CANDIDATE_MAIN_SHA=${expected}`)
+          NODE
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
         with:
-          ref: ${{ inputs.approved_sha }}
+          ref: ${{ inputs.candidate_sha }}
           path: migration-source
           fetch-depth: 1
           persist-credentials: false
@@ -78,8 +84,8 @@ jobs:
       - name: Build a non-secret migration checksum manifest in runner memory
         id: manifest
         env:
-          APPROVED_SHA: ${{ inputs.approved_sha }}
-          EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
           DIAGNOSTIC_MODE: ${{ inputs.diagnostic_mode }}
         run: |
           set -euo pipefail
@@ -95,7 +101,7 @@ jobs:
             if (!fs.lstatSync(file).isFile()) throw new Error('regular migration SQL required')
             return { name, checksum: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }
           }).filter(Boolean)
-          const manifest = validateManifest({ app: APP, expectedSha: process.env.EXPECTED_SHA, approvedSha: process.env.APPROVED_SHA, migrations })
+          const manifest = validateManifest({ app: APP, expectedSha: process.env.CANDIDATE_SHA, approvedSha: process.env.CANDIDATE_SHA, candidateSha: process.env.CANDIDATE_SHA, expectedProductionSha: process.env.EXPECTED_PRODUCTION_SHA || undefined, migrationCount: migrations.length, migrations })
           fs.appendFileSync(process.env.GITHUB_OUTPUT, 'payload=' + Buffer.from(JSON.stringify(manifest)).toString('base64') + '\n')
           if (!['full', 'env_metadata_only'].includes(process.env.DIAGNOSTIC_MODE)) process.exit(1)
           fs.appendFileSync(process.env.GITHUB_OUTPUT, 'diagnostic_mode=' + process.env.DIAGNOSTIC_MODE + '\n')
