@@ -2,6 +2,14 @@ import type { NextConfig } from 'next'
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare'
 
 const nextConfig: NextConfig = {
+  // These checks run as separate required gates in Unified Release CI.
+  // Avoid repeating both inside the memory-limited production build process.
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   experimental: {
     middlewareClientMaxBodySize: '256mb',
     cpus: 2,
