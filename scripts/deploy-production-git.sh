@@ -391,14 +391,47 @@ start_instagram_maintenance_drain() {
       return 0
     fi
     if ! kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null; then
-      cat "${instagram_maintenance_hold_log}" >&2 || true
+      print_instagram_maintenance_helper_log
       return 1
     fi
     sleep 1
   done
   echo "Instagram Worker admission did not drain within eight minutes." >&2
-  cat "${instagram_maintenance_hold_log}" >&2 || true
+  print_instagram_maintenance_helper_log
   return 1
+}
+
+print_instagram_maintenance_helper_log() {
+  if [ -z "${instagram_maintenance_hold_log}" ] || [ ! -r "${instagram_maintenance_hold_log}" ]; then
+    echo "INSTAGRAM_MAINTENANCE_HELPER_LOG=UNAVAILABLE" >&2
+    return 0
+  fi
+  echo "INSTAGRAM_MAINTENANCE_HELPER_LOG_BEGIN" >&2
+  sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#gi' \
+    "${instagram_maintenance_hold_log}" >&2 || true
+  echo "INSTAGRAM_MAINTENANCE_HELPER_LOG_END" >&2
+}
+
+print_instagram_maintenance_helper_diagnostics() {
+  local helper_status
+  if [ -z "${instagram_maintenance_hold_pid}" ]; then
+    echo "INSTAGRAM_MAINTENANCE_HELPER_PID_STATE=UNTRACKED" >&2
+  elif kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null; then
+    echo "INSTAGRAM_MAINTENANCE_HELPER_PID_STATE=ALIVE" >&2
+  else
+    echo "INSTAGRAM_MAINTENANCE_HELPER_PID_STATE=EXITED" >&2
+    if wait "${instagram_maintenance_hold_pid}"; then helper_status=0; else helper_status=$?; fi
+    echo "INSTAGRAM_MAINTENANCE_HELPER_EXIT_STATUS=${helper_status}" >&2
+    instagram_maintenance_hold_pid=""
+  fi
+  echo "INSTAGRAM_MAINTENANCE_HELPER_READY_FLAG=${instagram_maintenance_hold_ready}" >&2
+  if [ -n "${instagram_maintenance_hold_log}" ] &&
+     grep -Fxq 'INSTAGRAM_MAINTENANCE_DRAIN_READY=YES' "${instagram_maintenance_hold_log}" 2>/dev/null; then
+    echo "INSTAGRAM_MAINTENANCE_HELPER_READY_MARKER=YES" >&2
+  else
+    echo "INSTAGRAM_MAINTENANCE_HELPER_READY_MARKER=NO" >&2
+  fi
+  print_instagram_maintenance_helper_log
 }
 
 assert_instagram_maintenance_drain_live() {
@@ -406,7 +439,8 @@ assert_instagram_maintenance_drain_live() {
      ! kill -0 "${instagram_maintenance_hold_pid}" 2>/dev/null ||
      [ "${instagram_maintenance_hold_ready}" != true ] ||
      ! grep -Fxq 'INSTAGRAM_MAINTENANCE_DRAIN_READY=YES' "${instagram_maintenance_hold_log}" 2>/dev/null; then
-    die "Instagram maintenance connection was lost; refusing to continue with migration or release switching."
+    print_instagram_maintenance_helper_diagnostics
+    die "Instagram maintenance helper is no longer live; refusing to continue with migration or release switching."
   fi
 }
 
@@ -461,7 +495,7 @@ release_instagram_maintenance_drain() {
     echo "INSTAGRAM_MAINTENANCE_HOLD_RELEASED=YES"
     return 0
   fi
-  cat "${instagram_maintenance_hold_log}" >&2 || true
+  print_instagram_maintenance_helper_log
   instagram_maintenance_hold_release_uncertain=true
   return 1
 }
