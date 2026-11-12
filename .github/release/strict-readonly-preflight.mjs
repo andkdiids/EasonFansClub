@@ -166,7 +166,7 @@ export function prismaFailure(error) {
   // Do not serialize error messages, metadata, stack, stdout or stderr.
   const codes = { P1000: 'AUTH_FAILED', P1001: 'CONNECTION_FAILED', P1002: 'TIMEOUT',
     P1011: 'TLS_FAILED', P2024: 'TIMEOUT', P2010: 'FIXED_SELECT_FAILED' }
-  return 'PRISMA_' + (codes[error?.code] || 'QUERY_UNAVAILABLE')
+  return 'PRISMA_' + (codes[error?.code || error?.errorCode] || 'QUERY_UNAVAILABLE')
 }
 
 export function trustedParents(file, io) {
