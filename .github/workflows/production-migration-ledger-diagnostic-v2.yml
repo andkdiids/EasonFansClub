@@ -102,7 +102,7 @@ jobs:
           tar -czf "$base/candidate.tar.gz" -C "$GITHUB_WORKSPACE/candidate-source/prisma" migrations
           tar -xzf "$base/candidate.tar.gz" --no-same-owner --no-same-permissions -C "$package_dir/candidate"
           tar -czf "$archive" -C "$package_dir" diagnostic-v2.mjs candidate/migrations
-          node "$helper" validate-candidate "$package_dir" "$CANDIDATE_SHA" >/dev/null
+          node "$helper" validate-package "$package_dir" "$CANDIDATE_SHA" >/dev/null
 
       - name: Prepare and verify pinned production SSH identity
         id: ssh
@@ -218,7 +218,7 @@ jobs:
           while IFS= read -r entry; do
             if [[ "$entry" != diagnostic-v2.mjs && "$entry" != candidate/migrations/ &&
                   ! "$entry" =~ ^candidate/migrations/[0-9]{14}_[A-Za-z0-9_-]+/(migration\.sql)?$ &&
-                  "$entry" != candidate/migrations/migration_lock.toml ]]; then
+                  "$entry" != candidate/migrations/migration_lock.toml && "$entry" != candidate/migrations/README.md ]]; then
               printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_PATHS_INVALID\n'
               exit 1
             fi

@@ -59,8 +59,14 @@ test('complete migration tree accepts the root migration lock file', () => {
     fs.mkdirSync(path.join(migrationRoot, migrationName), { recursive: true })
     fs.writeFileSync(path.join(migrationRoot, migrationName, 'migration.sql'), 'CREATE TABLE `Probe` (`id` INT NOT NULL, PRIMARY KEY (`id`));\n')
     fs.writeFileSync(path.join(migrationRoot, 'migration_lock.toml'), 'provider = "mysql"\n')
+    fs.writeFileSync(path.join(migrationRoot, 'README.md'), 'Migration documentation\n')
     const result = validateCandidateTree(fixture, CANDIDATE_SHA)
     assert.deepEqual(result.names, [migrationName])
+    fs.mkdirSync(path.join(fixture, 'candidate'))
+    fs.renameSync(migrationRoot, path.join(fixture, 'candidate', 'migrations'))
+    execFileSync(process.execPath, [helperPath, 'validate-package', fixture, CANDIDATE_SHA])
+    fs.writeFileSync(path.join(fixture, 'candidate', 'migrations', 'unexpected.txt'), 'unexpected')
+    assert.throws(() => execFileSync(process.execPath, [helperPath, 'validate-package', fixture, CANDIDATE_SHA]), /Command failed/)
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true })
   }
