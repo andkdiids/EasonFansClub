@@ -2,6 +2,16 @@ name: Production Migration Ledger Diagnostic V2
 
 on:
   workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact approved candidate SHA; must equal the current main ref
+        required: true
+        type: string
+      expected_production_sha:
+        description: Optional observed production SHA precondition; the server always reports its actual SHA
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -17,8 +27,8 @@ jobs:
     environment: Production
     timeout-minutes: 20
     env:
-      EXPECTED_CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
-      EXPECTED_PRODUCTION_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
       APP_DIR: /home/apps/easonfansclub
     steps:
       - name: Require manual dispatch from main
@@ -28,6 +38,8 @@ jobs:
           [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || { echo "::error::Manual dispatch only."; exit 1; }
           [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Dispatch from main only."; exit 1; }
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Workflow source SHA is invalid."; exit 1; }
+          [[ "${CANDIDATE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::candidate_sha must be a full lowercase 40-character SHA."; exit 1; }
+          [[ -z "${EXPECTED_PRODUCTION_SHA:-}" || "${EXPECTED_PRODUCTION_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::expected_production_sha must be empty or a full lowercase 40-character SHA."; exit 1; }
 
       - name: Checkout exact workflow source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified checkout v4
@@ -41,18 +53,19 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_CANDIDATE_SHA: ${{ env.EXPECTED_CANDIDATE_SHA }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
           [[ "$(git -C "$GITHUB_WORKSPACE/workflow-source" rev-parse HEAD)" == "$GITHUB_SHA" ]]
-          [[ "$EXPECTED_CANDIDATE_SHA" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]]
-          REPOSITORY="$GITHUB_REPOSITORY" API_URL="$GITHUB_API_URL" EXPECTED="$EXPECTED_CANDIDATE_SHA" node --input-type=module <<'NODE'
+          REPOSITORY="$GITHUB_REPOSITORY" API_URL="$GITHUB_API_URL" EXPECTED="$CANDIDATE_SHA" WORKFLOW_SHA="$GITHUB_SHA" node --input-type=module <<'NODE'
           const repository = process.env.REPOSITORY
           const api = process.env.API_URL
           const token = process.env.GH_TOKEN
           const expected = process.env.EXPECTED
+          const workflowSha = process.env.WORKFLOW_SHA
           if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || '') || !/^https:\/\//.test(api || '') || !/^[0-9a-f]{40}$/.test(expected || '') || !token) process.exit(1)
-          const url = `${api}/repos/${repository}/git/ref/heads/integration/mobile-server-rc-v3`
+          if (!/^[0-9a-f]{40}$/.test(workflowSha || '') || workflowSha !== expected) process.exit(1)
+          const url = `${api}/repos/${repository}/git/ref/heads/main`
           const response = await fetch(url, { headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'x-github-api-version': '2022-11-28' } })
           if (!response.ok) { console.log('CANDIDATE_REF_VERIFIED=NO'); process.exit(1) }
           const body = await response.json()
@@ -63,55 +76,33 @@ jobs:
       - name: Checkout exact immutable candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified checkout v4
         with:
-          ref: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
+          ref: ${{ inputs.candidate_sha }}
           path: candidate-source
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Validate six SQL files and prepare exact diagnostic package
+      - name: Validate all migration files and prepare exact diagnostic package
         id: package
         shell: bash
         env:
-          EXPECTED_CANDIDATE_SHA: ${{ env.EXPECTED_CANDIDATE_SHA }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
-          [[ "$(git -C "$GITHUB_WORKSPACE/candidate-source" rev-parse HEAD)" == "$EXPECTED_CANDIDATE_SHA" ]]
+          [[ "$(git -C "$GITHUB_WORKSPACE/candidate-source" rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
           helper="$GITHUB_WORKSPACE/workflow-source/.github/release/production-migration-ledger-diagnostic-v2.mjs"
-          node "$helper" validate-candidate "$GITHUB_WORKSPACE/candidate-source" "$EXPECTED_CANDIDATE_SHA"
+          node "$helper" validate-candidate "$GITHUB_WORKSPACE/candidate-source" "$CANDIDATE_SHA"
           base="$RUNNER_TEMP/ecfc-migration-ledger-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           package_dir="$base/package"
           archive="$base.tar.gz"
           printf 'package_dir=%s\narchive=%s\n' "$package_dir" "$archive" >> "$GITHUB_OUTPUT"
           mkdir -m 700 "$base"
-          mkdir -m 700 "$package_dir" "$package_dir/candidate" "$package_dir/candidate/migrations"
+          mkdir -m 700 "$package_dir" "$package_dir/candidate"
           cp -- "$helper" "$package_dir/diagnostic-v2.mjs"
-          for name in \
-            20260815090000_add_song_ratings \
-            20260816120000_add_want_listen_game \
-            20260820140000_add_want_listen_session_exclusion \
-            20260821120000_add_rate_limit_log \
-            20260826100000_add_anywhere_door_social_posts \
-            20260827100000_add_anywhere_door_safety_state; do
-            mkdir -m 700 "$package_dir/candidate/migrations/$name"
-            cp -- "$GITHUB_WORKSPACE/candidate-source/prisma/migrations/$name/migration.sql" "$package_dir/candidate/migrations/$name/migration.sql"
-          done
-          tar -czf "$archive" -C "$package_dir" diagnostic-v2.mjs \
-            candidate/migrations/20260815090000_add_song_ratings/migration.sql \
-            candidate/migrations/20260816120000_add_want_listen_game/migration.sql \
-            candidate/migrations/20260820140000_add_want_listen_session_exclusion/migration.sql \
-            candidate/migrations/20260821120000_add_rate_limit_log/migration.sql \
-            candidate/migrations/20260826100000_add_anywhere_door_social_posts/migration.sql \
-            candidate/migrations/20260827100000_add_anywhere_door_safety_state/migration.sql
-          listing="$(tar -tzf "$archive")"
-          expected_listing="$(printf '%s\n' \
-            diagnostic-v2.mjs \
-            candidate/migrations/20260815090000_add_song_ratings/migration.sql \
-            candidate/migrations/20260816120000_add_want_listen_game/migration.sql \
-            candidate/migrations/20260820140000_add_want_listen_session_exclusion/migration.sql \
-            candidate/migrations/20260821120000_add_rate_limit_log/migration.sql \
-            candidate/migrations/20260826100000_add_anywhere_door_social_posts/migration.sql \
-            candidate/migrations/20260827100000_add_anywhere_door_safety_state/migration.sql)"
-          [[ "$listing" == "$expected_listing" ]] || { echo "::error::Diagnostic package contents are not exact."; exit 1; }
+          tar -czf "$archive" -C "$package_dir" diagnostic-v2.mjs
+          tar -czf "$base/candidate.tar.gz" -C "$GITHUB_WORKSPACE/candidate-source/prisma" migrations
+          tar -xzf "$base/candidate.tar.gz" --no-same-owner --no-same-permissions -C "$package_dir/candidate"
+          tar -czf "$archive" -C "$package_dir" diagnostic-v2.mjs candidate/migrations
+          node "$helper" validate-candidate "$package_dir" "$CANDIDATE_SHA" >/dev/null
 
       - name: Prepare and verify pinned production SSH identity
         id: ssh
@@ -181,7 +172,7 @@ jobs:
               echo "::error::Unable to transfer the exact diagnostic package."; exit 1;
             }
 
-      - name: Read only the six production ledger and schema records
+      - name: Read the complete production ledger and schema records
         shell: bash
         env:
           SSH_HOST: ${{ secrets.SERVER_HOST }}
@@ -190,8 +181,8 @@ jobs:
           KEY_FILE: ${{ steps.ssh.outputs.key_file }}
           HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
           REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
-          EXPECTED_PRODUCTION_SHA: ${{ env.EXPECTED_PRODUCTION_SHA }}
-          EXPECTED_CANDIDATE_SHA: ${{ env.EXPECTED_CANDIDATE_SHA }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           APP_DIR: ${{ env.APP_DIR }}
         run: |
           set -euo pipefail
@@ -202,7 +193,7 @@ jobs:
             -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
             -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 "$remote" \
-            "bash -s -- '$REMOTE_DIR' '$APP_DIR' '$EXPECTED_PRODUCTION_SHA' '$EXPECTED_CANDIDATE_SHA'" 2>/dev/null <<'REMOTE'
+            "bash -s -- '$REMOTE_DIR' '$APP_DIR' '$EXPECTED_PRODUCTION_SHA' '$CANDIDATE_SHA'" 2>/dev/null <<'REMOTE'
           set -euo pipefail
           tmp="${1:-}"
           app_dir="${2:-}"
@@ -210,8 +201,8 @@ jobs:
           candidate_sha="${4:-}"
           [[ "$tmp" =~ ^/tmp/ecfc-migration-ledger-v2\.[A-Za-z0-9]{8}$ ]] || exit 1
           [[ "$app_dir" == /home/apps/easonfansclub ]] || exit 1
-          [[ "$production_sha" == 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063 ]]
-          [[ "$candidate_sha" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]]
+          [[ -z "$production_sha" || "$production_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
           trap 'rm -rf -- "$tmp"' EXIT
           [[ -d "$tmp" && ! -L "$tmp" && -f "$tmp/diagnostic.tar.gz" && ! -L "$tmp/diagnostic.tar.gz" ]]
           command -v tar >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v flock >/dev/null 2>&1 || exit 1
@@ -222,15 +213,16 @@ jobs:
           mkdir -m 700 "$unpack"
           listing="$tmp/archive.list"
           tar -tzf "$tmp/diagnostic.tar.gz" > "$listing" 2>/dev/null || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_INVALID\n'; exit 1; }
-          expected="$(printf '%s\n' \
-            diagnostic-v2.mjs \
-            candidate/migrations/20260815090000_add_song_ratings/migration.sql \
-            candidate/migrations/20260816120000_add_want_listen_game/migration.sql \
-            candidate/migrations/20260820140000_add_want_listen_session_exclusion/migration.sql \
-            candidate/migrations/20260821120000_add_rate_limit_log/migration.sql \
-            candidate/migrations/20260826100000_add_anywhere_door_social_posts/migration.sql \
-            candidate/migrations/20260827100000_add_anywhere_door_safety_state/migration.sql)"
-          [[ "$(cat "$listing")" == "$expected" ]] || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_PATHS_INVALID\n'; exit 1; }
+          grep -Fxq 'diagnostic-v2.mjs' "$listing" || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_PATHS_INVALID\n'; exit 1; }
+          grep -Eq '^candidate/migrations/[0-9]{14}_[A-Za-z0-9_-]+/migration\.sql$' "$listing" || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_PATHS_INVALID\n'; exit 1; }
+          while IFS= read -r entry; do
+            if [[ "$entry" != diagnostic-v2.mjs && "$entry" != candidate/migrations/ &&
+                  ! "$entry" =~ ^candidate/migrations/[0-9]{14}_[A-Za-z0-9_-]+/(migration\.sql)?$ &&
+                  "$entry" != candidate/migrations/migration_lock.toml ]]; then
+              printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_PATHS_INVALID\n'
+              exit 1
+            fi
+          done < "$listing"
           rm -f -- "$listing"
           tar -xzf "$tmp/diagnostic.tar.gz" --no-same-owner --no-same-permissions -C "$unpack" 2>/dev/null || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_INVALID\n'; exit 1; }
           node "$unpack/diagnostic-v2.mjs" collect "$unpack" "$app_dir" "$production_sha" "$candidate_sha"

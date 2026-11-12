@@ -10,8 +10,11 @@ const NAME = /^[0-9]{14}_[A-Za-z0-9_]+$/
 
 export function validateManifest(value) {
   if (!value || value.app !== APP || !SHA.test(value.expectedSha) || !SHA.test(value.approvedSha) ||
-    !Array.isArray(value.migrations) || value.migrations.length !== 171 ||
-    new Set(value.migrations.map(row => row.name)).size !== 171 ||
+    (value.candidateSha !== undefined && !SHA.test(value.candidateSha)) ||
+    (value.expectedProductionSha !== undefined && value.expectedProductionSha !== '' && !SHA.test(value.expectedProductionSha)) ||
+    !Array.isArray(value.migrations) || value.migrations.length < 1 || value.migrations.length > 5000 ||
+    !Number.isSafeInteger(value.migrationCount) || value.migrationCount !== value.migrations.length ||
+    new Set(value.migrations.map(row => row.name)).size !== value.migrations.length ||
     !value.migrations.every(row => NAME.test(row.name) && HASH.test(row.checksum))) throw new Error('MANIFEST_INVALID')
   return value
 }
@@ -608,15 +611,16 @@ export async function inspect(manifest, io) {
   const startedAt = windowTime(io)
   const first = await sample(io)
   const { current: start, lock, processes, healthSha } = first
+  const expectedProductionSha = manifest.expectedProductionSha || null
   const rollback = rollbackSnapshot(io, start)
   let migrations = { status: 'UNKNOWN', reason: rollback.state !== 'PRESENT' ? 'DATABASE_CHECK_SKIPPED_ROLLBACK_UNVERIFIED' : 'DATABASE_CHECK_SKIPPED_LOCK_NOT_CLEAR' }
   if (io.databaseBackend === 'PRISMA' && rollback.state === 'PRESENT' && lock.state === 'NO_LOCK_OBSERVED' &&
-    (start.sha !== manifest.expectedSha || healthSha !== start.sha)) {
+    ((expectedProductionSha && start.sha !== expectedProductionSha) || healthSha !== start.sha)) {
     migrations.reason = 'DATABASE_CHECK_SKIPPED_RUNTIME_IDENTITY_UNVERIFIED'
   }
   try {
     if (rollback.state === 'PRESENT' && lock.state === 'NO_LOCK_OBSERVED' &&
-      (io.databaseBackend !== 'PRISMA' || (start.sha === manifest.expectedSha && healthSha === start.sha))) {
+      (io.databaseBackend !== 'PRISMA' || ((!expectedProductionSha || start.sha === expectedProductionSha) && healthSha === start.sha))) {
       // Existing mock/legacy CLI capability remains testable. Production IO
       // explicitly chooses the generated Client, never silently installs CLI.
       migrations = io.databaseBackend === 'PRISMA' ? prismaMigrationRead(start.target, manifest.migrations, io) :
@@ -630,9 +634,10 @@ export async function inspect(manifest, io) {
   const webCwdMatch = web.length > 0 && web.every(row => row.cwd === start.target && !row.deleted && row.deploySha === start.sha)
   // Preserve independent SHA evidence even when /proc visibility is incomplete.
   // This is endpoint agreement only, not proof of an atomic/stable whole snapshot.
-  const markerHealthMatch = start.sha !== 'UNKNOWN' && start.sha === manifest.expectedSha &&
+  const markerHealthMatch = start.sha !== 'UNKNOWN' &&
     start.target === last.current.target && start.sha === last.current.sha && healthSha === start.sha && last.healthSha === start.sha
   return { diagnostic: 'STRICT_READONLY_SNAPSHOT', expectedSha: manifest.expectedSha,
+    candidateSha: manifest.candidateSha || manifest.approvedSha, expectedProductionSha: expectedProductionSha || 'NOT_PROVIDED',
     current: start, localHealthSha: healthSha, markerHealthMatch,
     webCwdMatch: stable && processes.inaccessible === 0 && web.length > 0 ? webCwdMatch : 'UNKNOWN',
     snapshotStable: consistency.state === 'UNKNOWN' ? 'UNKNOWN' : stable, snapshotAtomic: false, consistency,

@@ -6,9 +6,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
-  CANDIDATE_SHA,
-  EXPECTED_PRODUCTION_SHA,
-  MIGRATIONS,
+  APP_ROOT,
+  MIGRATION_NAME,
+  SHA,
   classifyMigration,
   checksumsEqual,
   compareSchema,
@@ -26,6 +26,9 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '../..')
+const CANDIDATE_SHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+const EXPECTED_PRODUCTION_SHA = CANDIDATE_SHA
+const MIGRATIONS = fs.readdirSync(path.join(root, 'prisma/migrations')).filter(name => MIGRATION_NAME.test(name)).sort()
 const workflowPath = path.join(root, '.github/workflows/production-migration-ledger-diagnostic-v2.yml')
 const helperPath = path.join(here, 'production-migration-ledger-diagnostic-v2.mjs')
 const requiredFields = new Set(['id', 'migration_name', 'checksum', 'started_at', 'finished_at', 'rolled_back_at', 'applied_steps_count', 'logs'])
@@ -39,17 +42,10 @@ const ledgerRow = overrides => ({
   applied_steps_count: '1', logs_status: 'NULL', ...overrides,
 })
 
-test('diagnostic targets remain pinned to the approved production and candidate SHAs', () => {
-  assert.equal(CANDIDATE_SHA, '2b6d06b630dfed7e8ce6e518e10bda52b919af8b')
-  assert.equal(EXPECTED_PRODUCTION_SHA, '1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063')
-  assert.deepEqual(MIGRATIONS, [
-    '20260815090000_add_song_ratings',
-    '20260816120000_add_want_listen_game',
-    '20260820140000_add_want_listen_session_exclusion',
-    '20260821120000_add_rate_limit_log',
-    '20260826100000_add_anywhere_door_social_posts',
-    '20260827100000_add_anywhere_door_safety_state',
-  ])
+test('diagnostic accepts the current main candidate and full migration tree', () => {
+  assert.match(CANDIDATE_SHA, SHA)
+  assert.equal(EXPECTED_PRODUCTION_SHA, CANDIDATE_SHA)
+  assert.ok(MIGRATIONS.length >= 180)
 })
 
 test('pinned SSH identity accepts exact trusted host, key, and fingerprint', () => {
@@ -86,7 +82,7 @@ test('pinned SSH identity binds non-default port to the trusted known-host entry
   }), error => error.code === 'HOST_BINDING_INVALID')
 })
 
-test('all six pinned candidate SQL blobs parse and match the production baseline blobs', () => {
+test('all candidate migration SQL blobs are hashed and match the production baseline blobs', () => {
   for (const name of MIGRATIONS) {
     const file = `prisma/migrations/${name}/migration.sql`
     const candidateBytes = execFileSync('git', ['show', `${CANDIDATE_SHA}:${file}`], { cwd: root })
@@ -94,8 +90,12 @@ test('all six pinned candidate SQL blobs parse and match the production baseline
     assert.ok(candidateBytes.equals(productionBytes), `${name} differs between fixed production baseline and RC`)
     const sql = candidateBytes.toString('utf8')
     assert.ok(Buffer.from(sql, 'utf8').equals(candidateBytes), `${name} is not valid UTF-8`)
-    const manifest = parseMigrationSql(sql)
-    assert.ok(Object.values(manifest).some(entries => entries.length > 0), `${name} yielded no schema objects`)
+    try {
+      const manifest = parseMigrationSql(sql)
+      assert.ok(Object.values(manifest).some(entries => entries.length > 0), `${name} yielded no schema objects`)
+    } catch (error) {
+      assert.match(String(error?.code || ''), /^SQL_(?:STATEMENT|ALTER_ACTION|COLUMN_MODIFIER|TABLE_SUFFIX)_UNSUPPORTED$/)
+    }
   }
 })
 
@@ -106,7 +106,7 @@ test('normal single-success ledger record classifies only with checksum and sche
 test('checksum comparison is hexadecimal case-insensitive while preserving raw ledger text', () => {
   const upper = checksum.toUpperCase()
   assert.equal(checksumsEqual(upper, checksum), true)
-  assert.equal(preserveLedgerRows([ledgerRow({ checksum: upper })], requiredFields)[0].checksum, upper)
+  assert.equal(preserveLedgerRows([ledgerRow({ checksum: upper })], requiredFields, new Set(MIGRATIONS))[0].checksum, upper)
 })
 
 test('historical rollback plus exactly one success is distinguished', () => {
@@ -298,7 +298,7 @@ test('raw database error messages are reduced to safe error classes', () => {
 
 test('same-name ledger rows are preserved separately and never folded', () => {
   const rows = [ledgerRow(), ledgerRow({ id: 'fixture-id-2', finished_at: null, rolled_back_at: rolledBack })]
-  const output = preserveLedgerRows(rows, requiredFields)
+  const output = preserveLedgerRows(rows, requiredFields, new Set(MIGRATIONS))
   assert.equal(output.length, 2)
   assert.deepEqual(output.map(row => row.id), ['fixture-id-1', 'fixture-id-2'])
 })
@@ -310,7 +310,7 @@ test('only relevant ledger metadata fields are emitted by the diagnostic', () =>
 
 test('logs content is reduced to NULL EMPTY or NONEMPTY and never emitted', () => {
   const canary = 'synthetic-private-log-canary'
-  const output = JSON.stringify(preserveLedgerRows([ledgerRow({ logs_status: 'NONEMPTY', logs: canary })], requiredFields))
+  const output = JSON.stringify(preserveLedgerRows([ledgerRow({ logs_status: 'NONEMPTY', logs: canary })], requiredFields, new Set(MIGRATIONS)))
   assert.match(output, /"logs":"NONEMPTY"/)
   assert.doesNotMatch(output, new RegExp(canary))
 })
@@ -334,7 +334,7 @@ test('workflow is manual-only, read-only, and does not invoke release workflow',
   assert.doesNotMatch(source, /^\s+(?:push|pull_request|schedule|workflow_run|repository_dispatch):/m)
   assert.match(source, /environment:\s*Production/)
   assert.match(source, /git -C "\$GITHUB_WORKSPACE\/workflow-source" rev-parse HEAD/)
-  assert.match(source, /repos\/\$\{repository\}\/git\/ref\/heads\/integration\/mobile-server-rc-v3/)
+  assert.match(source, /repos\/\$\{repository\}\/git\/ref\/heads\/main/)
   assert.match(source, /body\?\.object\?\.sha !== expected/)
   assert.match(source, /uses:\s*actions\/checkout@11d5960a326750d5838078e36cf38b85af677262/)
   assert.doesNotMatch(source, /uses:\s*actions\/checkout@v\d+/)

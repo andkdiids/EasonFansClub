@@ -4,17 +4,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
-export const CANDIDATE_SHA = '2b6d06b630dfed7e8ce6e518e10bda52b919af8b'
-export const EXPECTED_PRODUCTION_SHA = '1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063'
 export const APP_ROOT = '/home/apps/easonfansclub'
-export const MIGRATIONS = Object.freeze([
-  '20260815090000_add_song_ratings',
-  '20260816120000_add_want_listen_game',
-  '20260820140000_add_want_listen_session_exclusion',
-  '20260821120000_add_rate_limit_log',
-  '20260826100000_add_anywhere_door_social_posts',
-  '20260827100000_add_anywhere_door_safety_state',
-])
+export const MIGRATION_NAME = /^\d{14}_[A-Za-z0-9_-]+$/
+export const SHA = /^[0-9a-f]{40}$/
 
 const LEDGER_FIELDS = Object.freeze([
   ['id', 'id'],
@@ -33,6 +25,22 @@ export class DiagnosticFailure extends Error {
     super(code)
     this.name = 'DiagnosticFailure'
     this.code = code
+  }
+}
+
+const NON_SCHEMA_PARSE_CODES = new Set([
+  'SQL_STATEMENT_UNSUPPORTED',
+  'SQL_ALTER_ACTION_UNSUPPORTED',
+  'SQL_COLUMN_MODIFIER_UNSUPPORTED',
+  'SQL_TABLE_SUFFIX_UNSUPPORTED',
+])
+
+function parseSchemaManifest(sql) {
+  try {
+    return parseMigrationSql(sql)
+  } catch (error) {
+    if (error instanceof DiagnosticFailure && NON_SCHEMA_PARSE_CODES.has(error.code)) return null
+    throw error
   }
 }
 
@@ -413,19 +421,19 @@ function normalizeTimestamp(value) {
   return /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/.test(text) ? text : 'UNSAFE_VALUE'
 }
 
-function safeLedgerValue(field, value) {
+function safeLedgerValue(field, value, migrationNames) {
   if (value === undefined) return 'FIELD_VALUE_UNAVAILABLE'
   if (value === null) return null
   const text = String(value)
   if (field === 'id') return /^[A-Za-z0-9-]{1,128}$/.test(text) ? text : 'UNSAFE_VALUE'
-  if (field === 'migration_name') return MIGRATIONS.includes(text) ? text : 'UNSAFE_VALUE'
+  if (field === 'migration_name') return migrationNames.has(text) ? text : 'UNSAFE_VALUE'
   if (field === 'checksum') return /^[A-Fa-f0-9]{64}$/.test(text) ? text : 'INVALID_FORMAT'
   if (['started_at', 'finished_at', 'rolled_back_at'].includes(field)) return normalizeTimestamp(text)
   if (field === 'applied_steps_count') return /^(0|[1-9]\d*)$/.test(text) ? text : 'UNSAFE_VALUE'
   return 'UNSAFE_VALUE'
 }
 
-export function preserveLedgerRows(rows, presentColumns) {
+export function preserveLedgerRows(rows, presentColumns, migrationNames = new Set()) {
   return rows.map(row => {
     const record = {}
     for (const [column, output] of LEDGER_FIELDS) {
@@ -434,7 +442,7 @@ export function preserveLedgerRows(rows, presentColumns) {
       } else if (column === 'logs') {
         record.logs = ['NULL', 'EMPTY', 'NONEMPTY'].includes(String(row.logs_status)) ? String(row.logs_status) : 'UNKNOWN'
       } else {
-        record[output] = safeLedgerValue(column, row[output])
+        record[output] = safeLedgerValue(column, row[output], migrationNames)
       }
     }
     return record
@@ -628,8 +636,24 @@ function safeCandidateRoot(root) {
   return resolved
 }
 
-function validateMigrationFiles(root, layout, candidateSha = CANDIDATE_SHA) {
-  requireThat(candidateSha === CANDIDATE_SHA, 'CANDIDATE_SHA_MISMATCH')
+function migrationNamesAt(root) {
+  const entries = fs.readdirSync(root, { withFileTypes: true })
+  const names = entries.map(entry => entry.name).sort()
+  requireThat(names.length > 0 && names.every(name => MIGRATION_NAME.test(name)), 'MIGRATION_TREE_NAME_INVALID')
+  for (const name of names) {
+    const directory = path.join(root, name)
+    requireThat(entries.find(entry => entry.name === name)?.isDirectory() === true, 'CANDIDATE_MIGRATION_DIR_INVALID')
+    requireThat(!fs.lstatSync(directory).isSymbolicLink(), 'CANDIDATE_MIGRATION_DIR_INVALID')
+    const file = path.join(directory, 'migration.sql')
+    lstatRegular(file, 'CANDIDATE_SQL_INVALID')
+    const files = fs.readdirSync(directory, { withFileTypes: true })
+    requireThat(files.length === 1 && files[0].name === 'migration.sql' && files[0].isFile(), 'MIGRATION_TREE_ENTRY_INVALID')
+  }
+  return names
+}
+
+function validateMigrationFiles(root, layout, candidateSha) {
+  requireThat(typeof candidateSha === 'string' && SHA.test(candidateSha), 'CANDIDATE_SHA_INVALID')
   const packageRoot = safeCandidateRoot(root)
   const candidateDir = path.join(packageRoot, layout === 'checkout' ? 'prisma' : 'candidate')
   const migrationRoot = path.join(candidateDir, 'migrations')
@@ -637,9 +661,10 @@ function validateMigrationFiles(root, layout, candidateSha = CANDIDATE_SHA) {
     const stat = fs.lstatSync(directory)
     requireThat(stat.isDirectory() && !stat.isSymbolicLink(), 'CANDIDATE_TREE_INVALID')
   }
+  const names = migrationNamesAt(migrationRoot)
   const manifests = new Map()
   const hashes = new Map()
-  for (const name of MIGRATIONS) {
+  for (const name of names) {
     const migrationDir = path.join(migrationRoot, name)
     const migrationStat = fs.lstatSync(migrationDir)
     requireThat(migrationStat.isDirectory() && !migrationStat.isSymbolicLink(), 'CANDIDATE_MIGRATION_DIR_INVALID')
@@ -648,16 +673,16 @@ function validateMigrationFiles(root, layout, candidateSha = CANDIDATE_SHA) {
     const sql = bytes.toString('utf8')
     requireThat(Buffer.from(sql, 'utf8').equals(bytes), 'CANDIDATE_SQL_ENCODING_INVALID')
     hashes.set(name, sha256(bytes))
-    manifests.set(name, parseMigrationSql(sql))
+    manifests.set(name, parseSchemaManifest(sql))
   }
-  return { packageRoot, hashes, manifests }
+  return { packageRoot, hashes, manifests, names }
 }
 
-export function validateCandidateTree(root, candidateSha = CANDIDATE_SHA) {
+export function validateCandidateTree(root, candidateSha) {
   return validateMigrationFiles(root, 'checkout', candidateSha)
 }
 
-export function validateCandidatePackage(root, candidateSha = CANDIDATE_SHA) {
+export function validateCandidatePackage(root, candidateSha) {
   return validateMigrationFiles(root, 'package', candidateSha)
 }
 
@@ -856,7 +881,7 @@ function selectList(present) {
   return selections
 }
 
-async function readLedger(db, emit) {
+async function readLedger(db, emit, migrationNames) {
   const columns = await db.$queryRawUnsafe(
     'SELECT COLUMN_NAME AS columnName FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION',
     '_prisma_migrations',
@@ -869,17 +894,17 @@ async function readLedger(db, emit) {
   }
   const result = new Map()
   if (!present.has('migration_name')) {
-    for (const name of MIGRATIONS) result.set(name, [])
-    return { present, rows: result }
+    for (const name of migrationNames) result.set(name, [])
+    return { present, rows: result, allRows: [] }
   }
   const selections = selectList(present)
   const order = ['started_at', 'id'].filter(field => present.has(field)).map(field => `\`${field}\``)
-  for (const name of MIGRATIONS) {
-    const query = `SELECT ${selections.join(', ')} FROM \`_prisma_migrations\` WHERE \`migration_name\` = ?${order.length ? ` ORDER BY ${order.join(', ')}` : ''}`
-    const rows = await db.$queryRawUnsafe(query, name)
-    result.set(name, rows)
+  const query = `SELECT ${selections.join(', ')} FROM \`_prisma_migrations\`${order.length ? ` ORDER BY ${order.join(', ')}` : ''}`
+  const allRows = await db.$queryRawUnsafe(query)
+  for (const name of migrationNames) {
+    result.set(name, allRows.filter(row => String(row.migration_name) === name))
   }
-  return { present, rows: result }
+  return { present, rows: result, allRows }
 }
 
 async function readActualSchema(db, tableNames) {
@@ -957,8 +982,8 @@ async function readActualSchema(db, tableNames) {
   return actual
 }
 
-function preparedRows(rows, present) {
-  return preserveLedgerRows(rows, present)
+function preparedRows(rows, present, migrationNames) {
+  return preserveLedgerRows(rows, present, new Set(migrationNames))
 }
 
 function successSummary(rows, present) {
@@ -972,8 +997,8 @@ function successSummary(rows, present) {
   }
 }
 
-function outputMigration(name, prod, rc, rows, present, schema, emit) {
-  const safeRows = preparedRows(rows, present)
+function outputMigration(name, prod, rc, rows, present, schema, emit, migrationNames) {
+  const safeRows = preparedRows(rows, present, migrationNames)
   const summary = successSummary(rows, present)
   const successes = rows.filter(row => row.finished_at !== null && row.rolled_back_at === null)
   const rollbacks = rows.filter(row => row.finished_at === null && row.rolled_back_at !== null)
@@ -1020,8 +1045,8 @@ function outputMigration(name, prod, rc, rows, present, schema, emit) {
 async function collect({ packageRoot, appRoot, expectedProductionSha, candidateSha }) {
   const emit = (key, value) => console.log(`${key}=${value}`)
   requireThat(path.resolve(appRoot) === APP_ROOT, 'APP_ROOT_INVALID')
-  requireThat(expectedProductionSha === EXPECTED_PRODUCTION_SHA, 'EXPECTED_PRODUCTION_SHA_INVALID')
-  requireThat(candidateSha === CANDIDATE_SHA, 'CANDIDATE_SHA_MISMATCH')
+  requireThat(!expectedProductionSha || SHA.test(expectedProductionSha), 'EXPECTED_PRODUCTION_SHA_INVALID')
+  requireThat(SHA.test(candidateSha), 'CANDIDATE_SHA_INVALID')
   const validatedPackage = validateCandidatePackage(packageRoot, candidateSha)
 
   const currentLink = path.join(appRoot, 'current')
@@ -1030,7 +1055,10 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
   const shaFile = path.join(release, '.deployed-sha')
   const shaBytes = lstatRegular(shaFile, 'PRODUCTION_RELEASE_SHA_INVALID', 256)
   const productionSha = shaBytes.toString('utf8').trim()
-  requireThat(/^[0-9a-f]{40}$/.test(productionSha) && productionSha === expectedProductionSha, 'PRODUCTION_RELEASE_SHA_MISMATCH')
+  requireThat(SHA.test(productionSha), 'PRODUCTION_RELEASE_SHA_INVALID')
+  emit('PRODUCTION_SHA_RUNTIME', productionSha)
+  emit('EXPECTED_PRODUCTION_SHA_INPUT', expectedProductionSha || 'NOT_PROVIDED')
+  if (expectedProductionSha) requireThat(productionSha === expectedProductionSha, 'PRODUCTION_RELEASE_SHA_MISMATCH')
   const { databaseUrl, target } = readReleaseEnvironment(release)
   process.env.DATABASE_URL = databaseUrl
   const requireFromRelease = createRequire(path.join(release, 'package.json'))
@@ -1039,10 +1067,13 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
 
   const productionFiles = new Map()
   const productionManifests = new Map()
-  for (const name of MIGRATIONS) {
+  const productionMigrationRoot = path.join(release, 'prisma', 'migrations')
+  const productionNames = migrationNamesAt(productionMigrationRoot)
+  requireThat(JSON.stringify(productionNames) === JSON.stringify(validatedPackage.names), 'MIGRATION_TREE_NAME_MISMATCH')
+  for (const name of validatedPackage.names) {
     const file = safeMigrationDirectory(release, name)
     productionFiles.set(name, file)
-    productionManifests.set(name, parseMigrationSql(file.sql))
+    productionManifests.set(name, parseSchemaManifest(file.sql))
   }
 
   const db = new PrismaClient({ log: [] })
@@ -1050,7 +1081,7 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
   try {
     await db.$connect()
     emit('DATABASE_CONNECTIVITY', 'PASS')
-    const tableNames = [...new Set([...productionManifests.values(), ...validatedPackage.manifests.values()].flatMap(manifest => [
+    const tableNames = [...new Set([...productionManifests.values(), ...validatedPackage.manifests.values()].filter(Boolean).flatMap(manifest => [
       ...manifest.tables,
       ...manifest.columns.map(item => item.table),
       ...manifest.indexes.map(item => item.table),
@@ -1076,7 +1107,7 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
     requireThat(databaseContext.identityVerified, 'DATABASE_CONTEXT_MISMATCH')
 
     phase = 'ledger-query'
-    const ledger = await readLedger(db, emit)
+    const ledger = await readLedger(db, emit, validatedPackage.names)
     const metadataVisibility = metadataVisibilityStatus({
       schemaPresent: databaseContext.schemaPresent,
       ledgerVisible: databaseContext.ledgerTableVisible && ledger.present.has('migration_name'),
@@ -1091,23 +1122,34 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
     emit('PRODUCTION_RELEASE_SHA', productionSha)
     emit('CANDIDATE_SHA', candidateSha)
 
-    for (const name of MIGRATIONS) {
+    for (const name of validatedPackage.names) {
       const production = productionFiles.get(name)
       const rcSha = validatedPackage.hashes.get(name)
       const productionManifest = productionManifests.get(name)
       const rcManifest = validatedPackage.manifests.get(name)
-      const schema = compareSchema(productionManifest, actual, { lowerCaseTableNames: databaseContext.lowerCaseTableNames })
+      const schema = productionManifest
+        ? compareSchema(productionManifest, actual, { lowerCaseTableNames: databaseContext.lowerCaseTableNames })
+        : { expected: [], missing: [], unexpected: [], match: 'UNKNOWN' }
       const schemaResult = {
         ...schema,
         rawMatch: schema.match,
         match: metadataVisibility === 'VERIFIED' ? schema.match : 'UNKNOWN',
         visibilityVerified: metadataVisibility === 'VERIFIED',
       }
-      const sameExpectedObjects = compareMigrationManifests(productionManifest, rcManifest)
+      const sameExpectedObjects = productionManifest && rcManifest
+        ? compareMigrationManifests(productionManifest, rcManifest)
+        : productionManifest === rcManifest
       if (!sameExpectedObjects) schemaResult.match = 'UNKNOWN'
-      outputMigration(name, production, { sha256: rcSha }, ledger.rows.get(name) ?? [], ledger.present, schemaResult, emit)
+      outputMigration(name, production, { sha256: rcSha }, ledger.rows.get(name) ?? [], ledger.present, schemaResult, emit, validatedPackage.names)
       emit('PRODUCTION_EQ_RC_SCHEMA_OBJECTS', sameExpectedObjects ? 'YES' : 'NO')
     }
+    const ledgerNames = [...new Set((ledger.allRows ?? []).map(row => String(row.migration_name)))]
+    const unexpectedLedgerNames = ledgerNames.filter(name => !validatedPackage.names.includes(name)).sort()
+    emit('MIGRATION_REPO_COUNT', validatedPackage.names.length)
+    emit('MIGRATION_APPLIED_COUNT', validatedPackage.names.filter(name => (ledger.rows.get(name) ?? []).some(row => row.finished_at !== null && row.rolled_back_at === null)).length)
+    emit('MIGRATION_PENDING_COUNT', validatedPackage.names.filter(name => !(ledger.rows.get(name) ?? []).some(row => row.finished_at !== null && row.rolled_back_at === null)).length)
+    emit('MIGRATION_PENDING_NAMES', JSON.stringify(validatedPackage.names.filter(name => !(ledger.rows.get(name) ?? []).some(row => row.finished_at !== null && row.rolled_back_at === null))))
+    emit('MIGRATION_UNEXPECTED_NAMES', JSON.stringify(unexpectedLedgerNames))
     emit('DIAGNOSTIC_STATUS', 'COMPLETE')
     return 0
   } catch (error) {
@@ -1119,7 +1161,7 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
     }[phase] ?? 'DIAGNOSTIC_PHASE'
     emit(phaseKey, 'FAIL')
     emit('DIAGNOSTIC_ERROR_CLASS', safeErrorClass(error, phase))
-    for (const name of MIGRATIONS) emit('CLASSIFICATION', 'UNKNOWN')
+    for (const name of validatedPackage?.names ?? []) emit('CLASSIFICATION', 'UNKNOWN')
     emit('DIAGNOSTIC_STATUS', 'PARTIAL')
     return 1
   } finally {
@@ -1147,9 +1189,9 @@ async function main() {
   }
   if (mode === 'validate-candidate') {
     const candidate = validateCandidateTree(process.argv[3], process.argv[4])
-    console.log(`CANDIDATE_SHA=${CANDIDATE_SHA}`)
-    console.log(`CANDIDATE_MIGRATION_SQL_COUNT=${MIGRATIONS.length}`)
-    for (const name of MIGRATIONS) console.log(`CANDIDATE_MIGRATION_SHA256 ${name}=${candidate.hashes.get(name)}`)
+    console.log(`CANDIDATE_SHA=${process.argv[4]}`)
+    console.log(`CANDIDATE_MIGRATION_SQL_COUNT=${candidate.names.length}`)
+    for (const name of candidate.names) console.log(`CANDIDATE_MIGRATION_SHA256 ${name}=${candidate.hashes.get(name)}`)
     return 0
   }
   if (mode === 'collect') {

@@ -27,7 +27,7 @@ const doc = parseDocument(workflowText, { uniqueKeys: true })
 const workflow = doc.toJS()
 const sha = '635ae4a0e1d8eae9d93420517a17f4b29794896f'
 const rc = '47396d19842755491e9634605a7d535c163b4495'
-const manifest = { app: APP, expectedSha: sha, approvedSha: rc, migrations: Array.from({ length: 171 }, (_, i) => ({
+const manifest = { app: APP, expectedSha: sha, approvedSha: rc, migrationCount: 171, migrations: Array.from({ length: 171 }, (_, i) => ({
   name: String(20261001000000 + i) + '_fixture', checksum: i.toString(16).padStart(64, '0'),
 })) }
 const release = APP + '/releases/fixture-' + sha.slice(0, 8)
@@ -137,7 +137,7 @@ process.on('exit', () => fs.rmSync(temp, { recursive: true, force: true })) // l
 const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/bash'
 function bashRun(script, extra = {}) {
   const env = { ...process.env, PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH,
-    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', APPROVED_SHA: rc, EXPECTED_SHA: sha,
+    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: rc, CANDIDATE_SHA: rc, EXPECTED_SHA: sha,
     DIAGNOSTIC_MODE: 'full',
     SSH_HOST: 'example.invalid', SSH_USER: 'reader', SSH_PORT: '22', KEY_FILE: '/runner/key', HOSTS_FILE: '/runner/hosts',
     PREFLIGHT_PAYLOAD: Buffer.from(JSON.stringify(manifest)).toString('base64'), ...extra }
@@ -183,17 +183,18 @@ test('secrets are bound to Production after the main-only validation job', () =>
 })
 test('main dispatch accepted locally', () => assert.equal(bashRun(guardStep.run).status, 0))
 for (const [name, env] of Object.entries({ push: { GITHUB_EVENT_NAME: 'push' }, branch: { GITHUB_REF: 'refs/heads/feature' },
-  shortSHA: { APPROVED_SHA: '47396d1' }, shellInjection: { APPROVED_SHA: '$(touch forbidden)' },
+  shortSHA: { CANDIDATE_SHA: '47396d1' }, shellInjection: { CANDIDATE_SHA: '$(touch forbidden)' },
   uppercase: { EXPECTED_SHA: sha.toUpperCase() }, diagnosticMode: { DIAGNOSTIC_MODE: 'shell;command' } })) {
   test('reject trigger/SHA: ' + name, () => assert.notEqual(bashRun(guardStep.run, env).status, 0))
 }
-test('checks installed policy/RC using existing non-deploying guard', () => {
-  assert.match(stepNamed('Validate installed').run, /approved-release-guard\.sh validate/)
+test('checks current main candidate using a non-deploying remote ref check', () => {
+  assert.match(stepNamed('Validate current main').run, /git\/ref\/heads\/main/)
+  assert.doesNotMatch(stepNamed('Validate current main').run, /approved-release-guard|production-topic-activity/)
   assert.match(stepNamed('Build a non-secret').run, /validateManifest/)
   const checkouts = steps.filter(step => step.uses?.startsWith('actions/checkout@'))
   assert.equal(checkouts.length, 3)
   assert.ok(checkouts.every(step => step.uses === 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262' && step.with['persist-credentials'] === false))
-  assert.equal(checkouts[1].with.ref, '${{ inputs.approved_sha }}')
+  assert.equal(checkouts[1].with.ref, '${{ inputs.candidate_sha }}')
   assert.equal(checkouts[2].with.ref, '${{ github.sha }}')
 })
 test('install .github-only files cannot trigger legacy deploy.yml push', () => {

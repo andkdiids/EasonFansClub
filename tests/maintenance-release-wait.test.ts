@@ -4,20 +4,22 @@ import { spawn } from 'node:child_process'
 import { createMaintenanceReleaseWait } from '../lib/instagram/maintenance-release-wait'
 
 test('release wait keeps a child alive until its deadline and exits with failure', async () => {
-  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
-    import { createMaintenanceReleaseWait } from './lib/instagram/maintenance-release-wait.ts';
+  const child = spawn(process.execPath, ['--import', 'tsx', '-e', `
+    const { createMaintenanceReleaseWait } = require('./lib/instagram/maintenance-release-wait.ts');
     const wait = createMaintenanceReleaseWait(150);
     console.log('READY');
     wait.promise.catch(() => { console.log('TIMEOUT'); process.exitCode = 1 }).finally(() => wait.dispose());
   `], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] })
   let output = ''
+  let errors = ''
   child.stdout.on('data', chunk => { output += chunk })
+  child.stderr.on('data', chunk => { errors += chunk })
   const code = await new Promise<number | null>((resolve, reject) => {
     child.once('error', reject)
     child.once('exit', resolve)
   })
   assert.equal(code, 1)
-  assert.match(output, /READY[\s\S]*TIMEOUT/)
+  assert.match(output, /READY[\s\S]*TIMEOUT/, errors)
 })
 
 test('only normal release resolves; termination rejects and cleanup is idempotent', async () => {
