@@ -97,10 +97,20 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   const mainUnifiedCi = baseSource('.github/workflows/unified-ci.yml')
   const expectedUnifiedCi = mainUnifiedCi.replace(
     '      - name: Next.js production build\n        shell: bash\n        run: |\n',
-    '      - name: Next.js production build\n        shell: bash\n        env:\n          NODE_OPTIONS: --max-old-space-size=6144\n        run: |\n',
+    '      - name: Next.js production build\n        shell: bash\n        env:\n          NODE_OPTIONS: --max-old-space-size=4096\n        run: |\n',
   )
   assert.notEqual(expectedUnifiedCi, mainUnifiedCi, 'the main build step must match the reviewed insertion point')
   assert.equal(source('.github/workflows/unified-ci.yml'), expectedUnifiedCi, 'only the reviewed build heap override may change unified release CI')
+  const nextConfig = source('next.config.ts')
+  const experimentalConfig = nextConfig.match(/experimental:\s*\{([\s\S]*?)\n\s*\},/)
+  assert.ok(experimentalConfig, 'Next.js experimental build configuration exists')
+  assert.match(experimentalConfig[1], /\bcpus:\s*2\b/)
+  assert.match(experimentalConfig[1], /\bwebpackMemoryOptimizations:\s*true\b/)
+  assert.match(nextConfig, /eslint:\s*\{[\s\S]*?ignoreDuringBuilds:\s*true/)
+  assert.match(nextConfig, /typescript:\s*\{[\s\S]*?ignoreBuildErrors:\s*true/)
+  const unifiedCi = source('.github/workflows/unified-ci.yml')
+  assert.match(unifiedCi, /^  typecheck:\s*$/m, 'type checking remains an independent CI gate')
+  assert.match(unifiedCi, /^  eslint:\s*$/m, 'ESLint remains an independent CI gate')
   const workerMysql = source('.github/workflows/recording-sessions-v2-mysql.yml')
   assert.match(workerMysql, /CREATE DATABASE ecfc_rc14_worker_qa/)
   assert.match(workerMysql, /tests\/instagram-worker-process\.mysql\.integration\.ts/)
