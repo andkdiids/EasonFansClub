@@ -166,8 +166,10 @@ export function prismaFailure(error) {
   // Do not serialize error messages, metadata, stack, stdout or stderr.
   const codes = { P1000: 'AUTH_FAILED', P1001: 'CONNECTION_FAILED', P1002: 'TIMEOUT',
     P1011: 'TLS_FAILED', P2024: 'TIMEOUT', P2010: 'FIXED_SELECT_FAILED' }
-  const known = codes[error?.code || error?.errorCode]
+  const code = error?.code || error?.errorCode
+  const known = Object.hasOwn(codes, code) ? codes[code] : undefined
   if (known) return 'PRISMA_' + known
+  if (typeof code === 'string' && /^P\d{4}$/.test(code)) return 'PRISMA_ERROR_' + code
   // Native initialization failures may omit both code fields. Match only the
   // fixed engine phrase; never emit any part of the connection error message.
   if (typeof error?.message === 'string' && error.message.includes('Error opening a TLS connection:')) {
@@ -175,7 +177,10 @@ export function prismaFailure(error) {
     if (/certificate verify failed|unknown issuer|self.signed certificate|unable to get local issuer/i.test(error.message)) return 'PRISMA_TLS_CERTIFICATE_UNTRUSTED'
     return 'PRISMA_TLS_FAILED'
   }
-  return 'PRISMA_QUERY_UNAVAILABLE'
+  const classes = { TypeError: 'QUERY_TYPE_ERROR', ReferenceError: 'GENERATED_REFERENCE_ERROR',
+    PrismaClientValidationError: 'QUERY_VALIDATION_FAILED', PrismaClientUnknownRequestError: 'ENGINE_QUERY_FAILED',
+    PrismaClientInitializationError: 'INITIALIZATION_FAILED', PrismaClientRustPanicError: 'ENGINE_PANIC' }
+  return 'PRISMA_' + (Object.hasOwn(classes, error?.name) ? classes[error.name] : 'QUERY_UNAVAILABLE')
 }
 
 export function trustedParents(file, io) {
@@ -429,7 +434,7 @@ export function prismaMigrationRead(release, manifest, io) {
     const lines = String(result.stdout).trim().split(/\r?\n/)
     if (lines.length !== 1 || !lines[0].startsWith('PRISMA_LEDGER=')) return unknown('PRISMA_CHILD_OUTPUT_INVALID')
     const value = JSON.parse(lines[0].slice(14))
-    if (value.status === 'UNKNOWN' && (/^PRISMA_[A-Z_]+$/.test(value.reason) || ENV_METADATA_REASON_CODES.includes(value.reason))) return unknown(value.reason)
+    if (value.status === 'UNKNOWN' && (/^PRISMA_(?:[A-Z_]+|ERROR_P\d{4})$/.test(value.reason) || ENV_METADATA_REASON_CODES.includes(value.reason))) return unknown(value.reason)
     if (value.status !== 'READ' || typeof value.tsv !== 'string' || value.backend !== 'EXISTING_PRISMA_CLIENT' || value.tls !== 'STRICT_CERT_AND_DOMAIN') return unknown('PRISMA_CHILD_OUTPUT_INVALID')
     return { ...migrationState(manifest, value.tsv), backend: value.backend, tls: value.tls,
       applicationSql: 'FIXED_SELECT_ONLY', sessionSideEffects: 'CONNECTION_AND_DRIVER_INITIALIZATION_NOT_ZERO_SYSTEM_EFFECTS' }

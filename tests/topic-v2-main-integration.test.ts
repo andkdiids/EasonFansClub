@@ -86,7 +86,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
     ['.github/workflows/production-migration-ledger-diagnostic-v2.yml', '9c39e9ac6897953b57fe47a53ce5217d3667a6c7875db5a33f12633cecff3de0'],
     ['.github/workflows/production-strict-readonly-preflight.yml', 'a938a5d06e883f2fdb9bb39ac246e98b735a6b8dd588ec57798131f5d21da16a'],
     ['.github/release/production-migration-ledger-diagnostic-v2.mjs', '724cacff167f60b77b493b32a40a8bb58ea3d7d208794d3dea4d0f88199700a2'],
-    ['.github/release/strict-readonly-preflight.mjs', '6f36686dbc00a683142361ed1991ff4f8dda1d1cf21aa02fc521d9488e9d9cfd'],
+    ['.github/release/strict-readonly-preflight.mjs', '584a1e017566bcae62d0419f11e4cf8e255c6676f3c0f7907724dfd0eeda91ef'],
     ['.github/release/test-production-migration-ledger-diagnostic-v2.mjs', '0c14dcfe21c784f6cb0d21615e316b3859d0bcd3ec13fc2fe3d5e1006c0ec45e'],
     ['.github/release/test-strict-readonly-preflight.mjs', '989ae7b601e0d67cc075c5053445a899aabef72be97bc5ac83926f2780cb6fc6'],
   ])
