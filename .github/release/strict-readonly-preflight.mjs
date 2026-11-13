@@ -166,7 +166,16 @@ export function prismaFailure(error) {
   // Do not serialize error messages, metadata, stack, stdout or stderr.
   const codes = { P1000: 'AUTH_FAILED', P1001: 'CONNECTION_FAILED', P1002: 'TIMEOUT',
     P1011: 'TLS_FAILED', P2024: 'TIMEOUT', P2010: 'FIXED_SELECT_FAILED' }
-  return 'PRISMA_' + (codes[error?.code || error?.errorCode] || 'QUERY_UNAVAILABLE')
+  const known = codes[error?.code || error?.errorCode]
+  if (known) return 'PRISMA_' + known
+  // Native initialization failures may omit both code fields. Match only the
+  // fixed engine phrase; never emit any part of the connection error message.
+  if (typeof error?.message === 'string' && error.message.includes('Error opening a TLS connection:')) {
+    if (/hostname mismatch|IP address mismatch/i.test(error.message)) return 'PRISMA_TLS_HOSTNAME_MISMATCH'
+    if (/certificate verify failed|unknown issuer|self.signed certificate|unable to get local issuer/i.test(error.message)) return 'PRISMA_TLS_CERTIFICATE_UNTRUSTED'
+    return 'PRISMA_TLS_FAILED'
+  }
+  return 'PRISMA_QUERY_UNAVAILABLE'
 }
 
 export function trustedParents(file, io) {
