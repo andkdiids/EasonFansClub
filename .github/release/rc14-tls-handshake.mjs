@@ -67,7 +67,10 @@ function main(expectedSha) {
     env: { PATH: '/usr/bin:/bin', LANG: 'C' } })
   const after = runtime()
   if (JSON.stringify(before) !== JSON.stringify(after)) throw Error('PRODUCTION_CHANGED')
-  console.log(JSON.stringify({ scope: 'READONLY_MYSQL_STARTTLS', productionSha: before.sha, configuredCa: options.configuredCa, ...summarizeHandshake(result, options.hostname) }))
+  const childVersion = spawnSync('/usr/bin/node', ['--version'], { encoding: 'utf8', timeout: 5000, shell: false }).stdout?.trim()
+  console.log(JSON.stringify({ scope: 'READONLY_MYSQL_STARTTLS', productionSha: before.sha, nodeVersion: process.version,
+    strictChildNodeVersion: /^v\d+\.\d+\.\d+$/.test(childVersion || '') ? childVersion : 'UNKNOWN',
+    configuredCa: options.configuredCa, ...summarizeHandshake(result, options.hostname) }))
 }
 if (process.argv[1] === '-' || (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))) {
   try { main(process.argv[2]) }
