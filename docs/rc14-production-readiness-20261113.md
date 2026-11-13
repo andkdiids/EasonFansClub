@@ -35,3 +35,7 @@ Fresh code33 download: 183811739 bytes; SHA256 `5D39F4CD071D2D4B78EA82DFEFEE7D20
 5. Verify migration ledger, leaseGeneration, Web/Worker identity, heartbeats and normal hold release.
 6. Re-read code33 baseline and perform the official code33-to34 CAS, then public download verification.
 7. Complete real-device acceptance when an authorized device is available.
+
+## Historical snapshot and current policy
+
+The status above records an earlier recovery stage and must not be used as current production evidence or a new release gate. Future releases follow [the default development and release process](RELEASE_PROCESS.md); use fresh source and workflow results for the task at hand.

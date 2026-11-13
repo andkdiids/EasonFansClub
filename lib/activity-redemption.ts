@@ -25,10 +25,15 @@ export type ActivityRedemptionEntitlement = {
   blockedReason: string | null
   redeemedAt: string | null
   redemptionState?: ActivityLotteryWinnerRedemptionState
+  prizeType?: 'PHYSICAL' | 'VIRTUAL' | null
+  rewardType?: string | null
+  lotteryTitle?: string | null
+  wonAt?: string | null
+  fulfillmentStatus?: string | null
 }
 
 export type ActivityRedemptionLookupView = {
-  activity: { id: string; title: string }
+  activity: { id: string; title: string; coverUrl: string | null; startsAt: string | null; endsAt: string | null; locationName: string | null; locationAddress: string | null }
   registration: {
     id: string
     status: 'ACTIVE' | 'CANCELLED'
@@ -73,7 +78,7 @@ const lookupRegistrationSelect = {
   },
   VerifiedBy: { select: { uid: true, nickname: true } },
   User: { select: { uid: true, nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
-  Activity: { select: { id: true, title: true, status: true, startsAt: true, endsAt: true } },
+  Activity: { select: { id: true, title: true, status: true, coverUrl: true, locationName: true, locationAddress: true, startsAt: true, endsAt: true } },
 } satisfies Prisma.ActivityRegistrationSelect
 
 type LookupRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof lookupRegistrationSelect }>
@@ -109,31 +114,49 @@ export async function resolveActivityVerificationTokenByToken(db: ActivityRegist
   return { token, registration }
 }
 
-function materialEntitlement(registration: LookupRegistration, now: Date): ActivityRedemptionEntitlement | null {
-  const order = registration.LinkedMaterialRedemption
-  if (!order) return null
+function materialEntitlement(registration: LookupRegistration, order: LookupMaterialOrder, now: Date): ActivityRedemptionEntitlement {
   const isPending = order.status === 'SUCCESS'
   const isRedeemed = order.status === 'REDEEMED'
-  const isAvailableNow = !registration.Activity.startsAt || now >= registration.Activity.startsAt
+  const hasStarted = !registration.Activity.startsAt || now >= registration.Activity.startsAt
+  const hasExpired = order.source !== 'ACTIVITY_REGISTRATION_AUTO' && now > order.material.redeemEndAt
+  const isAvailableNow = hasStarted && !hasExpired
   const selectable = isPending && isAvailableNow
+  const stateReason = isRedeemed ? '已领取，不能重复核销'
+    : order.status === 'REFUNDED' ? '物料订单已退款'
+      : order.status === 'CANCELLED' ? '物料订单已取消'
+        : order.status === 'EXPIRED' || hasExpired ? '物料领取期限已结束，订单已失效'
+          : !hasStarted ? '活动尚未开始，暂不能核销活动物料' : null
   return {
     type: 'MATERIAL',
     id: order.id,
     title: order.material.title,
-    subtitle: order.source === 'ACTIVITY_REGISTRATION_AUTO' && !isAvailableNow && isPending ? '活动尚未开始' : '活动物料',
+    subtitle: stateReason || '活动物料',
     quantity: order.quantity,
-    status: isPending ? 'PENDING' : isRedeemed ? 'REDEEMED' : 'UNAVAILABLE',
+    status: isRedeemed ? 'REDEEMED' : isPending && !hasExpired ? 'PENDING' : 'UNAVAILABLE',
     redeemable: selectable,
-    ...selectionMetadata(selectable, [], !isPending ? '当前不可核销' : !isAvailableNow ? '活动尚未开始，暂不能核销活动物料' : null),
+    ...selectionMetadata(selectable, [], stateReason),
     redeemedAt: order.redeemedAt?.toISOString() || null,
   }
 }
+
+const lookupMaterialOrderSelect = {
+  id: true, status: true, source: true, quantity: true, redeemedAt: true,
+  material: { select: { title: true, redeemEndAt: true } },
+} satisfies Prisma.MaterialRedemptionOrderSelect
+type LookupMaterialOrder = Prisma.MaterialRedemptionOrderGetPayload<{ select: typeof lookupMaterialOrderSelect }>
 
 async function loadLookupRows(activityId: string | null, token: string) {
   const { registration } = activityId
     ? await resolveActivityVerificationToken(prisma, activityId, token)
     : await resolveActivityVerificationTokenByToken(prisma, token)
-  const winners = await prisma.lotteryEntry.findMany({
+  const [materials, winners] = await Promise.all([prisma.materialRedemptionOrder.findMany({
+    where: { userId: registration.userId, OR: [
+      { linkedActivityId: registration.Activity.id },
+      ...(registration.LinkedMaterialRedemption ? [{ id: registration.LinkedMaterialRedemption.id, linkedActivityId: null }] : []),
+    ] },
+    select: lookupMaterialOrderSelect,
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  }), prisma.lotteryEntry.findMany({
     where: { userId: registration.userId, Lottery: { activityId: registration.Activity.id, status: 'DRAWN' } },
     orderBy: [{ wonAt: 'asc' }, { id: 'asc' }],
     select: {
@@ -141,14 +164,15 @@ async function loadLookupRows(activityId: string | null, token: string) {
       registrationId: true,
       redemptionStatus: true,
       redeemedAt: true,
+      wonAt: true,
+      fulfillmentStatus: true,
+      fulfilledAt: true,
       Lottery: { select: { title: true } },
-       LotteryPrize: { select: { tierName: true, name: true, prizeType: true } },
+      LotteryPrize: { select: { tierName: true, name: true, prizeType: true, type: true } },
       Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
     },
-  })
-  // Virtual prizes are fulfilled automatically after the draw and must never
-  // enter the physical check-in/redemption flow.
-  return { registration, winners: winners.filter((winner) => winner.LotteryPrize?.prizeType !== 'VIRTUAL') }
+  })])
+  return { registration, materials, winners }
 }
 
 function lotteryWinnerRegistration(registration: LookupRegistration, winner: { registrationId: string | null; Registration: ActivityLotteryCheckInSnapshot | null }) {
@@ -163,11 +187,10 @@ function lotteryWinnerSubtitle(state: ActivityLotteryWinnerRedemptionState) {
   return '已中奖 · 需完成活动签到后兑奖，可与活动签到一并核销'
 }
 
-async function serializeActivityRedemptionLookup(registration: LookupRegistration, winners: Awaited<ReturnType<typeof loadLookupRows>>['winners']): Promise<ActivityRedemptionLookupView> {
+async function serializeActivityRedemptionLookup(registration: LookupRegistration, materials: LookupMaterialOrder[], winners: Awaited<ReturnType<typeof loadLookupRows>>['winners']): Promise<ActivityRedemptionLookupView> {
   const now = new Date()
   const risk = await getActivityRiskAlert(registration.Activity.id, registration.userId)
   const registrationSelectable = !registration.verifiedAt
-  const material = materialEntitlement(registration, now)
   const entitlements: ActivityRedemptionEntitlement[] = [
     {
       type: 'ACTIVITY_REGISTRATION',
@@ -180,8 +203,9 @@ async function serializeActivityRedemptionLookup(registration: LookupRegistratio
       ...selectionMetadata(registrationSelectable),
       redeemedAt: registration.verifiedAt?.toISOString() || null,
     },
-    ...(material ? [material] : []),
+    ...materials.map((order) => materialEntitlement(registration, order, now)),
     ...winners.map((winner) => {
+      const virtual = winner.LotteryPrize?.prizeType === 'VIRTUAL'
       const redemptionState = getActivityLotteryWinnerRedemptionState({
         redemptionStatus: winner.redemptionStatus,
         registration: lotteryWinnerRegistration(registration, winner),
@@ -192,14 +216,20 @@ async function serializeActivityRedemptionLookup(registration: LookupRegistratio
         type: 'LOTTERY_PRIZE' as const,
         id: winner.id,
         title: winner.LotteryPrize ? `${winner.LotteryPrize.tierName || '中奖奖项'} · ${winner.LotteryPrize.name}` : '中奖奖品',
-        subtitle: `${winner.Lottery.title} · ${lotteryWinnerSubtitle(redemptionState)}`,
+        subtitle: `${winner.Lottery.title} · ${virtual ? winner.fulfillmentStatus === 'FULFILLED' ? '已中奖 · 虚拟奖品已发放' : winner.fulfillmentStatus === 'FAILED' ? '已中奖 · 虚拟奖品发放失败，待工作人员处理' : '已中奖 · 虚拟奖品待自动发放' : lotteryWinnerSubtitle(redemptionState)}`,
+        // Each LotteryEntry represents one allocated winning slot. Prize.quantity is total stock.
         quantity: 1,
-        status: redemptionState === 'REDEEMED' ? 'REDEEMED' as const : redemptionState === 'EXPIRED' ? 'UNAVAILABLE' as const : 'PENDING' as const,
-        redeemable: redemptionState === 'REDEEMABLE',
+        prizeType: winner.LotteryPrize?.prizeType || null,
+        rewardType: winner.LotteryPrize?.type || null,
+        lotteryTitle: winner.Lottery.title,
+        wonAt: winner.wonAt.toISOString(),
+        fulfillmentStatus: winner.fulfillmentStatus,
+        status: virtual ? winner.fulfillmentStatus === 'FULFILLED' ? 'REDEEMED' as const : 'UNAVAILABLE' as const : redemptionState === 'REDEEMED' ? 'REDEEMED' as const : redemptionState === 'EXPIRED' ? 'UNAVAILABLE' as const : 'PENDING' as const,
+        redeemable: !virtual && redemptionState === 'REDEEMABLE',
         ...selectionMetadata(
-          redemptionState === 'WAITING_FOR_CHECK_IN' || redemptionState === 'REDEEMABLE',
+          !virtual && (redemptionState === 'WAITING_FOR_CHECK_IN' || redemptionState === 'REDEEMABLE'),
           ['ACTIVITY_REGISTRATION'],
-          redemptionState === 'WAITING_FOR_CHECK_IN'
+          virtual ? '虚拟奖品自动发放，无需现场核销' : redemptionState === 'WAITING_FOR_CHECK_IN'
             ? '需完成活动签到，可与活动签到一并核销'
             : redemptionState === 'EXPIRED'
               ? '已失效，无法兑奖'
@@ -208,12 +238,12 @@ async function serializeActivityRedemptionLookup(registration: LookupRegistratio
                 : null,
         ),
         redemptionState,
-        redeemedAt: winner.redeemedAt?.toISOString() || null,
+        redeemedAt: (virtual ? winner.fulfilledAt : winner.redeemedAt)?.toISOString() || null,
       }
     }),
   ]
   return {
-    activity: { id: registration.Activity.id, title: registration.Activity.title },
+    activity: { id: registration.Activity.id, title: registration.Activity.title, coverUrl: publicImageUrl(registration.Activity.coverUrl), startsAt: registration.Activity.startsAt?.toISOString() || null, endsAt: registration.Activity.endsAt?.toISOString() || null, locationName: registration.Activity.locationName, locationAddress: registration.Activity.locationAddress },
     registration: {
       id: registration.id,
       status: registration.status,
@@ -231,13 +261,13 @@ async function serializeActivityRedemptionLookup(registration: LookupRegistratio
 }
 
 export async function getActivityRedemptionLookup(activityId: string, rawToken: string): Promise<ActivityRedemptionLookupView> {
-  const { registration, winners } = await loadLookupRows(activityId, rawToken)
-  return serializeActivityRedemptionLookup(registration, winners)
+  const { registration, materials, winners } = await loadLookupRows(activityId, rawToken)
+  return serializeActivityRedemptionLookup(registration, materials, winners)
 }
 
 export async function getActivityRedemptionLookupByToken(rawToken: string): Promise<ActivityRedemptionLookupView> {
-  const { registration, winners } = await loadLookupRows(null, rawToken)
-  return serializeActivityRedemptionLookup(registration, winners)
+  const { registration, materials, winners } = await loadLookupRows(null, rawToken)
+  return serializeActivityRedemptionLookup(registration, materials, winners)
 }
 
 function assertSelection(value: unknown): ActivityRedemptionSelection[] {
@@ -329,6 +359,30 @@ async function redeemLotteryWinnerInTransaction(
   return { id: winner.id, status: 'REDEEMED' as const, redeemedAt: now.toISOString() }
 }
 
+/** Additional existing orders can belong to the same activity without being
+ * the registration's single automatic material order. Never trust an order id
+ * supplied by a client without checking both its activity and recipient. */
+async function redeemAdditionalActivityMaterialInTransaction(tx: Prisma.TransactionClient, activityId: string, registration: LockedActivityRegistration, orderId: string, adminId: string, now: Date) {
+  await tx.$queryRaw`SELECT \`id\` FROM \`MaterialRedemptionOrder\` WHERE \`id\` = ${orderId} FOR UPDATE`
+  const order = await tx.materialRedemptionOrder.findFirst({
+    where: { id: orderId, linkedActivityId: activityId, userId: registration.userId },
+    select: { ...lookupMaterialOrderSelect, material: { select: { title: true, redeemEndAt: true } } },
+  })
+  if (!order) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '该物料不属于当前活动或当前用户', 403)
+  if (order.status === 'REDEEMED') return { changed: false, orderId: order.id }
+  if (order.status !== 'SUCCESS' || (order.source !== 'ACTIVITY_REGISTRATION_AUTO' && now > order.material.redeemEndAt)) {
+    throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '该活动物料当前不可核销', 409)
+  }
+  const activity = await tx.activity.findUnique({ where: { id: activityId }, select: { startsAt: true } })
+  if (activity?.startsAt && now < activity.startsAt) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '活动尚未开始，暂不能核销活动物料', 409)
+  const changed = await tx.materialRedemptionOrder.updateMany({
+    where: { id: order.id, linkedActivityId: activityId, userId: registration.userId, status: 'SUCCESS' },
+    data: { status: 'REDEEMED', redeemedAt: now, redeemedByAdminId: adminId, redemptionSource: 'ACTIVITY_CHECK_IN' },
+  })
+  if (changed.count !== 1) throw new ActivityRedemptionError('REDEMPTION_FAILED', '活动物料核销状态发生变化，请刷新后重试', 409)
+  return { changed: true, orderId: order.id }
+}
+
 export async function confirmActivityRedemption(activityId: string, rawToken: string, rawSelections: unknown, adminId: string) {
   const token = tokenFromInput(rawToken)
   const selections = assertSelection(rawSelections)
@@ -346,8 +400,14 @@ export async function confirmActivityRedemption(activityId: string, rawToken: st
         registration = await readLockedRegistration(tx, registration.id)
         itemResults.push({ type: selection.type, id: selection.id, status: result.alreadyVerified ? 'ALREADY_REDEEMED' : 'REDEEMED' })
       } else if (selection.type === 'MATERIAL') {
-        if (selection.id !== registration.linkedMaterialRedemptionId) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '活动物料不属于当前二维码', 403)
-        const result = await redeemActivityLinkedMaterialInTransaction(tx, { activityId, registrationId: registration.id, orderId: selection.id, adminId }, now)
+        const materialScope = await tx.materialRedemptionOrder.findFirst({ where: {
+          id: selection.id, userId: registration.userId,
+          OR: [{ linkedActivityId: activityId }, ...(selection.id === registration.linkedMaterialRedemptionId ? [{ linkedActivityId: null }] : [])],
+        }, select: { id: true } })
+        if (!materialScope) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '该物料不属于当前活动或当前用户', 403)
+        const result = selection.id === registration.linkedMaterialRedemptionId
+          ? await redeemActivityLinkedMaterialInTransaction(tx, { activityId, registrationId: registration.id, orderId: selection.id, adminId }, now)
+          : await redeemAdditionalActivityMaterialInTransaction(tx, activityId, registration, selection.id, adminId, now)
         itemResults.push({ type: selection.type, id: selection.id, status: result.changed ? 'REDEEMED' : 'ALREADY_REDEEMED' })
       } else {
         const result = await redeemLotteryWinnerInTransaction(tx, activityId, selection.id, registration, adminId, now)

@@ -16,6 +16,11 @@ on:
       - 'tests/instagram-worker-process.mysql.integration.ts'
       - 'tests/instagram-lease-generation-migration.mysql.integration.ts'
       - 'tests/fixtures/instagram-lease-child.ts'
+      - 'lib/activity-redemption.ts'
+      - 'lib/activity-registration.ts'
+      - 'lib/activity-lottery.ts'
+      - 'app/api/admin/activities/**'
+      - 'tests/activity-redemption.mysql.integration.ts'
       - '.github/workflows/recording-sessions-v2-mysql.yml'
 
 permissions:
@@ -93,3 +98,16 @@ jobs:
           RECORDING_SESSIONS_TEST_DATABASE_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/recording_sessions_v2_qa
         shell: bash
         run: pnpm exec tsx tests/recording-sessions-v2-mysql.integration.ts
+
+      - name: Exercise activity redemption concurrency on a separate isolated database
+        env:
+          DATABASE_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/activity_redemption_qa
+          ACTIVITY_REDEMPTION_MYSQL_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/activity_redemption_qa
+        shell: bash
+        run: |
+          set -euo pipefail
+          mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only \
+            -e 'CREATE DATABASE activity_redemption_qa CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+          trap 'mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only -e "DROP DATABASE IF EXISTS activity_redemption_qa"' EXIT
+          pnpm exec prisma db push --skip-generate
+          pnpm exec tsx tests/activity-redemption.mysql.integration.ts

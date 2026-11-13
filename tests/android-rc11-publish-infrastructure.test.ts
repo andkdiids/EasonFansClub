@@ -302,7 +302,7 @@ test('RC12 publication pins code32 and reuses the original immutable code31 roll
     on: { workflow_dispatch: { inputs: Record<string, { default?: string; options?: string[] }> } }
     jobs: Record<string, { environment?: { name?: string } | string; steps: Array<{ name?: string; if?: string; run?: string; env?: Record<string, string> }> }>
   }
-  assert.deepEqual(stage.on.workflow_dispatch.inputs.release_candidate.options, ['rc11', 'rc12', 'rc13', 'rc14'])
+  assert.deepEqual(stage.on.workflow_dispatch.inputs.release_candidate.options, ['rc11', 'rc12', 'rc13', 'rc14', 'beta22'])
   assert.equal(stage.on.workflow_dispatch.inputs.release_candidate.default, 'rc11')
   assert.equal(stage.concurrency.group, 'production-deploy')
   assert.equal(stage.concurrency['cancel-in-progress'], false)
@@ -587,7 +587,7 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
   assert.match(workflowText, /RC11-20261102-152136\.apk/)
   assert.match(workflowText, /verify --print-certs/)
   const configureWorkflowText = read('.github/workflows/configure-android-version.yml')
-  assert.equal((configureWorkflowText.match(/verify-android-apk-signature\.mjs/g) || []).length, 7)
+  assert.equal((configureWorkflowText.match(/verify-android-apk-signature\.mjs/g) || []).length, 9)
   assert.doesNotMatch(configureWorkflowText, /certificate SHA-256 digest.*awk/)
   assert.match(workflowText, /aapt dump badging/)
 })
@@ -1190,4 +1190,27 @@ test('OIDC-only STS errors are explicit and omit untrusted response details', as
     assert.doesNotMatch(error.message, /test-request-credential|sensitive-provider-detail/)
     return true
   })
+})
+
+
+test('Beta22 staging and metadata publication retain same-run ingress, full signature checks, and code34 CAS', () => {
+  const stage = parse(read('.github/workflows/publish-android-rc11.yml')) as { jobs: Record<string, { steps: Array<{ if?: string; id?: string; run?: string }> }> }
+  const ingress = stage.jobs.ingress.steps.map(step => step.run || '').join('\n')
+  assert.match(ingress, /releaseCandidate -eq 'beta22'/)
+  const beta22Ingress = ingress.slice(ingress.indexOf("releaseCandidate -eq 'beta22'"), ingress.indexOf("} else { throw 'RELEASE_CANDIDATE_INVALID'"))
+  assert.match(beta22Ingress, /expectedCode = '35'/)
+  assert.match(beta22Ingress, /expectedVersionName = '1.0.0-beta.22'/)
+  const workflow = parse(read('.github/workflows/configure-android-version.yml')) as { concurrency: { group: string }; jobs: { configure: { steps: Array<{ if?: string; id?: string; run?: string }> } } }
+  assert.equal(workflow.concurrency.group, 'production-deploy')
+  const baseline = workflow.jobs.configure.steps.find(step => step.id === 'beta22-baseline')
+  assert.ok(baseline)
+  assert.equal(baseline.if, "inputs.release_candidate == 'beta22'")
+  assert.match(baseline.run || '', /verify_apk.*35.*1.0.0-beta.22/)
+  assert.match(baseline.run || '', /CODE34_ROLLBACK_SOURCE_VERIFIED=YES/)
+  assert.match(baseline.run || '', /versionCode == 34/)
+  assert.match(baseline.run || '', /verify-android-apk-signature.mjs/)
+  const allRuns = workflow.jobs.configure.steps.map(step => step.run || '').join('\n')
+  assert.match(allRuns, /ANDROID_BETA22_ARTIFACT_PIN_B64/)
+  assert.match(allRuns, /ANDROID_EXPECTED_CURRENT_B64/)
+  assert.match(allRuns, /flock -n/)
 })

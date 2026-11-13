@@ -39,6 +39,8 @@ on:
       # RC14 scheduled-post route and release-control files require
       # explicit skip-db/app-only dispatch; never start default full-DB push.
       - 'app/api/posts/*/schedule/route.ts'
+      - 'scripts/android-beta22-release.json'
+      - 'scripts/android-beta22-release.mjs'
       - 'scripts/android-rc14-release.json'
       - 'scripts/android-rc14-release.mjs'
       - 'tests/android-rc14-release.test.mjs'

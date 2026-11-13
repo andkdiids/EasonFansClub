@@ -1,0 +1,21 @@
+{
+  "applicationId": "fans.ecfc.app",
+  "versionName": "1.0.0-beta.22",
+  "versionCode": 35,
+  "sha256": "86028B1E16F21C0B94F44B2AC20A9D8FBAD428B905113A3CBC3EB81971625133",
+  "size": 183859547,
+  "signerSha256": "12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B",
+  "sourceFile": "ECFC-1.0.0-beta.22-release-code35.apk",
+  "sourcePath": "E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta22\\ECFC-1.0.0-beta.22-release-code35.apk",
+  "mobileCommit": "a3dd23900947efbacfd63a17d0acd49b1a246fef",
+  "releaseNotes": [
+    "统一个人主页和活动中心扫码核销入口",
+    "展示当前活动真实物料与领取状态",
+    "展示全部中奖奖品及领取状态",
+    "核销前使用应用内明细确认弹窗",
+    "完善核销权限、幂等与并发保护",
+    "Beta.22 正式版本"
+  ],
+  "buildCompletedAt": "2026-11-14T06:52:02+08:00",
+  "provenance": "Local Windows official release build using the existing credential-backed signing script; final incremental build rebundled the frozen runtime source. No independent build attestation or GitHub build run."
+}
