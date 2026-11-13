@@ -246,12 +246,13 @@ async function main() {
     await event(worker, 'worker-drained')
     await event(draining, 'maintenance-acquired', 8_000)
 
-    // Maintenance is held. A new independent process must not enter until it
-    // is released. The lock attempt may be rejected or remain blocked; either
-    // outcome is safe so long as admission does not happen.
+    // Maintenance is held. A new independent process must be rejected before
+    // the hold is released. Waiting for its actual decision avoids releasing
+    // maintenance while a delayed child has not yet attempted admission.
     const blocked = startChild('hold-worker', target, { RC14_TEST_TOKEN: 'during-maintenance', RC14_TEST_LEASE_MS: '30000' })
     running.push(blocked)
-    await wait(500)
+    const blockedAdmission = await event(blocked, 'error', 8_000)
+    assert.match(String(blockedAdmission.message), /admission is held/i, 'maintenance rejects a worker that attempts admission while held')
     assert.equal(blocked.events.some((item) => item.event === 'worker-active'), false, 'maintenance excludes a new admission')
     send(draining, 'RELEASE')
     await event(draining, 'maintenance-released')
