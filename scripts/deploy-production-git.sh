@@ -1050,6 +1050,10 @@ try {
   const matches = Array.isArray(config.apps) ? config.apps.filter(app => app.name === appName) : [];
   if (matches.length !== 1) throw new Error();
   const app = matches[0];
+  // PM2 merges old process environments. Override a stale connection URL
+  // explicitly from the selected release's existing shared configuration.
+  const databaseUrl = require('dotenv').parse(fs.readFileSync('.env')).DATABASE_URL;
+  if (typeof databaseUrl !== 'string' || new URL(databaseUrl).protocol !== 'mysql:') throw new Error();
   fs.writeFileSync(output, JSON.stringify({ apps: [{
     ...app,
     env: {
@@ -1057,6 +1061,7 @@ try {
       NODE_ENV: 'production',
       ...(appName === 'easonfansclub' ? { PORT: port } : {}),
       DEPLOY_SHA: releaseSha,
+      DATABASE_URL: databaseUrl,
       DEPLOY_DB_MAINTENANCE_HOLD_FILE: dbMode === 'skip-db' ? maintenanceHoldFile : '',
     },
   }] }), { mode: 0o600 });
