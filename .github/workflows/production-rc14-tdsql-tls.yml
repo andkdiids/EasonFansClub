@@ -1,0 +1,75 @@
+name: RC14 verified TDSQL TLS configuration
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact approved current main commit
+        required: true
+        type: string
+      expected_production_sha:
+        description: Exact observed running production SHA
+        required: true
+        type: string
+      mode:
+        description: Verify peer first; install only after successful chain proof
+        required: true
+        type: choice
+        options: [verify, install]
+        default: verify
+permissions:
+  contents: read
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  configure:
+    runs-on: ubuntu-22.04
+    environment: Production
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact current main and package public CA
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ && "$CANDIDATE_SHA" == "$GITHUB_SHA" ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$CANDIDATE_SHA" ]]
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import { validateCa } from './.github/release/rc14-tdsql-tls.mjs'
+          const ca = fs.readFileSync('.github/release/certs/tdsql-c-mysql-ca.pem', 'utf8')
+          validateCa(ca)
+          const source = fs.readFileSync('.github/release/rc14-tdsql-tls.mjs', 'utf8')
+          const marker = "'__RC14_CA_PEM__'"
+          if (source.split(marker).length !== 2) throw Error('CA_SOURCE_MARKER_INVALID')
+          fs.writeFileSync(process.env.RUNNER_TEMP + '/rc14-tdsql-tls.mjs', source.replace(marker, () => JSON.stringify(ca)), { mode: 0o600 })
+          NODE
+      - name: Verify peer and optionally configure strict Prisma TLS
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PIN: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ && "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SSH_PORT" =~ ^[0-9]{1,5}$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ && "$PIN" =~ ^SHA256:[A-Za-z0-9+/]+=?$ && -n "$SSH_KEY" && -n "$PINNED_HOSTS" ]]
+          [[ "$MODE" == verify || "$MODE" == install ]]
+          key="$RUNNER_TEMP/rc14-tdsql-tls.key"
+          hosts="$RUNNER_TEMP/rc14-tdsql-tls.hosts"
+          trap 'rm -f -- "$key" "$hosts" "$RUNNER_TEMP/rc14-tdsql-tls.mjs"' EXIT
+          umask 077
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          [[ "$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')" == "$PIN" ]]
+          timeout 90s ssh -i "$key" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" -o GlobalKnownHostsFile=/dev/null "$SSH_USER@$SSH_HOST" "test -f /home/apps/easonfansclub/.deploy.lock && test ! -L /home/apps/easonfansclub/.deploy.lock && flock --exclusive --nonblock /home/apps/easonfansclub/.deploy.lock node --input-type=module - '$EXPECTED_SHA' '$MODE'" < "$RUNNER_TEMP/rc14-tdsql-tls.mjs"
