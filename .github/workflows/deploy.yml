@@ -9,6 +9,7 @@ on:
     # still runs because at least one changed path is not ignored.
     paths-ignore:
       - '.github/**'
+      - 'tests/**' # Test-only commits must not trigger production deploys
       # Android release metadata changes require an explicit app-only dispatch
       # so the default push deployment cannot start database phases.
       - 'app/api/app/version/route.ts'
