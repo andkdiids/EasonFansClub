@@ -14,6 +14,9 @@ export const ROOT_PIN = '70E2E9FCC3067F87CBB54BB1D9AAEC2547F15FF483BEA1EC8C5C674
 const fingerprint = cert => cert.fingerprint256.replaceAll(':', '')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const certs = pem => (pem.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) || []).map(p => new X509Certificate(p))
+class PeerVerificationError extends Error {
+  constructor(code, evidence) { super(code); this.evidence = evidence }
+}
 
 export function validateCa(pem) {
   if (/PRIVATE KEY/.test(pem)) throw Error('PRIVATE_KEY_FORBIDDEN')
@@ -42,8 +45,20 @@ export function verifyPeer(output, status, hostname, pem) {
   const peers = certs(output)
   const leaf = peers[0]
   const codes = [...output.matchAll(/(?:Verify return code:\s*|verify error:num=)(\d+)/g)].map(m => Number(m[1]))
-  if (status !== 0 || !codes.includes(0) || codes.some(n => n !== 0) || !leaf) throw Error('TLS_CHAIN_VERIFICATION_FAILED')
-  if (!(net.isIP(hostname) ? leaf.checkIP(hostname) : leaf.checkHost(hostname))) throw Error('TLS_HOSTNAME_MISMATCH')
+  const evidence = {
+    opensslExitStatus: Number.isInteger(status) ? status : 'UNKNOWN',
+    verifyCodes: codes.filter(n => Number.isSafeInteger(n) && n >= 0 && n <= 1000).slice(0, 16),
+    peerCertificateCount: peers.length,
+    endpointKind: ['localhost', '127.0.0.1'].includes(hostname) ? 'LOOPBACK' : net.isIP(hostname) ? 'IP' : 'DNS',
+    leafCertificateSha256: leaf ? fingerprint(leaf) : 'UNKNOWN',
+    hostnameMatch: leaf ? Boolean(net.isIP(hostname) ? leaf.checkIP(hostname) : leaf.checkHost(hostname)) : 'UNKNOWN',
+    leafCdbSignatureVerified: leaf ? Boolean(leaf.checkIssued(cdb) && leaf.verify(cdb.publicKey)) : 'UNKNOWN',
+    caLoadFailed: /error setting certificate|no certificate or crl|unable to load certificate/i.test(output),
+    peerClosed: /unexpected eof|read:errno=/i.test(output),
+  }
+  const fail = code => { throw new PeerVerificationError(code, evidence) }
+  if (status !== 0 || !codes.includes(0) || codes.some(n => n !== 0) || !leaf) fail('TLS_CHAIN_VERIFICATION_FAILED')
+  if (!evidence.hostnameMatch) fail('TLS_HOSTNAME_MISMATCH')
   const walk = (child, seen = new Set()) => {
     const pin = fingerprint(child)
     if (seen.has(pin) || seen.size > 8) return false
@@ -51,7 +66,7 @@ export function verifyPeer(output, status, hostname, pem) {
     if (pin === ROOT_PIN) return next.has(CDB_PIN)
     return [...peers, cdb, root].some(parent => parent.ca && child.checkIssued(parent) && child.verify(parent.publicKey) && walk(parent, next))
   }
-  if (!walk(leaf)) throw Error('PEER_NOT_SIGNED_BY_APPROVED_CDB_CHAIN')
+  if (!walk(leaf)) fail('PEER_NOT_SIGNED_BY_APPROVED_CDB_CHAIN')
   return { leafCertificateSha256: fingerprint(leaf), cdbCaSha256: CDB_PIN, rootCaSha256: ROOT_PIN, hostnameVerified: true, chainVerified: true }
 }
 function trusted(file, isPrivate = false) {
@@ -82,7 +97,7 @@ async function main(expected, mode) {
   const config = strictConfiguration(raw)
   validateCa(CA_PEM)
   const result = spawnSync('/usr/bin/openssl', ['s_client', '-starttls', 'mysql', '-connect', `${config.hostname}:${config.port}`, '-servername', config.hostname,
-    ...(net.isIP(config.hostname) ? ['-verify_ip', config.hostname] : ['-verify_hostname', config.hostname]), '-verify_return_error', '-showcerts', '-CAfile', '/dev/stdin'],
+    ...(net.isIP(config.hostname) ? ['-verify_ip', config.hostname] : ['-verify_hostname', config.hostname]), '-verify_return_error', '-showcerts', '-prexit', '-CAfile', '/dev/stdin'],
   { input: CA_PEM, encoding: 'utf8', timeout: 15000, maxBuffer: 2097152, shell: false, env: { PATH: '/usr/bin:/bin', LANG: 'C' } })
   const proof = verifyPeer(String(result.stdout || '') + '\n' + String(result.stderr || ''), result.status, config.hostname, CA_PEM)
   if (runtime(expected) !== release || !fs.readFileSync(envPath).equals(original)) throw Error('ENV_OR_RELEASE_CHANGED')
@@ -124,6 +139,7 @@ if ((process.argv[1] === '-' && path.basename(fileURLToPath(import.meta.url)) ==
   const keepAlive = setInterval(() => {}, 1000)
   main(process.argv[2], process.argv[3]).catch(error => {
     const code = error.code || error.errorCode
-    console.log(JSON.stringify({ result: 'FAILED_CLOSED', code: /^P\d{4}$/.test(code || '') ? code : /^[A-Z_]+$/.test(error.message || '') ? error.message : 'TLS_CONFIGURATION_FAILED' })); process.exitCode = 1
+    console.log(JSON.stringify({ result: 'FAILED_CLOSED', code: /^P\d{4}$/.test(code || '') ? code : /^[A-Z_]+$/.test(error.message || '') ? error.message : 'TLS_CONFIGURATION_FAILED',
+      ...(error instanceof PeerVerificationError ? { evidence: error.evidence } : {}) })); process.exitCode = 1
   }).finally(() => clearInterval(keepAlive))
 }
