@@ -119,7 +119,8 @@ async function main(expected, mode) {
     if (!committed && created && fs.existsSync(CA_PATH) && hash(fs.readFileSync(CA_PATH)) === hash(CA_PEM)) fs.unlinkSync(CA_PATH)
   }
 }
-if (process.argv[1] === '-' || (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))) {
+if ((process.argv[1] === '-' && path.basename(fileURLToPath(import.meta.url)) === '[eval1]') ||
+    (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))) {
   const keepAlive = setInterval(() => {}, 1000)
   main(process.argv[2], process.argv[3]).catch(error => {
     const code = error.code || error.errorCode

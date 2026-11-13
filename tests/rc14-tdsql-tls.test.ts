@@ -33,3 +33,10 @@ test('approved CA pins, signatures, strict connection identity and peer rejectio
     assert.ok(!workflow.includes('pm2 restart'));
   `], { cwd: process.cwd(), stdio: 'pipe' })
 })
+
+test('runner stdin imports cannot trigger production configuration', () => {
+  execFileSync(process.execPath, ['--input-type=module', '-'], {
+    input: "import { validateCa } from './.github/release/rc14-tdsql-tls.mjs'; if (typeof validateCa !== 'function') throw Error('IMPORT_FAILED');",
+    cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'],
+  })
+})
