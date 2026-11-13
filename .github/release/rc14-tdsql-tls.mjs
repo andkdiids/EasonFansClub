@@ -53,6 +53,8 @@ export function verifyPeer(output, status, hostname, pem) {
     leafCertificateSha256: leaf ? fingerprint(leaf) : 'UNKNOWN',
     hostnameMatch: leaf ? Boolean(net.isIP(hostname) ? leaf.checkIP(hostname) : leaf.checkHost(hostname)) : 'UNKNOWN',
     leafCdbSignatureVerified: leaf ? Boolean(leaf.checkIssued(cdb) && leaf.verify(cdb.publicKey)) : 'UNKNOWN',
+    certificateDnsNames: leaf ? [...leaf.subjectAltName?.matchAll(/(?:^|, )DNS:([A-Za-z0-9*.-]+)/g) || []].map(m => m[1]).slice(0, 16) : [],
+    certificateCommonName: leaf?.subject.match(/(?:^|\n)CN=([A-Za-z0-9* ._-]{1,253})(?:\n|$)/)?.[1] || 'UNKNOWN',
     caLoadFailed: /error setting certificate|no certificate or crl|unable to load certificate/i.test(output),
     peerClosed: /unexpected eof|read:errno=/i.test(output),
   }
@@ -68,6 +70,19 @@ export function verifyPeer(output, status, hostname, pem) {
   }
   if (!walk(leaf)) fail('PEER_NOT_SIGNED_BY_APPROVED_CDB_CHAIN')
   return { leafCertificateSha256: fingerprint(leaf), cdbCaSha256: CDB_PIN, rootCaSha256: ROOT_PIN, hostnameVerified: true, chainVerified: true }
+}
+export function verifyWithIdentityEvidence(result, hostname, pem, probeChain) {
+  try { return verifyPeer(String(result.stdout || '') + '\n' + String(result.stderr || ''), result.status, hostname, pem) }
+  catch (error) {
+    if (error instanceof PeerVerificationError && error.evidence.verifyCodes.includes(62)) {
+      const chainResult = probeChain()
+      try { verifyPeer(String(chainResult.stdout || '') + '\n' + String(chainResult.stderr || ''), chainResult.status, hostname, pem) }
+      catch (chainError) {
+        if (chainError instanceof PeerVerificationError) error.evidence.chainProbe = chainError.evidence
+      }
+    }
+    throw error
+  }
 }
 function trusted(file, isPrivate = false) {
   for (let dir = path.posix.dirname(file); ; dir = path.posix.dirname(dir)) {
@@ -99,10 +114,18 @@ async function main(expected, mode) {
   // Node creates socket-backed child stdin on Linux. OpenSSL cannot reopen that
   // socket as /dev/stdin (ENXIO); cat supplies an ordinary anonymous pipe instead.
   // All variable arguments remain positional parameters, never shell source.
-  const result = spawnSync('/bin/bash', ['-c', 'set -o pipefail; /bin/cat | /usr/bin/openssl "$@"', 'rc14-openssl', 's_client', '-starttls', 'mysql', '-connect', `${config.hostname}:${config.port}`, '-servername', config.hostname,
+  const command = ['-c', 'set -o pipefail; /bin/cat | /usr/bin/openssl "$@"', 'rc14-openssl', 's_client', '-starttls', 'mysql', '-connect', `${config.hostname}:${config.port}`, '-servername', config.hostname,
     ...(net.isIP(config.hostname) ? ['-verify_ip', config.hostname] : ['-verify_hostname', config.hostname]), '-verify_return_error', '-showcerts', '-prexit', '-CAfile', '/dev/stdin'],
-  { input: CA_PEM, encoding: 'utf8', timeout: 15000, maxBuffer: 2097152, shell: false, env: { PATH: '/usr/bin:/bin', LANG: 'C' } })
-  const proof = verifyPeer(String(result.stdout || '') + '\n' + String(result.stderr || ''), result.status, config.hostname, CA_PEM)
+    options = { input: CA_PEM, encoding: 'utf8', timeout: 15000, maxBuffer: 2097152, shell: false, env: { PATH: '/usr/bin:/bin', LANG: 'C' } }
+  const result = spawnSync('/bin/bash', command, options)
+  const proof = verifyWithIdentityEvidence(result, config.hostname, CA_PEM, () => {
+      // Evidence only: obtain the chain while retaining CA verification, then
+      // perform the same crypto hostname check. The original failure is ALWAYS
+      // rethrown; this probe can never authorize installation or authentication.
+      const index = command.findIndex(arg => ['-verify_hostname', '-verify_ip'].includes(arg))
+      const chainCommand = [...command.slice(0, index), ...command.slice(index + 2)]
+      return spawnSync('/bin/bash', chainCommand, options)
+  })
   if (runtime(expected) !== release || !fs.readFileSync(envPath).equals(original)) throw Error('ENV_OR_RELEASE_CHANGED')
   if (mode === 'verify') { console.log(JSON.stringify({ result: 'APPROVED_CA_PEER_VERIFIED', ...proof, productionWrites: 'NONE', databaseAuthenticationSent: false })); return }
   let created = false, db, committed = false

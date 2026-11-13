@@ -7,7 +7,7 @@ test('approved CA pins, signatures, strict connection identity and peer rejectio
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
     import fs from 'node:fs';
-    import { validateCa, strictConfiguration, verifyPeer, CDB_PIN, ROOT_PIN } from './.github/release/rc14-tdsql-tls.mjs';
+    import { validateCa, strictConfiguration, verifyPeer, verifyWithIdentityEvidence, CDB_PIN, ROOT_PIN } from './.github/release/rc14-tdsql-tls.mjs';
     const pem = fs.readFileSync('.github/release/certs/tdsql-c-mysql-ca.pem', 'utf8');
     const ca = validateCa(pem);
     assert.equal(ca.cdb.fingerprint256.replaceAll(':',''), CDB_PIN);
@@ -32,6 +32,12 @@ test('approved CA pins, signatures, strict connection identity and peer rejectio
     assert.throws(() => verifyPeer(pem + '\\nVerify return code: 19 (untrusted)', 1, 'db.example', pem));
     try { verifyPeer('verify error:num=62:hostname mismatch', 1, 'db.example', pem); assert.fail('verification must reject'); }
     catch (error) { assert.deepEqual(error.evidence.verifyCodes, [62]); assert.equal(error.evidence.leafCertificateSha256, 'UNKNOWN'); assert.ok(!JSON.stringify(error.evidence).includes('db.example')); }
+    let probes = 0;
+    assert.throws(() => verifyWithIdentityEvidence({stdout:'verify error:num=62:hostname mismatch',status:1}, 'db.example', pem, () => {
+      probes++; return {stdout:pem + '\\nVerify return code: 0 (ok)',status:0};
+    }), error => error.evidence.verifyCodes[0] === 62 && error.evidence.chainProbe.hostnameMatch === false);
+    assert.equal(probes, 1);
+    assert.throws(() => verifyWithIdentityEvidence({stdout:'verify error:num=19:untrusted',status:1}, 'db.example', pem, () => { throw Error('must not probe'); }));
     const workflow = fs.readFileSync('.github/workflows/production-rc14-tdsql-tls.yml','utf8');
     for (const required of ['environment: Production','group: production-deploy','flock --exclusive --nonblock','git/ref/heads/main','StrictHostKeyChecking=yes']) assert.ok(workflow.includes(required));
     assert.ok(!workflow.includes('pm2 restart'));
