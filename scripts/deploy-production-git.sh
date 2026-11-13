@@ -750,6 +750,9 @@ release_env_real="$(readlink -f -- "${release_dir}/.env" 2>/dev/null || true)"
 [ "${release_env_real}" = "${shared_env_real}" ] || die "Release .env does not point to shared/.env."
 test -r "${release_dir}/.env"
 test -s "${release_dir}/.env"
+# Every child must load the selected shared configuration, never a stale URL
+# inherited from the SSH/login shell before the strict TLS configuration.
+unset DATABASE_URL
 
 for required_path in package.json pnpm-lock.yaml server.ts ecosystem.config.js prisma/schema.prisma; do
   test -e "${release_dir}/${required_path}" || die "Release is missing required path: ${required_path}"
@@ -1050,6 +1053,10 @@ try {
   const matches = Array.isArray(config.apps) ? config.apps.filter(app => app.name === appName) : [];
   if (matches.length !== 1) throw new Error();
   const app = matches[0];
+  // PM2 merges old process environments. Override a stale connection URL
+  // explicitly from the selected release's existing shared configuration.
+  const databaseUrl = require('dotenv').parse(fs.readFileSync('.env')).DATABASE_URL;
+  if (typeof databaseUrl !== 'string' || new URL(databaseUrl).protocol !== 'mysql:') throw new Error();
   fs.writeFileSync(output, JSON.stringify({ apps: [{
     ...app,
     env: {
@@ -1057,6 +1064,7 @@ try {
       NODE_ENV: 'production',
       ...(appName === 'easonfansclub' ? { PORT: port } : {}),
       DEPLOY_SHA: releaseSha,
+      DATABASE_URL: databaseUrl,
       DEPLOY_DB_MAINTENANCE_HOLD_FILE: dbMode === 'skip-db' ? maintenanceHoldFile : '',
     },
   }] }), { mode: 0o600 });
