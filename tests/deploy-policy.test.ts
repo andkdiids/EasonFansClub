@@ -23,6 +23,7 @@ test('production deployment has no manual backup attestation dependency', () => 
 
   const ignoredPaths = workflow.match(/paths-ignore:\s*([\s\S]*?)\n  workflow_dispatch:/)?.[1] ?? ''
   for (const path of [
+    'tests/**',
     'scripts/production-backup-gate.mjs',
     'scripts/production-backup-gate.d.mts',
     'scripts/production-risk-attestation.mjs',
