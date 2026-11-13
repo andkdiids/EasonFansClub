@@ -7,6 +7,8 @@ import { parse } from 'dotenv'
 
 test('Web and Worker reload override stale PM2 database URLs from the current shared env', () => {
   const script = readFileSync('scripts/deploy-production-git.sh', 'utf8')
+  assert.ok(script.indexOf('unset DATABASE_URL') > script.indexOf('ln -s -- "${shared_dir}/.env"'))
+  assert.ok(script.indexOf('unset DATABASE_URL') < script.indexOf('pnpm_with_timeout 12m install'))
   const source = script.match(/if ! node - "\$\{app_name\}"[^\n]*<<'NODE'\r?\n([\s\S]*?)\r?\nNODE/)?.[1]
   assert.ok(source)
   const current = 'mysql://qa:synthetic@db.example/ecfc?sslaccept=strict&sslcert=%2Fhome%2Fapps%2Feasonfansclub%2Fshared%2Fdatabase-ca.pem'

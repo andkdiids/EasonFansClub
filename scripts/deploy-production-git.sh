@@ -750,6 +750,9 @@ release_env_real="$(readlink -f -- "${release_dir}/.env" 2>/dev/null || true)"
 [ "${release_env_real}" = "${shared_env_real}" ] || die "Release .env does not point to shared/.env."
 test -r "${release_dir}/.env"
 test -s "${release_dir}/.env"
+# Every child must load the selected shared configuration, never a stale URL
+# inherited from the SSH/login shell before the strict TLS configuration.
+unset DATABASE_URL
 
 for required_path in package.json pnpm-lock.yaml server.ts ecosystem.config.js prisma/schema.prisma; do
   test -e "${release_dir}/${required_path}" || die "Release is missing required path: ${required_path}"
