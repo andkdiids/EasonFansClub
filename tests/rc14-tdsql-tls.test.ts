@@ -32,6 +32,8 @@ test('approved CA pins, signatures, strict connection identity and peer rejectio
     assert.throws(() => verifyPeer(pem + '\\nVerify return code: 19 (untrusted)', 1, 'db.example', pem));
     try { verifyPeer('verify error:num=62:hostname mismatch', 1, 'db.example', pem); assert.fail('verification must reject'); }
     catch (error) { assert.deepEqual(error.evidence.verifyCodes, [62]); assert.equal(error.evidence.leafCertificateSha256, 'UNKNOWN'); assert.ok(!JSON.stringify(error.evidence).includes('db.example')); }
+    try { verifyPeer(pem + '\\nVerify return code: 0 (ok)', 0, 'db.example', pem); assert.fail('strict identity must reject the CA hostname'); }
+    catch (error) { assert.equal(error.message, 'TLS_HOSTNAME_MISMATCH'); assert.equal(error.evidence.approvedCdbPathVerified, true); assert.equal(error.evidence.hostnameMatch, false); }
     let probes = 0;
     assert.throws(() => verifyWithIdentityEvidence({stdout:'verify error:num=62:hostname mismatch',status:1}, 'db.example', pem, () => {
       probes++; return {stdout:pem + '\\nVerify return code: 0 (ok)',status:0};

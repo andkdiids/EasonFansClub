@@ -45,6 +45,14 @@ export function verifyPeer(output, status, hostname, pem) {
   const peers = certs(output)
   const leaf = peers[0]
   const codes = [...output.matchAll(/(?:Verify return code:\s*|verify error:num=)(\d+)/g)].map(m => Number(m[1]))
+  const walk = (child, seen = new Set()) => {
+    const pin = fingerprint(child)
+    if (seen.has(pin) || seen.size > 8) return false
+    const next = new Set([...seen, pin])
+    if (pin === ROOT_PIN) return next.has(CDB_PIN)
+    return [...peers, cdb, root].some(parent => parent.ca && child.checkIssued(parent) && child.verify(parent.publicKey) && walk(parent, next))
+  }
+  const approvedCdbPathVerified = leaf ? walk(leaf) : 'UNKNOWN'
   const evidence = {
     opensslExitStatus: Number.isInteger(status) ? status : 'UNKNOWN',
     verifyCodes: codes.filter(n => Number.isSafeInteger(n) && n >= 0 && n <= 1000).slice(0, 16),
@@ -53,6 +61,7 @@ export function verifyPeer(output, status, hostname, pem) {
     leafCertificateSha256: leaf ? fingerprint(leaf) : 'UNKNOWN',
     hostnameMatch: leaf ? Boolean(net.isIP(hostname) ? leaf.checkIP(hostname) : leaf.checkHost(hostname)) : 'UNKNOWN',
     leafCdbSignatureVerified: leaf ? Boolean(leaf.checkIssued(cdb) && leaf.verify(cdb.publicKey)) : 'UNKNOWN',
+    approvedCdbPathVerified,
     certificateDnsNames: leaf ? [...leaf.subjectAltName?.matchAll(/(?:^|, )DNS:([A-Za-z0-9*.-]+)/g) || []].map(m => m[1]).slice(0, 16) : [],
     certificateCommonName: leaf?.subject.match(/(?:^|\n)CN=([A-Za-z0-9* ._-]{1,253})(?:\n|$)/)?.[1] || 'UNKNOWN',
     caLoadFailed: /error setting certificate|no certificate or crl|unable to load certificate/i.test(output),
@@ -60,15 +69,8 @@ export function verifyPeer(output, status, hostname, pem) {
   }
   const fail = code => { throw new PeerVerificationError(code, evidence) }
   if (status !== 0 || !codes.includes(0) || codes.some(n => n !== 0) || !leaf) fail('TLS_CHAIN_VERIFICATION_FAILED')
+  if (!approvedCdbPathVerified) fail('PEER_NOT_SIGNED_BY_APPROVED_CDB_CHAIN')
   if (!evidence.hostnameMatch) fail('TLS_HOSTNAME_MISMATCH')
-  const walk = (child, seen = new Set()) => {
-    const pin = fingerprint(child)
-    if (seen.has(pin) || seen.size > 8) return false
-    const next = new Set([...seen, pin])
-    if (pin === ROOT_PIN) return next.has(CDB_PIN)
-    return [...peers, cdb, root].some(parent => parent.ca && child.checkIssued(parent) && child.verify(parent.publicKey) && walk(parent, next))
-  }
-  if (!walk(leaf)) fail('PEER_NOT_SIGNED_BY_APPROVED_CDB_CHAIN')
   return { leafCertificateSha256: fingerprint(leaf), cdbCaSha256: CDB_PIN, rootCaSha256: ROOT_PIN, hostnameVerified: true, chainVerified: true }
 }
 export function verifyWithIdentityEvidence(result, hostname, pem, probeChain) {
