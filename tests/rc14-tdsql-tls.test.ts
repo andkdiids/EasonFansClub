@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
 
 test('approved CA pins, signatures, strict connection identity and peer rejection remain enforced', () => {
   execFileSync(process.execPath, ['--input-type=module', '-e', `
@@ -41,4 +43,14 @@ test('runner stdin imports cannot trigger production configuration', () => {
     input: "import { validateCa } from './.github/release/rc14-tdsql-tls.mjs'; if (typeof validateCa !== 'function') throw Error('IMPORT_FAILED');",
     cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'],
   })
+})
+
+test('Linux OpenSSL reads the pinned CA through an anonymous pipe, without a production file', { skip: process.platform !== 'linux' }, () => {
+  const pem = fs.readFileSync('.github/release/certs/tdsql-c-mysql-ca.pem', 'utf8')
+  const output = execFileSync('/bin/bash', ['-c', 'set -o pipefail; /bin/cat | /usr/bin/openssl "$@"', 'rc14-openssl',
+    'x509', '-in', '/dev/stdin', '-noout', '-fingerprint', '-sha256'], { input: pem, encoding: 'utf8' })
+  assert.ok(output.replaceAll(':', '').includes('1FA929BBD66489637E008E61D070DCC47A4AF5DBFC8BBE086E6F32864C921956'))
+  const source = fs.readFileSync('.github/release/rc14-tdsql-tls.mjs', 'utf8')
+  assert.ok(source.includes('set -o pipefail; /bin/cat | /usr/bin/openssl "$@"'))
+  for (const flag of ['-verify_return_error', '-verify_hostname', '-verify_ip', '-CAfile']) assert.ok(source.includes(flag))
 })

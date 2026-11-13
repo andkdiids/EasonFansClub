@@ -96,7 +96,10 @@ async function main(expected, mode) {
   if (!Buffer.from(raw).equals(original)) throw Error('ENV_ENCODING_INVALID')
   const config = strictConfiguration(raw)
   validateCa(CA_PEM)
-  const result = spawnSync('/usr/bin/openssl', ['s_client', '-starttls', 'mysql', '-connect', `${config.hostname}:${config.port}`, '-servername', config.hostname,
+  // Node creates socket-backed child stdin on Linux. OpenSSL cannot reopen that
+  // socket as /dev/stdin (ENXIO); cat supplies an ordinary anonymous pipe instead.
+  // All variable arguments remain positional parameters, never shell source.
+  const result = spawnSync('/bin/bash', ['-c', 'set -o pipefail; /bin/cat | /usr/bin/openssl "$@"', 'rc14-openssl', 's_client', '-starttls', 'mysql', '-connect', `${config.hostname}:${config.port}`, '-servername', config.hostname,
     ...(net.isIP(config.hostname) ? ['-verify_ip', config.hostname] : ['-verify_hostname', config.hostname]), '-verify_return_error', '-showcerts', '-prexit', '-CAfile', '/dev/stdin'],
   { input: CA_PEM, encoding: 'utf8', timeout: 15000, maxBuffer: 2097152, shell: false, env: { PATH: '/usr/bin:/bin', LANG: 'C' } })
   const proof = verifyPeer(String(result.stdout || '') + '\n' + String(result.stderr || ''), result.status, config.hostname, CA_PEM)
