@@ -166,7 +166,8 @@ export function prismaFailure(error) {
   // Do not serialize error messages, metadata, stack, stdout or stderr.
   const codes = { P1000: 'AUTH_FAILED', P1001: 'CONNECTION_FAILED', P1002: 'TIMEOUT',
     P1011: 'TLS_FAILED', P2024: 'TIMEOUT', P2010: 'FIXED_SELECT_FAILED' }
-  const known = codes[error?.code || error?.errorCode]
+  const code = error?.code || error?.errorCode
+  const known = Object.hasOwn(codes, code) ? codes[code] : undefined
   if (known) return 'PRISMA_' + known
   // Native initialization failures may omit both code fields. Match only the
   // fixed engine phrase; never emit any part of the connection error message.
@@ -175,7 +176,10 @@ export function prismaFailure(error) {
     if (/certificate verify failed|unknown issuer|self.signed certificate|unable to get local issuer/i.test(error.message)) return 'PRISMA_TLS_CERTIFICATE_UNTRUSTED'
     return 'PRISMA_TLS_FAILED'
   }
-  return 'PRISMA_QUERY_UNAVAILABLE'
+  const classes = { TypeError: 'QUERY_TYPE_ERROR', ReferenceError: 'GENERATED_REFERENCE_ERROR',
+    PrismaClientValidationError: 'QUERY_VALIDATION_FAILED', PrismaClientUnknownRequestError: 'ENGINE_QUERY_FAILED',
+    PrismaClientInitializationError: 'INITIALIZATION_FAILED', PrismaClientRustPanicError: 'ENGINE_PANIC' }
+  return 'PRISMA_' + (Object.hasOwn(classes, error?.name) ? classes[error.name] : 'QUERY_UNAVAILABLE')
 }
 
 export function trustedParents(file, io) {
