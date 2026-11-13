@@ -825,7 +825,7 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.doesNotMatch(workflow, /code(?:30|31)_backup_object_key|CODE(?:30|31)_BACKUP_OBJECT_KEY/)
   assert.match(workflow, /VERSION_API_BASELINE_CHANGED/)
   assert.match(workflow, /ANDROID_EXPECTED_CURRENT_B64/)
-  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\)\$/)
+  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\|35\)\$/)
   assert.ok(workflow.indexOf('Update only Android version variables') < workflow.indexOf('Reload only the web process'))
   assert.match(workflow, /pm2 reload easonfansclub --update-env/)
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)
@@ -942,5 +942,49 @@ test('RC14 to code33 rollback requires exact live CAS, pinned code34 and authent
   assert.equal(restored.ANDROID_APK_SHA256, code33.ANDROID_APK_SHA256)
   assert.equal(restored.ANDROID_RELEASE_NOTES, code33.ANDROID_RELEASE_NOTES)
   assert.equal(restored.ANDROID_PUBLISHED_AT, code33.ANDROID_PUBLISHED_AT)
+  assert.throws(() => restoreAndroidVersionEnv(rollback), /ANDROID_BASELINE_MISMATCH/)
+})
+
+test('Beta22 publishes real reviewed notes with code34 CAS and can atomically roll back to authentic code34', (t) => {
+  const code34: AndroidReleaseMetadata = {
+    ...metadata, ANDROID_VERSION_CODE: 34,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc14-20261111-024245-run42947606564-attempt1.apk',
+    ANDROID_APK_SHA256: '450AA28BD98D614C61B18A3BF981F36EEE4C168459EAEF74D1665A54221692AB',
+    ANDROID_APK_SIZE: 183849255,
+    ANDROID_RELEASE_NOTES: JSON.stringify(JSON.parse(readFileSync(path.join(process.cwd(), 'scripts/android-rc14-release.json'), 'utf8')).releaseNotes),
+    ANDROID_PUBLISHED_AT: '2026-11-13T13:18:23Z',
+  }
+  const pin = { sha256: 'A'.repeat(64), size: 181000000 }
+  const code35: AndroidReleaseMetadata = {
+    ...code34, ANDROID_VERSION_NAME: '1.0.0-beta.22', ANDROID_VERSION_CODE: 35,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.22-release-beta22-20261114-010000-run123-attempt1.apk',
+    ANDROID_APK_SHA256: pin.sha256, ANDROID_APK_SIZE: pin.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify(JSON.parse(readFileSync(path.join(process.cwd(), 'scripts/android-beta22-release.json'), 'utf8')).releaseNotes),
+    ANDROID_PUBLISHED_AT: '2026-11-14T01:00:00.000Z',
+  }
+  const { ANDROID_APK_COS_KEY: sourceKey, ...expected34 } = code34
+  const { ANDROID_APK_COS_KEY: liveKey, ...expected35 } = code35
+  const { appDir, envPath } = fixture(t, `DATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code34)}\n`)
+  const before = readFileSync(envPath, 'utf8')
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code35, expectedCurrentMetadata: expected34 }), /BETA22_ARTIFACT_PIN_NOT_READY/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code35, beta22Pin: pin }), /BETA22_CODE34_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code35, beta22Pin: pin, expectedCurrentMetadata: { ...expected34, ANDROID_VERSION_CODE: 35 } }), /BETA22_CODE34_CAS_BASELINE_REQUIRED/)
+  assert.equal(readFileSync(envPath, 'utf8'), before)
+  const published = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code35, expectedCurrentMetadata: expected34, beta22Pin: pin })
+  const live = readFileSync(envPath, 'utf8')
+  assert.equal(dotenv.parse(live).ANDROID_VERSION_CODE, '35')
+  assert.equal(dotenv.parse(live).ANDROID_RELEASE_NOTES, code35.ANDROID_RELEASE_NOTES)
+  const rollback = { appDir, expectedProductionSha, backupName: path.basename(published.backupPath), targetVersionCode: 34 as const, expectedCurrentMetadata: expected35, expectedCurrentObjectKey: liveKey, beta22Pin: pin }
+  assert.throws(() => restoreAndroidVersionEnv({ ...rollback, expectedCurrentMetadata: { ...expected35, ANDROID_VERSION_CODE: 36 } }), /BETA22_ROLLBACK_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => restoreAndroidVersionEnv({ ...rollback, expectedCurrentObjectKey: liveKey.replace('run123', 'run124') }), /ANDROID_BASELINE_MISMATCH/)
+  assert.throws(() => restoreAndroidVersionEnv({ ...rollback, beta22Pin: { ...pin, sha256: 'B'.repeat(64) } }), /INVALID_BETA22_APK_SHA256/)
+  assert.equal(readFileSync(envPath, 'utf8'), live)
+  restoreAndroidVersionEnv(rollback)
+  const restored = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(restored.ANDROID_VERSION_CODE, '34')
+  assert.equal(restored.ANDROID_VERSION_NAME, code34.ANDROID_VERSION_NAME)
+  assert.equal(restored.ANDROID_APK_COS_KEY, sourceKey)
+  assert.equal(restored.ANDROID_RELEASE_NOTES, code34.ANDROID_RELEASE_NOTES)
+  assert.equal(restored.ANDROID_PUBLISHED_AT, code34.ANDROID_PUBLISHED_AT)
   assert.throws(() => restoreAndroidVersionEnv(rollback), /ANDROID_BASELINE_MISMATCH/)
 })

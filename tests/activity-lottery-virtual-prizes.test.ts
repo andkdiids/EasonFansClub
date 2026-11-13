@@ -81,7 +81,13 @@ test('重试服务接收原 winnerId，不重新抽奖', () => {
   assert.match(source, /if \(winner\.fulfillmentStatus === 'FULFILLED'\)/)
 })
 test('虚拟中奖结果不发送物理核销通知', () => assert.match(read('lib/activity-lottery.ts'), /if \(winner\?\.prizeType === 'VIRTUAL'\) return null/))
-test('虚拟奖品不进入现场核销权益列表', () => assert.match(read('lib/activity-redemption.ts'), /winners\.filter\(\(winner\) => winner\.LotteryPrize\?\.prizeType !== 'VIRTUAL'\)/))
+test('虚拟奖品显示真实发放状态但不能进入现场核销选择', () => {
+  const source = read('lib/activity-redemption.ts')
+  assert.match(source, /const virtual = winner\.LotteryPrize\?\.prizeType === 'VIRTUAL'/)
+  assert.match(source, /redeemable: !virtual &&/)
+  assert.match(source, /!virtual && \(redemptionState === 'WAITING_FOR_CHECK_IN' \|\| redemptionState === 'REDEEMABLE'\)/)
+  assert.match(source, /虚拟奖品发放失败，待工作人员处理/)
+})
 test('现场核销接口拒绝虚拟奖品', () => assert.match(read('lib/activity-redemption.ts'), /虚拟奖品已自动发放，无需现场兑奖/))
 test('管理端提供虚拟奖品配置选择器', () => {
   const manager = read('components/activities/ActivityLotteryManager.tsx')

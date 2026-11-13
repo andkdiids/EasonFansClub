@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ActivityRedemptionError, confirmActivityRedemption } from '@/lib/activity-redemption'
+import { ActivityVerificationError } from '@/lib/activity-registration'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -24,7 +25,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     const result = await confirmActivityRedemption(activityId, token, body?.entitlements, guard.user.id)
     return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders })
   } catch (error) {
-    if (error instanceof ActivityRedemptionError) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: privateHeaders })
+    if (error instanceof ActivityRedemptionError || error instanceof ActivityVerificationError) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: privateHeaders })
     console.error('[admin.activities.redemption-confirm]', error instanceof Error ? error.message : error)
     return NextResponse.json({ ok: false, code: 'REDEMPTION_FAILED', message: '核销失败，请稍后重试' }, { status: 500, headers: privateHeaders })
   }

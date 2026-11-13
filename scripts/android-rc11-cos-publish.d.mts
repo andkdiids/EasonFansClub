@@ -37,13 +37,13 @@ export const EXPECTED_COS_BUCKET: 'ecfc-1306412725'
 export const EXPECTED_COS_REGION: 'ap-guangzhou'
 export function getStsExpiryInfo(credentials: { ExpiredTime: number | string }, now?: number): { expiredTime: number; expiredAt: string; remainingSeconds: number }
 export function assertStsCredentialLifetime(credentials: { ExpiredTime: number | string }, minimumRemainingSeconds: number, now?: number): { expiredTime: number; expiredAt: string; remainingSeconds: number }
-export function captureVersionApiBaseline(input?: { candidate?: 'rc11' | 'rc12'; env?: Record<string, string>; fetchImpl?: typeof fetch }): Promise<{ body: Record<string, unknown>; baselinePath: string; rollbackSource: { key: string; size: number; code: 30 | 31 } }>
+export function captureVersionApiBaseline(input?: { candidate?: 'rc11' | 'rc12' | 'rc13' | 'rc14' | 'beta22'; env?: Record<string, string>; fetchImpl?: typeof fetch }): Promise<{ body: Record<string, unknown>; baselinePath: string; rollbackSource: { key: string; size: number; code: 30 | 31 | 32 | 33 | 34 } }>
 
 export function validateCode30VersionApi(body: Record<string, unknown>): Record<string, unknown>
 export function validateCode31VersionApi(body: Record<string, unknown>): Record<string, unknown>
-export function validateIngressManifest(manifest: Record<string, unknown>, context?: Record<string, string> & { candidate?: 'rc11' | 'rc12' }): Record<string, unknown>
-export function createVersionedObjectKey(kind: 'rc11' | 'rc12', context?: { date?: Date; runId?: string; runAttempt?: string }): string
-export function validateVersionedObjectKey(key: string, kind: 'rc11' | 'rc12', context?: { runId?: string; runAttempt?: string }): string
+export function validateIngressManifest(manifest: Record<string, unknown>, context?: Record<string, string> & { candidate?: 'rc11' | 'rc12' | 'rc13' | 'rc14' | 'beta22' }): Record<string, unknown>
+export function createVersionedObjectKey(kind: 'rc11' | 'rc12' | 'rc13' | 'rc14' | 'beta22', context?: { date?: Date; runId?: string; runAttempt?: string }): string
+export function validateVersionedObjectKey(key: string, kind: 'rc11' | 'rc12' | 'rc13' | 'rc14' | 'beta22', context?: { runId?: string; runAttempt?: string }): string
 export function validateCosConfig(env?: Record<string, string | undefined>): Record<string, string | undefined>
 export function validateOidcClaims(claims: Record<string, unknown>, expected: { audience: string; expectedSubject: string; workflowRef: string }): true
 export function validateObjectMetadata(result: { statusCode?: number; headers?: Record<string, unknown> }, expected: { size: number; sha256: string }): true
@@ -57,7 +57,7 @@ export function publishRc11Artifact(input?: { env?: Record<string, string>; fetc
 export function publishRc12Artifact(input?: { env?: Record<string, string>; fetchImpl?: typeof fetch; date?: Date }): Promise<{ key: string; cdnUrl: string }>
 
 export function verifyOidcSts(input?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch; log?: (line: string) => void; now?: () => number }): Promise<true>
-export function verifyRollbackSourceRange(candidate: 'rc11' | 'rc12' | 'rc13', fetchImpl?: typeof fetch): Promise<{ key: string; size: number; code: 30 | 31 | 32 }>
+export function verifyRollbackSourceRange(candidate: 'rc11' | 'rc12' | 'rc13' | 'rc14' | 'beta22', fetchImpl?: typeof fetch): Promise<{ key: string; size: number; code: 30 | 31 | 32 | 33 | 34 }>
 export function verifyCosReadOnlyAccess(input: {
   cos: {
     getBucketVersioning(input: { Bucket: string; Region: string }): Promise<{ VersioningConfiguration: Record<string, unknown> }>

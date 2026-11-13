@@ -17,6 +17,7 @@ on:
           - rc12
           - rc13
           - rc14
+          - beta22
         default: rc11
 
 permissions:
@@ -197,6 +198,15 @@ jobs:
             $env:EXPECTED_SIZE = [string]$pin.size
             $expectedCode = '34'
             $expectedVersionName = '1.0.0-beta.21'
+          } elseif ($releaseCandidate -eq 'beta22') {
+            & node (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-beta22-release.mjs') validate
+            if ($LASTEXITCODE -ne 0) { throw 'BETA22_ARTIFACT_PIN_NOT_READY' }
+            $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-beta22-release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $sourcePath = $pin.sourcePath
+            $env:EXPECTED_SHA256 = $pin.sha256
+            $env:EXPECTED_SIZE = [string]$pin.size
+            $expectedCode = '35'
+            $expectedVersionName = '1.0.0-beta.22'
           } else { throw 'RELEASE_CANDIDATE_INVALID' }
           if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'RC11_APK_SOURCE_MISSING' }
           $source = Get-Item -LiteralPath $sourcePath
@@ -226,11 +236,11 @@ jobs:
             }
           }
           if (-not $apksigner -or -not $aapt) { throw 'ANDROID_APK_VALIDATION_TOOLS_UNAVAILABLE' }
-          $signatureOutput = if ($releaseCandidate -in @('rc13', 'rc14')) {
+          $signatureOutput = if ($releaseCandidate -in @('rc13', 'rc14', 'beta22')) {
             & $apksigner verify --verbose --print-certs $sourcePath 2>&1
           } else { & $apksigner verify --print-certs $sourcePath 2>&1 }
           if ($LASTEXITCODE -ne 0) { throw 'RC11_APK_SIGNATURE_INVALID' }
-          if ($releaseCandidate -in @('rc13', 'rc14')) {
+          if ($releaseCandidate -in @('rc13', 'rc14', 'beta22')) {
             $signatureFile = Join-Path $env:RUNNER_TEMP "rc13-apksigner-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.txt"
             [IO.File]::WriteAllText($signatureFile, [string]::Join("`n", $signatureOutput), [Text.UTF8Encoding]::new($false))
             $signer = '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
@@ -316,6 +326,8 @@ jobs:
       rc13_cdn_url: ${{ steps.rc13.outputs.RC13_CDN_URL }}
       rc14_object_key: ${{ steps.rc14.outputs.RC14_OBJECT_KEY }}
       rc14_cdn_url: ${{ steps.rc14.outputs.RC14_CDN_URL }}
+      beta22_object_key: ${{ steps.beta22.outputs.BETA22_OBJECT_KEY }}
+      beta22_cdn_url: ${{ steps.beta22.outputs.BETA22_CDN_URL }}
     steps:
       - name: Check out the exact protected-main workflow revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -419,6 +431,20 @@ jobs:
           TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
         run: node scripts/android-rc11-cos-publish.mjs publish-rc14
 
+      - name: Upload the immutable BETA22 candidate and verify CDN readback
+        if: inputs.release_candidate == 'beta22'
+        id: beta22
+        env:
+          RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs publish-beta22
+
       - name: Preserve the verified code32 Version API baseline
         if: inputs.release_candidate == 'rc13'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -436,6 +462,17 @@ jobs:
         with:
           name: android-beta21-rc14-version-api-code33-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/android-version-api-code33-baseline.json
+          if-no-files-found: error
+          retention-days: 90
+
+
+
+      - name: Preserve the verified code34 Version API baseline
+        if: inputs.release_candidate == 'beta22'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta22-version-api-code34-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-version-api-code34-baseline.json
           if-no-files-found: error
           retention-days: 90
 
