@@ -11,6 +11,7 @@ test('TLS probe sends no database credentials and fails closed on verification e
     assert.ok(probe.args.includes('-verify_hostname'));
     assert.equal(summarizeHandshake({status: 1, stderr:'verify error:num=20:unable to get local issuer certificate'}, 'db.example').verifyCode, 20);
     assert.equal(summarizeHandshake({status: 0, stdout:'Verify return code: 0 (ok)'}, 'db.example').status, 'FAILED_CLOSED');
+    assert.equal(summarizeHandshake({status: 1, stderr:'MySQL server does not support SSL'}, 'db.example').serverTlsSupport, 'NOT_SUPPORTED');
     assert.throws(() => handshakeOptions('DATABASE_URL="mysql://qa:x@db.example/ecfc?sslcert=/tmp/untrusted.pem"'));
   `], { cwd: process.cwd(), stdio: 'pipe' })
 })

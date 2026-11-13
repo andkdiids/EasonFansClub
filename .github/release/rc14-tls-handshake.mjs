@@ -36,6 +36,7 @@ export function summarizeHandshake(result, hostname) {
   }
   return { status: result.status === 0 && failure === undefined && verify.includes(0) && identity === 'MATCH' ? 'PASS' : 'FAILED_CLOSED',
     verifyCode: failure ?? (verify.includes(0) ? 0 : 'UNKNOWN'), hostnameIdentity: identity, leafCertificateSha256: fingerprint,
+    serverTlsSupport: /does not support SSL|doesn't support SSL|does not support TLS/i.test(text) ? 'NOT_SUPPORTED' : pem ? 'SUPPORTED' : 'UNKNOWN',
     timeout: result.error?.code === 'ETIMEDOUT', databaseAuthenticationSent: false, sqlExecuted: false }
 }
 
