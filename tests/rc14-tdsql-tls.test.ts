@@ -28,6 +28,8 @@ test('approved CA pins, signatures, strict connection identity and peer rejectio
     assert.throws(() => strictConfiguration(raw + 'DATABASE_URL="mysql://duplicate:x@db.example/ecfc"'));
     assert.throws(() => verifyPeer('Verify return code: 0 (ok)', 0, 'db.example', pem));
     assert.throws(() => verifyPeer(pem + '\\nVerify return code: 19 (untrusted)', 1, 'db.example', pem));
+    try { verifyPeer('verify error:num=62:hostname mismatch', 1, 'db.example', pem); assert.fail('verification must reject'); }
+    catch (error) { assert.deepEqual(error.evidence.verifyCodes, [62]); assert.equal(error.evidence.leafCertificateSha256, 'UNKNOWN'); assert.ok(!JSON.stringify(error.evidence).includes('db.example')); }
     const workflow = fs.readFileSync('.github/workflows/production-rc14-tdsql-tls.yml','utf8');
     for (const required of ['environment: Production','group: production-deploy','flock --exclusive --nonblock','git/ref/heads/main','StrictHostKeyChecking=yes']) assert.ok(workflow.includes(required));
     assert.ok(!workflow.includes('pm2 restart'));
