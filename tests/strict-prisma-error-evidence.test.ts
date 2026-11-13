@@ -15,5 +15,7 @@ test('Prisma initialization error codes remain classified without exposing error
   assert.equal(prismaFailure({ message: 'Error opening a TLS connection: IP address mismatch' }), 'PRISMA_TLS_HOSTNAME_MISMATCH');
   assert.equal(prismaFailure({ name: 'TypeError', message: 'sensitive details' }), 'PRISMA_QUERY_TYPE_ERROR');
   assert.equal(prismaFailure({ name: 'PrismaClientInitializationError', message: 'sensitive details' }), 'PRISMA_INITIALIZATION_FAILED');
+  assert.equal(prismaFailure({ errorCode: 'P1013', message: 'sensitive details' }), 'PRISMA_ERROR_P1013');
+  assert.equal(prismaFailure({ code: 'private-value' }), 'PRISMA_QUERY_UNAVAILABLE');
   `], { cwd: process.cwd(), stdio: 'pipe' })
 })
