@@ -566,6 +566,7 @@ jobs:
       - name: Require protected current main before any COS request
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PSExecutionPolicyPreference: RemoteSigned
         run: node scripts/assert-release-main.mjs
 
       - name: Set up the lockfile-pinned Node and pnpm versions

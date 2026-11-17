@@ -596,6 +596,7 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
   const beta23FallbackDownload = cos.steps.find((step) => String(step.name).includes('Download this run\'s full Beta23 ingress artifact'))
   const beta23FallbackRestore = cos.steps.find((step) => String(step.name).includes('Restore the Beta23 APK from the run artifact fallback'))
   const mainGuardIndex = cos.steps.findIndex((step) => String(step.name).includes('Require protected current main before any COS request'))
+  assert.equal((cos.steps[mainGuardIndex].env as Record<string, unknown> | undefined)?.PSExecutionPolicyPreference, 'RemoteSigned')
   assert.equal(cosCheckout?.if, "inputs.release_candidate != 'beta23'")
   assert.equal(artifactDownloadIndex >= 0 ? cos.steps[artifactDownloadIndex].if : undefined, "inputs.release_candidate != 'beta23'")
   assert.equal(beta23SourceDownload?.if, "inputs.release_candidate == 'beta23'")
