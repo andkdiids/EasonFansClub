@@ -6,12 +6,12 @@ import ts from 'typescript'
 
 function routeHarness(userId: string | null) {
   const writes: { userId: string; events: unknown }[] = []
-  const module = { exports: {} as { POST(request: Request): Promise<Response> } }
+  const routeModule = { exports: {} as { POST(request: Request): Promise<Response> } }
   const compiled = ts.transpileModule(readFileSync('app/api/music/listening/route.ts', 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
   runInNewContext(compiled, {
-    module, exports: module.exports, console,
+    module: routeModule, exports: routeModule.exports, console,
     require: (id: string) => {
       if (id === 'next/server') return { NextResponse: { json: (body: unknown, options?: ResponseInit) => Response.json(body, options) } }
       if (id === '@/lib/security') return {
@@ -25,7 +25,7 @@ function routeHarness(userId: string | null) {
       throw new Error(`Unexpected route dependency: ${id}`)
     },
   })
-  return { post: module.exports.POST, writes }
+  return { post: routeModule.exports.POST, writes }
 }
 
 function request(expectedOwner?: string) {
