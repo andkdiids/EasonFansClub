@@ -1302,6 +1302,7 @@ test('Beta23 staging and metadata publication retain same-run ingress, full sign
   assert.ok(baseline)
   assert.equal(baseline.if, "inputs.release_candidate == 'beta23'")
   assert.match(baseline.run || '', /verify_apk.*36.*1\.0\.0-beta\.23/)
+  assert.match(baseline.run || '', /beta23_apk="\$\{RUNNER_TEMP\}\/ecfc-beta21-beta23\.apk"/)
   assert.match(baseline.run || '', /CODE35_ROLLBACK_SOURCE_VERIFIED=YES/)
   assert.match(baseline.run || '', /versionCode == 35/)
   assert.match(baseline.run || '', /verify-android-apk-signature\.mjs/)
