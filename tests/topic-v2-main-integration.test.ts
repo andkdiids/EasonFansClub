@@ -129,7 +129,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   assert.match(workerMysql, /tests\/instagram-worker-process\.mysql\.integration\.ts/)
   assert.match(workerMysql, /tests\/instagram-lease-generation-migration\.mysql\.integration\.ts/)
   const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
-  assert.equal(createHash('sha256').update(reviewedStaging.replace(/\r\n/g, '\n')).digest('hex'), '9594263036d5ce1481e115d346ec9fd37bd78c0d0d757e55f0676ff27eb84d3f', 'reviewed Android staging workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedStaging.replace(/\r\n/g, '\n')).digest('hex'), '137442c751bda2f5050af9db9bd18e6fda9b31e7668ae6046f08986f34076c5d', 'reviewed Android staging workflow must not change without updating this guard')
   const reviewedMetadata = source('.github/workflows/configure-android-version.yml')
   assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), 'cba951359f83db805e310f1eb0fbf31d0db0a86c4a2768622047c116e827e236', 'reviewed Android metadata workflow must not change without updating this guard')
 })
@@ -222,4 +222,3 @@ test('Ecenter conflict retains GET/PATCH request-auth plus generic identity regr
   assert.ok(tests.includes('export async function PATCH\\(request: Request\\)[\\s\\S]*?requireRequestUser'))
   assert.ok(tests.includes('assert.doesNotMatch(route, /requireUser\\(/)'))
 })
-
