@@ -614,6 +614,15 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
     (productionDependencyInstall as unknown as { env?: Record<string, unknown> } | undefined)?.env?.PSExecutionPolicyPreference,
     'RemoteSigned',
   )
+  const beta23ActiveRunSteps = cos.steps.filter((step) => {
+    const typedStep = step as unknown as { if?: string; run?: string }
+    return Boolean(typedStep.run) && (!typedStep.if || typedStep.if.includes("release_candidate == 'beta23'"))
+  })
+  assert.ok(beta23ActiveRunSteps.length > 0)
+  for (const step of beta23ActiveRunSteps) {
+    const typedStep = step as unknown as { name?: string; env?: Record<string, unknown> }
+    assert.equal(typedStep.env?.PSExecutionPolicyPreference, 'RemoteSigned', `${typedStep.name} must run under the configured Windows policy`)
+  }
   assert.match(String(beta23LocalReuse?.run), /android-beta23-release\.mjs/)
   assert.match(String(beta23LocalReuse?.run), /Get-FileHash/)
   assert.match(String(beta23LocalReuse?.run), /BETA23_LOCAL_APK_SHA256_MISMATCH/)
