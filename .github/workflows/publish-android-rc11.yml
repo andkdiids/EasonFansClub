@@ -581,6 +581,8 @@ jobs:
           run_install: false
 
       - name: Install locked production dependencies
+        env:
+          PSExecutionPolicyPreference: RemoteSigned
         run: pnpm install --prod --frozen-lockfile --ignore-scripts
 
       - name: Capture the current Android Version API baseline without modifying it
