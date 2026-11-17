@@ -31,6 +31,7 @@ export function configureAndroidVersionEnv(input: {
   rc13Pin?: AndroidArtifactPin
   rc14Pin?: AndroidArtifactPin
   beta22Pin?: AndroidArtifactPin
+  beta23Pin?: AndroidArtifactPin
   now?: Date
 }): { backupPath: string; changedKeys: string[]; envSha256: string }
 
@@ -45,6 +46,7 @@ export type AndroidVersionRollbackInput = {
   | { targetVersionCode: 32; code30BackupObjectKey?: never; expectedCurrentMetadata: AndroidVersionApiBaseline; expectedCurrentObjectKey: string; rc13Pin: AndroidArtifactPin }
   | { targetVersionCode: 33; code30BackupObjectKey?: never; expectedCurrentMetadata: AndroidVersionApiBaseline; expectedCurrentObjectKey: string; rc14Pin: AndroidArtifactPin }
   | { targetVersionCode: 34; code30BackupObjectKey?: never; expectedCurrentMetadata: AndroidVersionApiBaseline; expectedCurrentObjectKey: string; beta22Pin: AndroidArtifactPin }
+  | { targetVersionCode: 35; code30BackupObjectKey?: never; expectedCurrentMetadata: AndroidVersionApiBaseline; expectedCurrentObjectKey: string; beta23Pin: AndroidArtifactPin }
 )
 
 export function restoreAndroidVersionEnv(input: AndroidVersionRollbackInput): { backupPath: string; changedKeys: string[]; envSha256: string }

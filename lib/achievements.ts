@@ -47,7 +47,11 @@ export async function getUserAchievementStats(userId: string) {
         select: {
           Post: { where: { isDeleted: false } },
           CheckIn: true,
-          MusicPlayRecord: true,
+          // A listening sync event is a duration sample, not a new song play.
+          // Keep playTotal tied to legacy records that identify a MusicTrack
+          // so a client flushing one event every 60 seconds cannot inflate
+          // the existing "播放 N 首歌曲" achievements.
+          MusicPlayRecord: { where: { trackId: { not: null } } },
           Friendship_Friendship_userAIdToUser: true,
           Friendship_Friendship_userBIdToUser: true,
         },

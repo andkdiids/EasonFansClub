@@ -94,6 +94,24 @@ test('未登录敏感 API 返回 JSON 401，不重定向 HTML', async () => {
   await expectUnauthorizedApi('/api/checkin')
 })
 
+test('EasMusic 受保护音频与听歌统计允许 Bearer 到达路由认证，匿名仍被拦截', async () => {
+  const routes: Array<[string, string]> = [
+    ['/api/music/songs/song-1/playback/audio', 'GET'],
+    ['/api/music/songs/song-1/playback/audio', 'HEAD'],
+    ['/api/music/listening', 'GET'],
+    ['/api/music/listening', 'POST'],
+  ]
+  for (const [path, method] of routes) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'mobile-audio-token' }))
+    assert.equal(bearer.status, 200, `${method} ${path} reaches route-level Bearer auth`)
+    const anonymous = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymous.status, 401, `${method} ${path} remains protected anonymously`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/music/songs/song-1/unknown', 'GET', { bearer: 'mobile-audio-token' }))
+  assert.equal(unrelated.status, 401, 'the audio allowlist does not open unrelated song routes')
+})
+
 test('Post Like 的 POST/DELETE 支持 Bearer，同时保留 Cookie 与匿名保护', async () => {
   const path = '/api/posts/test-post/like'
   for (const method of ['POST', 'DELETE']) {

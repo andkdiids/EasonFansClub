@@ -41,10 +41,13 @@ on:
       - 'app/api/posts/*/schedule/route.ts'
       - 'scripts/android-beta22-release.json'
       - 'scripts/android-beta22-release.mjs'
+      - 'scripts/android-beta23-release.json'
+      - 'scripts/android-beta23-release.mjs'
       - 'scripts/android-rc14-release.json'
       - 'scripts/android-rc14-release.mjs'
       - 'tests/android-rc14-release.test.mjs'
       - 'tests/android-rc14-staging.test.mjs'
+      - 'tests/android-beta23-release.test.mjs'
       - 'tests/post-scheduling.test.ts'
       # RC11 signer verification is release infrastructure, not app runtime.
       - 'scripts/verify-android-apk-signature.d.mts'

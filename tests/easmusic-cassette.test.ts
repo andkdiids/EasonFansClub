@@ -59,7 +59,9 @@ test('互动录音机复用全局播放器且没有创建第二个 Audio', () =>
   assert.match(hero, /player\.playTrack/)
   assert.match(hero, /player\.eject/)
   assert.doesNotMatch(hero, /new Audio\(/)
-  assert.equal((provider.match(/new Audio\(\)/g) || []).length, 1)
+  const audioFactory = read('lib/music-browser-playback.ts')
+  assert.match(provider, /createBrowserAudioElement\(\)/)
+  assert.equal((audioFactory.match(/new Audio\(\)/g) || []).length, 1)
 })
 
 test('磁带支持 Pointer Events、触屏点击备用操作和明确状态', () => {

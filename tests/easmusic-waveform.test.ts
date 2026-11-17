@@ -50,11 +50,13 @@ test('暂停、结束和不可见状态会停止高幅动画并回落到基线',
 test('切歌和卸载时只保留一个 RAF 生命周期并清理监听器', () => {
   const waveform = read('components/music/cassette/RecorderWaveform.tsx')
   const provider = read('components/music/MusicPlayerProvider.tsx')
+  const audioFactory = read('lib/music-browser-playback.ts')
   assert.match(waveform, /window\.cancelAnimationFrame\(frame\)/)
   assert.match(waveform, /active = false/)
   assert.match(waveform, /motionQuery\.removeEventListener\('change'/)
   assert.match(waveform, /document\.removeEventListener\('visibilitychange'/)
-  assert.equal((provider.match(/new Audio\(\)/g) || []).length, 1)
+  assert.match(provider, /createBrowserAudioElement\(\)/)
+  assert.equal((audioFactory.match(/new Audio\(\)/g) || []).length, 1)
 })
 
 test('声纹分析失败时降级，不会包住或取消 audio.play()', () => {

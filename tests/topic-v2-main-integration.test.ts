@@ -129,9 +129,9 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   assert.match(workerMysql, /tests\/instagram-worker-process\.mysql\.integration\.ts/)
   assert.match(workerMysql, /tests\/instagram-lease-generation-migration\.mysql\.integration\.ts/)
   const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
-  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), '0713bfea407626c04ad727fbf2b3e573f56479054c7844d01e9d79ffe6bc347c', 'reviewed Android staging workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), '8bb14ab07c67cc980bb84f6f8308652be118642961776454eb3fa0da8304cf79', 'reviewed Android staging workflow must not change without updating this guard')
   const reviewedMetadata = source('.github/workflows/configure-android-version.yml')
-  assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), '1d08d8c23880fb2df1dce808f2a5aee5884641a1d106bdecfa5d785a6e63d922', 'reviewed Android metadata workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), 'cba951359f83db805e310f1eb0fbf31d0db0a86c4a2768622047c116e827e236', 'reviewed Android metadata workflow must not change without updating this guard')
 })
 
 test('reviewed RC14 diagnostics retain exact main identity and read-only production checks', () => {
@@ -149,6 +149,70 @@ test('reviewed RC14 diagnostics retain exact main identity and read-only product
   assert.match(ledger, /PRODUCTION_RELEASE_SHA_MISMATCH/)
   assert.match(ledger, /checksum/)
   assert.match(ledger, /\.deployed-sha/)
+})
+
+test('Beta23 release control is independently fail-closed and keeps the prior candidate guards', async () => {
+  const pin = JSON.parse(source('scripts/android-beta23-release.json')) as {
+    applicationId: string
+    versionName: string
+    versionCode: number
+    sha256: string | null
+    size: number | null
+    signerSha256: string
+    sourceFile: string
+    sourcePath: string
+    mobileCommit: string | null
+    releaseNotes: string[]
+  }
+  assert.equal(pin.applicationId, 'fans.ecfc.app')
+  assert.equal(pin.versionName, '1.0.0-beta.23')
+  assert.equal(pin.versionCode, 36)
+  assert.equal(pin.sourceFile, 'ECFC-1.0.0-beta.23-release-code36.apk')
+  assert.equal(pin.sourcePath, 'E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta23\\ECFC-1.0.0-beta.23-release-code36.apk')
+  assert.equal(pin.signerSha256, '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B')
+  assert.equal(pin.releaseNotes.at(-1), 'Beta.23 正式版本')
+  const beta23Release = await import('../scripts/android-beta23-release.mjs' as string) as unknown as {
+    validateBeta23Pin: (value: Record<string, unknown>) => unknown
+  }
+  const readyPin = {
+    ...pin,
+    sha256: pin.sha256 ?? 'A'.repeat(64),
+    size: pin.size ?? 10000000,
+    mobileCommit: pin.mobileCommit ?? 'a'.repeat(40),
+  }
+  if (pin.sha256 === null || pin.size === null || pin.mobileCommit === null) {
+    assert.throws(() => beta23Release.validateBeta23Pin(pin), /BETA23_ARTIFACT_PIN_NOT_READY/)
+  } else {
+    assert.doesNotThrow(() => beta23Release.validateBeta23Pin(pin))
+  }
+  assert.doesNotThrow(() => beta23Release.validateBeta23Pin(readyPin))
+  for (const field of ['sha256', 'size', 'mobileCommit'] as const) {
+    assert.throws(() => beta23Release.validateBeta23Pin({ ...readyPin, [field]: null }), /BETA23_ARTIFACT_PIN_NOT_READY/)
+  }
+  const pinScript = source('scripts/android-beta23-release.mjs')
+  assert.match(pinScript, /BETA23_ARTIFACT_PIN_NOT_READY/)
+  assert.match(pinScript, /mobileCommit/)
+  const staging = source('.github/workflows/publish-android-rc11.yml')
+  assert.match(staging, /- beta23/)
+  assert.match(staging, /android-beta23-release\.mjs.*validate/)
+  assert.match(staging, /expectedCode = '36'/)
+  assert.match(staging, /expectedVersionName = '1\.0\.0-beta\.23'/)
+  assert.match(staging, /publish-beta23/)
+  assert.match(staging, /apksigner verify --verbose --print-certs/)
+  const metadata = source('.github/workflows/configure-android-version.yml')
+  assert.match(metadata, /- beta23/)
+  assert.match(metadata, /BETA23_ARTIFACT_PIN_NOT_READY|android-beta23-release\.mjs/)
+  assert.match(metadata, /BETA23.*code35|code35.*BETA23/i)
+  assert.match(metadata, /ANDROID_BETA23_ARTIFACT_PIN_B64/)
+  assert.match(metadata, /expected_version_code=36/)
+  const rollback = source('.github/workflows/rollback-android-version-to-code33.yml')
+  assert.match(rollback, /- '35'/)
+  assert.match(rollback, /expected_beta23_object_key/)
+  assert.match(rollback, /rollback-code35/)
+  assert.match(rollback, /BETA23_ROLLBACK_OBJECT_KEY_INVALID/)
+  assert.match(rollback, /CODE35_ORIGINAL_ROLLBACK_SOURCE_VERIFIED=YES/)
+  assert.match(rollback, /VERSION_API_CODE35_RESTORED=VERIFIED/)
+  assert.doesNotMatch(rollback, /DATABASE_URL|prisma migrate|migration deploy/i)
 })
 
 test('Ecenter conflict retains GET/PATCH request-auth plus generic identity regression guard', () => {
