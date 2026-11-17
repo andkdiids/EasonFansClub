@@ -2,7 +2,9 @@ import { open } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 
-const PART_SIZE = 8 * 1024 * 1024
+// Smaller parts avoid long single requests on the GitHub-hosted COS route.
+// 4 MiB stays above COS's 1 MiB minimum for all non-final multipart parts.
+const PART_SIZE = 4 * 1024 * 1024
 const PART_STREAM_CHUNK_SIZE = 64 * 1024
 const MIN_INITIAL_CREDENTIAL_REMAINING_MS = 15 * 60 * 1000
 const COMPLETE_CREDENTIAL_SAFETY_MS = 60 * 1000
