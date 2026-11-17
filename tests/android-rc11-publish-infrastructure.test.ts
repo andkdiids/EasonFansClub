@@ -609,6 +609,11 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
   assert.match(String(cosSourceRestore?.run), /GITHUB_WORKSPACE/)
   assert.equal(beta23LocalReuse?.if, "inputs.release_candidate == 'beta23'")
   assert.equal((beta23LocalReuse?.env as Record<string, unknown> | undefined)?.PSExecutionPolicyPreference, 'RemoteSigned')
+  const productionDependencyInstall = cos.steps.find((step) => String((step as unknown as { name?: string }).name) === 'Install locked production dependencies')
+  assert.equal(
+    (productionDependencyInstall as unknown as { env?: Record<string, unknown> } | undefined)?.env?.PSExecutionPolicyPreference,
+    'RemoteSigned',
+  )
   assert.match(String(beta23LocalReuse?.run), /android-beta23-release\.mjs/)
   assert.match(String(beta23LocalReuse?.run), /Get-FileHash/)
   assert.match(String(beta23LocalReuse?.run), /BETA23_LOCAL_APK_SHA256_MISMATCH/)
