@@ -300,7 +300,7 @@ test('RC12 publication pins code32 and reuses the original immutable code31 roll
   const stage = parse(stageText) as {
     concurrency: { group: string; 'cancel-in-progress': boolean }
     on: { workflow_dispatch: { inputs: Record<string, { default?: string; options?: string[] }> } }
-    jobs: Record<string, { environment?: { name?: string } | string; steps: Array<{ name?: string; if?: string; run?: string; env?: Record<string, string> }> }>
+    jobs: Record<string, { 'runs-on'?: unknown; environment?: { name?: string } | string; steps: Array<{ name?: string; if?: string; run?: string; env?: Record<string, string> }> }>
   }
   assert.deepEqual(stage.on.workflow_dispatch.inputs.release_candidate.options, ['rc11', 'rc12', 'rc13', 'rc14', 'beta22', 'beta23'])
   assert.equal(stage.on.workflow_dispatch.inputs.release_candidate.default, 'rc11')
@@ -562,7 +562,7 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
   const workflowText = read('.github/workflows/publish-android-rc11.yml')
   const workflow = parse(workflowText) as {
     concurrency: { group: string; 'cancel-in-progress': boolean }
-    jobs: Record<string, { needs?: string | string[]; environment?: { name?: string } | string; permissions?: Record<string, string>; steps: Array<Record<string, unknown>> }>
+    jobs: Record<string, { needs?: string | string[]; 'runs-on'?: unknown; environment?: { name?: string } | string; permissions?: Record<string, string>; steps: Array<Record<string, unknown>> }>
   }
   const ingress = workflow.jobs.ingress
   const cos = workflow.jobs.cos
@@ -571,6 +571,7 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
   assert.equal(typeof ingress.environment === 'object' ? ingress.environment.name : ingress.environment, 'Production')
   assert.equal(cos.environment && typeof cos.environment === 'object' ? cos.environment.name : cos.environment, 'Production')
   assert.deepEqual(cos.needs, 'ingress')
+  assert.equal(cos['runs-on'], "${{ inputs.release_candidate == 'beta23' && fromJSON('[\"self-hosted\",\"Windows\",\"X64\",\"rc11-artifact-ingress\"]') || 'ubuntu-22.04' }}")
   assert.equal(cos.permissions?.['id-token'], 'write')
   assert.equal(cos.permissions?.deployments, undefined)
   assert.equal(ingress.permissions?.['id-token'], undefined)
@@ -1216,7 +1217,8 @@ test('Beta22 staging and metadata publication retain same-run ingress, full sign
 })
 
 test('Beta23 staging and metadata publication retain same-run ingress, full signature checks, and code35 CAS', () => {
-  const stage = parse(read('.github/workflows/publish-android-rc11.yml')) as { jobs: Record<string, { steps: Array<{ if?: string; id?: string; run?: string }> }> }
+  const stage = parse(read('.github/workflows/publish-android-rc11.yml')) as { jobs: Record<string, { 'runs-on'?: unknown; steps: Array<{ if?: string; id?: string; run?: string }> }> }
+  assert.equal(stage.jobs.cos['runs-on'], "${{ inputs.release_candidate == 'beta23' && fromJSON('[\"self-hosted\",\"Windows\",\"X64\",\"rc11-artifact-ingress\"]') || 'ubuntu-22.04' }}")
   const ingress = stage.jobs.ingress.steps.map(step => step.run || '').join('\n')
   assert.match(ingress, /releaseCandidate -eq 'beta23'/)
   const beta23Ingress = ingress.slice(ingress.indexOf("releaseCandidate -eq 'beta23'"), ingress.indexOf("} else { throw 'RELEASE_CANDIDATE_INVALID'"))

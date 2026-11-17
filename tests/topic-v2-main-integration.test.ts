@@ -129,7 +129,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   assert.match(workerMysql, /tests\/instagram-worker-process\.mysql\.integration\.ts/)
   assert.match(workerMysql, /tests\/instagram-lease-generation-migration\.mysql\.integration\.ts/)
   const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
-  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), '8bb14ab07c67cc980bb84f6f8308652be118642961776454eb3fa0da8304cf79', 'reviewed Android staging workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedStaging).digest('hex'), '8343f5df800f0701c9c22c281d4a3e1f5b6c7b1dcf06aed572dc6e046a70a448', 'reviewed Android staging workflow must not change without updating this guard')
   const reviewedMetadata = source('.github/workflows/configure-android-version.yml')
   assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), 'cba951359f83db805e310f1eb0fbf31d0db0a86c4a2768622047c116e827e236', 'reviewed Android metadata workflow must not change without updating this guard')
 })

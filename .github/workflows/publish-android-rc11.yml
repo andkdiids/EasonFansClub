@@ -318,7 +318,8 @@ jobs:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
     name: Stage the candidate without copying the current release
     needs: ingress
-    runs-on: ubuntu-22.04
+    # Beta.23 COS staging uses the same Windows runner network path as its verified ingress.
+    runs-on: ${{ inputs.release_candidate == 'beta23' && fromJSON('["self-hosted","Windows","X64","rc11-artifact-ingress"]') || 'ubuntu-22.04' }}
     environment:
       name: Production
       url: https://ecfc.fans
