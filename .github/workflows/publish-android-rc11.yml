@@ -587,6 +587,7 @@ jobs:
 
       - name: Capture the current Android Version API baseline without modifying it
         env:
+          PSExecutionPolicyPreference: RemoteSigned
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: node scripts/android-rc11-cos-publish.mjs verify-version-baseline
 
@@ -673,6 +674,7 @@ jobs:
         if: inputs.release_candidate == 'beta23'
         id: beta23
         env:
+          PSExecutionPolicyPreference: RemoteSigned
           RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
           TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
           TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
