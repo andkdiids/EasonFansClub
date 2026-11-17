@@ -251,7 +251,7 @@ test('failed parts retry and abort only the owned upload', async () => fixture(a
   assert.deepEqual(aborted, ['owned-id'])
 }))
 
-test('large files use three bounded concurrent 8 MiB parts', async () => fixture(async (filePath) => {
+test('large files use three bounded concurrent 4 MiB parts', async () => fixture(async (filePath) => {
   const size = 17 * 1024 * 1024
   await writeFile(filePath, Buffer.alloc(size))
   let active = 0; let peak = 0
@@ -272,10 +272,10 @@ test('large files use three bounded concurrent 8 MiB parts', async () => fixture
   } })
   await multipartUpload({ ...args(cos, filePath), size })
   assert.equal(peak, 3)
-  assert.deepEqual(lengths.sort((a, b) => b - a), [8 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024])
+  assert.deepEqual(lengths.sort((a, b) => b - a), [4 * 1024 * 1024, 4 * 1024 * 1024, 4 * 1024 * 1024, 4 * 1024 * 1024, 1024 * 1024])
 }))
 
-test('configured concurrency one keeps only one 8 MiB part in flight', async () => fixture(async (filePath) => {
+test('configured concurrency one keeps only one 4 MiB part in flight', async () => fixture(async (filePath) => {
   const size = 17 * 1024 * 1024
   await writeFile(filePath, Buffer.alloc(size))
   let active = 0; let peak = 0; const lengths = []
@@ -286,7 +286,7 @@ test('configured concurrency one keeps only one 8 MiB part in flight', async () 
   } })
   await multipartUpload({ ...args(cos, filePath), size, concurrency: 1 })
   assert.equal(peak, 1)
-  assert.deepEqual(lengths, [8 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024])
+  assert.deepEqual(lengths, [4 * 1024 * 1024, 4 * 1024 * 1024, 4 * 1024 * 1024, 4 * 1024 * 1024, 1024 * 1024])
 }))
 
 test('concurrent failures abort only their own UploadId', async () => fixture(async (filePath) => {
@@ -405,7 +405,7 @@ test('slow HTTP body consumption can finish with exact Content-Length', async ()
   } finally { await new Promise((resolve) => server.close(resolve)) }
 }))
 
-test('COS SDK sends exact signed lengths for full 8 MiB parts and final tail', async () => fixture(async (filePath) => {
+test('COS SDK sends exact signed lengths for full 4 MiB parts and final tail', async () => fixture(async (filePath) => {
   const require = createRequire(import.meta.url)
   const COS = require('cos-nodejs-sdk-v5')
   const size = 17 * 1024 * 1024
@@ -436,7 +436,7 @@ test('COS SDK sends exact signed lengths for full 8 MiB parts and final tail', a
   try {
     const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 5000 })
     await multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou', size, sha256: 'A'.repeat(64), log: () => {} })
-    assert.deepEqual(partsSeen.map((part) => part.bodyBytes).sort((a, b) => b - a), [8 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024])
+    assert.deepEqual(partsSeen.map((part) => part.bodyBytes).sort((a, b) => b - a), [4 * 1024 * 1024, 4 * 1024 * 1024, 4 * 1024 * 1024, 4 * 1024 * 1024, 1024 * 1024])
     for (const part of partsSeen) {
       assert.equal(Number(part.contentLength), part.bodyBytes)
       assert.equal(part.transferEncoding, undefined)
