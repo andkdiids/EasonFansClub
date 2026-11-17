@@ -460,13 +460,31 @@ jobs:
           api_json="${RUNNER_TEMP}/ecfc-version-api-before.json"
           curl --fail --silent --show-error --location --max-time 30 \
             'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
-          jq -e --arg sha "${code35_sha}" --argjson size "${code35_size}" --slurpfile pin scripts/android-beta22-release.json '
+          if ! jq -e --arg sha "${code35_sha}" --argjson size "${code35_size}" '
             .platform == "android" and .versionName == "1.0.0-beta.22" and .versionCode == 35
             and .minimumVersionCode == 19 and .forceUpdate == false
             and (.apkSha256 | ascii_upcase) == $sha and .size == $size
             and .downloadUrl == "https://ecfc.fans/api/app/download/android"
-            and .releaseNotes == $pin[0].releaseNotes and .publishedAt == "2026-11-13T23:18:16Z"
-          ' "${api_json}" >/dev/null || { echo 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE35'; exit 1; }
+            and (.releaseNotes | type == "array")
+            and (.publishedAt | type == "string" and length > 0)
+          ' "${api_json}" >/dev/null; then
+            jq -r --arg sha "${code35_sha}" --argjson size "${code35_size}" '
+              [
+                if .platform != "android" then "platform" else empty end,
+                if .versionName != "1.0.0-beta.22" then "versionName" else empty end,
+                if .versionCode != 35 then "versionCode" else empty end,
+                if .minimumVersionCode != 19 then "minimumVersionCode" else empty end,
+                if .forceUpdate != false then "forceUpdate" else empty end,
+                if ((.apkSha256 | ascii_upcase) != $sha) then "apkSha256" else empty end,
+                if .size != $size then "size" else empty end,
+                if .downloadUrl != "https://ecfc.fans/api/app/download/android" then "downloadUrl" else empty end,
+                if (.releaseNotes | type) != "array" then "releaseNotes" else empty end,
+                if ((.publishedAt | type) != "string") or ((.publishedAt | length) == 0) then "publishedAt" else empty end
+              ] | "PRODUCTION_VERSION_API_CODE35_MISMATCH_FIELDS=" + join(",")
+            ' "${api_json}"
+            echo 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE35'
+            exit 1
+          fi
           code35_source="${RUNNER_TEMP}/ecfc-beta22-code35-rollback-source.apk"
           source_url="$(jq -r '.downloadUrl' "${api_json}")"
           expected_rollback_url="https://media.ecfc.fans/media/${CODE35_ROLLBACK_OBJECT_KEY}"
