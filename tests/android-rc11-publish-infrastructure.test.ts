@@ -1299,4 +1299,3 @@ test('Beta23 staging and metadata publication retain same-run ingress, full sign
   assert.match(rollbackText, /PUBLIC_VERSION_API_CODE35_RESTORED=VERIFIED/)
   assert.doesNotMatch(rollbackText, /DATABASE_URL|prisma migrate|migration deploy/i)
 })
-
