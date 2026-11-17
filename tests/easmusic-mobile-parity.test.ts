@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
-import { execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
-const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8')
+const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n')
 
 test('EasMusic mobile APIs use the existing request auth bridge for user state', () => {
   const requestAuthRoutes = [
@@ -61,18 +60,22 @@ test('EasMusic mobile paths and methods are specifically allowlisted', () => {
     '/api/music/albums', '/api/music/search', '/api/music/live',
     '/api/music/reviews', '/api/ratings/songs', '/api/ratings/albums',
     '/api/ratings/public-comments', '/api/ratings/personal-ranking',
-    '/api/music/concerts/contributions',
+    '/api/music/concerts/contributions', '/api/music/listening',
   ]) assert.ok(block.includes(path), `missing GET allowlist: ${path}`)
+  assert.match(block, /music\\\/songs\\\/\[\^\/\]\+\\\/playback\\\/audio\$\/.test\(pathname\)/, 'missing GET allowlist for protected audio')
   assert.match(block, /music\\\/live\\\/attendance\\\/\[\^\/\]\+\\\/photos\$\/\.test\(pathname\)/, 'missing GET allowlist for live photos')
   const postBlock = block.slice(block.indexOf("if (request.method === 'POST')"), block.indexOf("if (request.method === 'PUT' || request.method === 'PATCH')"))
   const patchBlock = block.slice(block.indexOf("if (request.method === 'PUT' || request.method === 'PATCH')"), block.indexOf("if (request.method === 'DELETE')"))
   const deleteBlock = block.slice(block.indexOf("if (request.method === 'DELETE')"), block.indexOf("if (request.method === 'HEAD')"))
   assert.ok(postBlock.includes("pathname === '/api/music/concerts/contributions'"), 'missing POST allowlist for contributions')
+  assert.ok(postBlock.includes("pathname === '/api/music/listening'"), 'missing POST allowlist for listening stats')
   assert.match(postBlock, /live.{0,80}attendance.{0,80}photos/, 'missing POST allowlist for live photos')
   assert.match(patchBlock, /music.{0,80}concerts.{0,80}contributions.{0,80}test\(pathname\)/, 'missing PATCH allowlist for contributions')
   assert.match(patchBlock, /music.{0,80}live.{0,80}attendance.{0,80}photos.{0,80}test\(pathname\)/, 'missing PATCH allowlist for live photos')
   assert.match(deleteBlock, /music.{0,80}concerts.{0,80}contributions.{0,80}test\(pathname\)/, 'missing DELETE allowlist for contributions')
   assert.match(deleteBlock, /music.{0,80}live.{0,80}attendance.{0,80}photos.{0,80}test\(pathname\)/, 'missing DELETE allowlist for live photos')
+  const headBlock = block.slice(block.indexOf("if (request.method === 'HEAD')"))
+  assert.match(headBlock, /music.{0,80}playback.{0,80}audio.{0,80}test\(pathname\)/, 'missing HEAD allowlist for protected audio')
   assert.match(block, /music.{0,40}\(\?:songs\|albums\).{0,80}like\$\/\.test\(pathname\)/)
   assert.match(block, /ratings.{0,60}reviews.{0,60}like\$\/\.test\(pathname\)/)
   assert.match(block, /music.{0,80}live.{0,80}attendance\$\/\.test\(pathname\)/)
@@ -80,20 +83,29 @@ test('EasMusic mobile paths and methods are specifically allowlisted', () => {
   assert.doesNotMatch(block, /pathname\.startsWith\(['"]\/api\/music\//)
 })
 
-test('EasMusic stays schema-neutral while the activity lottery adds only its approved draw-source field', () => {
-  const schemaDiff = execSync('git diff --ignore-all-space HEAD --unified=3 -- prisma/schema.prisma', { encoding: 'utf8' })
-  const schemaAdditions = schemaDiff.split(/\r?\n/).filter((line) => line.startsWith('+') && !line.startsWith('+++'))
-  const schemaDeletions = schemaDiff.split(/\r?\n/).filter((line) => line.startsWith('-') && !line.startsWith('---'))
-  assert.deepEqual(schemaAdditions, schemaDiff ? ['+  drawSource         String?                            @db.VarChar(32)'] : [])
-  assert.deepEqual(schemaDeletions, [])
-  if (schemaDiff) assert.match(schemaDiff, /model Lottery \{[\s\S]*\+  drawSource\s+String\?\s+@db\.VarChar\(32\)/)
+test('EasMusic listening stats extend the legacy play record without local media metadata', () => {
+  const schema = source('prisma/schema.prisma')
+  const playRecord = schema.slice(schema.indexOf('model MusicPlayRecord {'), schema.indexOf('\n}\n\nmodel MusicSong', schema.indexOf('model MusicPlayRecord {')) + 2)
+  assert.match(playRecord, /source\s+MusicPlaySource\s+@default\(ONLINE\)/)
+  assert.match(playRecord, /eventId\s+String\?/)
+  assert.match(playRecord, /startedAt\s+DateTime\?/)
+  assert.match(playRecord, /endedAt\s+DateTime\?/)
+  assert.match(playRecord, /trackId\s+String\?/)
+  assert.match(playRecord, /@@unique\(\[userId, eventId\]/)
+  assert.match(schema, /enum MusicPlaySource \{\s+ONLINE\s+LOCAL\s+\}/)
 
-  const changedMigrations = execSync('git diff HEAD --name-only -- prisma/migrations', { encoding: 'utf8' })
-  const untrackedMigrations = execSync('git ls-files --others --exclude-standard -- prisma/migrations', { encoding: 'utf8' })
-  const migrationPaths = [...new Set(`${changedMigrations}\n${untrackedMigrations}`.split(/\r?\n/).filter(Boolean))].sort()
-  assert.deepEqual(migrationPaths, migrationPaths.length
-    ? ['prisma/migrations/20261105090000_add_activity_lottery_draw_source/migration.sql']
-    : [])
+  const migration = source('prisma/migrations/20261117110000_add_music_listening_stats/migration.sql')
+  assert.match(migration, /MODIFY `trackId` VARCHAR\(191\) NULL/)
+  assert.match(migration, /ADD COLUMN `source` ENUM\('ONLINE', 'LOCAL'\) NOT NULL DEFAULT 'ONLINE'/)
+  assert.match(migration, /ADD UNIQUE INDEX `MusicPlayRecord_userId_eventId_key` \(`userId`, `eventId`\)/)
+  assert.doesNotMatch(migration, /songId|MusicSong/i)
+  assert.doesNotMatch(migration, /DROP TABLE|DROP COLUMN|TRUNCATE/i)
+  const achievements = source('lib/achievements.ts')
+  assert.match(achievements, /MusicPlayRecord:\s*\{\s*where:\s*\{\s*trackId:\s*\{\s*not:\s*null\s*\}\s*\}\s*\}/)
+  assert.match(schema, /model Lottery \{[\s\S]*?drawSource\s+String\?\s+@db\.VarChar\(32\)/)
+  assert.equal(source('prisma/migrations/20261105090000_add_activity_lottery_draw_source/migration.sql').trim(),
+    "ALTER TABLE `Lottery`\n    ADD COLUMN `drawSource` VARCHAR(32) NULL;")
+
   assert.equal(source('prisma/schema.prisma').match(/enum SocialPostMediaType \{([^}]*)\}/)?.[1]
     ?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(','), 'IMAGE,VIDEO,CAROUSEL,REEL,TEXT')
   assert.equal(source('prisma/migrations/20261102090000_add_social_post_text_media_type/migration.sql').replace(/\r\n/g, '\n').trim(),

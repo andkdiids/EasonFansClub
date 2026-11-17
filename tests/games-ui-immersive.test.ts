@@ -72,7 +72,8 @@ test('immersive exit unifies button, browser back, confirmation and abandon clea
 test('EasMusic pauses on entry, preserves its track and hides the mini player while immersed', () => {
   const provider = read('components/music/MusicPlayerProvider.tsx')
   assert.match(game, /dispatchEvent\(new Event\('easmusic:pause-all'\)\)/)
-  assert.match(provider, /const onPauseAll = \(\) => audio\.pause\(\)/)
+  assert.match(provider, /const onPauseAll = \(\) => \{\s*if \(audio === audioRef\.current\) audio\.pause\(\)/)
+  assert.match(provider, /window\.removeEventListener\('easmusic:pause-all', onPauseAll\)/)
   assert.match(provider, /track && !isImmersiveGameRoute/)
   assert.doesNotMatch(provider, /onPauseAll = \(\) => stop/)
 })

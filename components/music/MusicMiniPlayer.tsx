@@ -15,12 +15,17 @@ type MusicMiniPlayerProps = {
   collapsed: boolean
   position: MiniPlayerPosition | null
   progress: number
+  elapsed: number
+  duration: number
+  repeatMode: 'list' | 'single' | 'shuffle'
   onToggleExpanded: () => void
   onToggleCollapsed: () => void
   onPositionChange: (position: MiniPlayerPosition) => void
   onTogglePlayback: () => void
   onPrevious: () => void
   onNext: () => void
+  onSeek: (seconds: number) => void
+  onCycleRepeat: () => void
   onClose: () => void
 }
 
@@ -228,8 +233,25 @@ export function MusicMiniPlayer(props: Readonly<MusicMiniPlayerProps>) {
             {props.expanded ? <button type="button" className="h-11 w-11" onClick={props.onPrevious} aria-label="上一首">‹</button> : null}
             <button type="button" className="h-11 min-w-11" onClick={props.onTogglePlayback} aria-label={props.playing ? '暂停' : '播放'}>{props.loading ? '…' : props.playing ? 'Ⅱ' : '▶'}</button>
             {props.expanded ? <button type="button" className="h-11 w-11" onClick={props.onNext} aria-label="下一首">›</button> : null}
+            {props.expanded ? <button type="button" className="h-11 min-w-11 text-[10px] text-slate-300" onClick={props.onCycleRepeat} aria-label="切换循环模式">{props.repeatMode === 'single' ? '单曲' : props.repeatMode === 'shuffle' ? '随机' : '列表'}</button> : null}
             <button type="button" className="easmusic-player-close-button h-11 w-11 text-slate-300" onPointerDown={(event) => event.stopPropagation()} onClick={props.onClose} aria-label="关闭播放器">×</button>
           </div>
+          {props.expanded ? (
+            <label className="flex items-center gap-2 px-3 pb-2 text-[10px] text-slate-300/70">
+              <span className="sr-only">播放进度</span>
+              <input
+                className="min-w-0 flex-1 accent-sky-300"
+                type="range"
+                min="0"
+                max={Math.max(1, props.duration)}
+                step="0.1"
+                value={Math.min(Math.max(0, props.elapsed), Math.max(1, props.duration))}
+                onChange={(event) => props.onSeek(Number(event.currentTarget.value))}
+                aria-label="播放进度"
+              />
+              <span className="w-16 text-right tabular-nums">{Math.floor(props.elapsed)} / {Math.floor(props.duration)} 秒</span>
+            </label>
+          ) : null}
         </>
       )}
       <div className="h-1 bg-white/10"><div className="h-full bg-sky-300" style={{ width: `${props.progress}%` }} /></div>

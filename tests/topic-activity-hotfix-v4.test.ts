@@ -99,11 +99,33 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   const approvedSourceBlocks = blocks(execFileSync('git', ['show',
     'cbc22ce4d0feac91aae124205780c6ae3ac2b871:prisma/schema.prisma'], gitOptions))
   const newBlocks = blocks(after)
+  // Exact reviewed expansion for private duration events. All other models,
+  // fields, indexes and historical migration bytes retain the original guard.
+  const originalMusicFields = currentMainBlocks.get('MusicPlayRecord')!
+  const reviewedMusicFields = originalMusicFields.flatMap((field) => {
+    if (field === 'playedAt DateTime @default(now())') return [field,
+      'source MusicPlaySource @default(ONLINE)', 'eventId String? @db.VarChar(191)',
+      'startedAt DateTime?', 'endedAt DateTime?']
+    if (field === 'trackId String') return ['trackId String?']
+    if (field === 'MusicTrack MusicTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)') {
+      return ['MusicTrack MusicTrack? @relation(fields: [trackId], references: [id], onDelete: Cascade)']
+    }
+    return [field]
+  }).concat(['@@index([userId, source, playedAt])', '@@index([userId, startedAt, endedAt])',
+    '@@unique([userId, eventId], map: "MusicPlayRecord_userId_eventId_key")'])
+  assert.deepEqual(newBlocks.get('MusicPlayRecord'), reviewedMusicFields, 'only reviewed listening fields and nullable track relation differ')
+  assert.deepEqual(newBlocks.get('MusicPlaySource'), ['ONLINE', 'LOCAL'])
+  const listeningMigration = read('prisma/migrations/20261117110000_add_music_listening_stats/migration.sql')
+  assert.match(listeningMigration, /MODIFY `trackId` VARCHAR\(191\) NULL/)
+  assert.match(listeningMigration, /ENUM\('ONLINE', 'LOCAL'\) NOT NULL DEFAULT 'ONLINE'/)
+  assert.match(listeningMigration, /ADD UNIQUE INDEX `MusicPlayRecord_userId_eventId_key` \(`userId`, `eventId`\)/)
+  assert.doesNotMatch(listeningMigration, /\b(?:DROP|TRUNCATE|DELETE|RENAME)\b/i)
   // Preserve every field already on current main, while separately ensuring
   // the reviewed V2 source fields remain present. Comparing cbc directly to
   // current main would incorrectly reject unrelated additive fields added later.
   for (const [name, fields] of currentMainBlocks) {
     assert.ok(newBlocks.has(name), `existing model/enum ${name} retained`)
+    if (name === 'MusicPlayRecord') continue // Exact full model comparison above.
     for (const field of fields) assert.ok(newBlocks.get(name)!.includes(field), `existing field/index unchanged: ${name}.${field}`)
   }
   const v2Models = ['TopicActivityPollVote', 'TopicActivityRewardEntry', 'TopicActivityTestAttempt',
@@ -190,6 +212,8 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   }
 
   const comparableBlocks = new Map(newBlocks)
+  comparableBlocks.set('MusicPlayRecord', originalMusicFields)
+  comparableBlocks.delete('MusicPlaySource')
   comparableBlocks.set('SocialSyncState', syncFields.filter((field) => field !== 'leaseGeneration BigInt @default(0)'))
   for (const [name, fields] of restoredHistoricalFields) {
     comparableBlocks.set(name, comparableBlocks.get(name)!.filter((field) => !fields.includes(field)))

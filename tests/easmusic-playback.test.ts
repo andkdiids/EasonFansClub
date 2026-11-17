@@ -56,7 +56,9 @@ test('playback resolution keeps preview fallback and full permission separate', 
 
 test('the single player resolves the API before assigning one audio source and logs sanitized state', () => {
   const provider = read('components/music/MusicPlayerProvider.tsx')
-  assert.equal((provider.match(/new Audio\(\)/g) || []).length, 1)
+  const audioFactory = read('lib/music-browser-playback.ts')
+  assert.match(provider, /createBrowserAudioElement\(\)/)
+  assert.equal((audioFactory.match(/new Audio\(\)/g) || []).length, 1)
   assert.match(provider, /fetch\(nextTrack\.previewUrl/)
   assert.match(provider, /payload = await response\.json\(\)/)
   assert.match(provider, /body\?\.ok !== true/)

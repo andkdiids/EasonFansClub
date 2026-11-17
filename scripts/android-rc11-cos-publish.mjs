@@ -10,6 +10,7 @@ import path from 'node:path'
 import { CODE32_BASELINE, CODE32_ROLLBACK_OBJECT_KEY, loadRc13Pin, validateCode32VersionApi } from './android-rc13-release.mjs'
 import { RC13_BASELINE, loadRc14Pin, validateCode33VersionApi } from './android-rc14-release.mjs'
 import { RC14_BASELINE, loadBeta22Pin, validateCode34VersionApi } from './android-beta22-release.mjs'
+import { BETA22_BASELINE, loadBeta23Pin, validateCode35VersionApi } from './android-beta23-release.mjs'
 import { multipartUpload, safeCosError } from './android-rc13-multipart.mjs'
 
 const require = createRequire(import.meta.url)
@@ -166,9 +167,9 @@ export function validateIngressManifest(manifest, {
   workflowRef = process.env.GITHUB_WORKFLOW_REF,
   workflowSha = process.env.GITHUB_SHA,
 } = {}) {
-  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : candidate === 'rc13' ? loadRc13Pin() : candidate === 'rc14' ? loadRc14Pin() : candidate === 'beta22' ? loadBeta22Pin() : null
-  const sourceFile = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : candidate === 'rc13' || candidate === 'rc14' || candidate === 'beta22' ? baseline?.sourceFile : null
-  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : candidate === 'rc13' ? 'RC13' : candidate === 'rc14' ? 'RC14' : candidate === 'beta22' ? 'BETA22' : null
+  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : candidate === 'rc13' ? loadRc13Pin() : candidate === 'rc14' ? loadRc14Pin() : candidate === 'beta22' ? loadBeta22Pin() : candidate === 'beta23' ? loadBeta23Pin() : null
+  const sourceFile = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : candidate === 'rc13' || candidate === 'rc14' || candidate === 'beta22' || candidate === 'beta23' ? baseline?.sourceFile : null
+  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : candidate === 'rc13' ? 'RC13' : candidate === 'rc14' ? 'RC14' : candidate === 'beta22' ? 'BETA22' : candidate === 'beta23' ? 'BETA23' : null
   if (!baseline || !sourceFile || !prefix) throw new Error('RELEASE_CANDIDATE_INVALID')
   if (!manifest || manifest.release_candidate !== candidate || manifest.source_file !== sourceFile
     || String(manifest.run_id) !== String(runId)
@@ -191,14 +192,18 @@ export function validateIngressManifest(manifest, {
 }
 
 export function createVersionedObjectKey(kind, { date = new Date(), runId, runAttempt } = {}) {
-  if (!['rc11', 'rc12', 'rc13', 'rc14', 'beta22'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
+  if (!['rc11', 'rc12', 'rc13', 'rc14', 'beta22', 'beta23'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
   if (!/^\d+$/.test(String(runId ?? '')) || !/^[1-9]\d*$/.test(String(runAttempt ?? ''))) {
     throw new Error('GITHUB_RUN_ID_INVALID')
   }
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) throw new Error('OBJECT_TIMESTAMP_INVALID')
   const timestamp = date.toISOString().replace(/[-:]/g, '').replace('T', '-').replace(/\.\d{3}Z$/, '')
-  const filename = (kind === 'beta22' ? 'ECFC-1.0.0-beta.22-release-' : 'ECFC-1.0.0-beta.21-release-beta21-') + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
-  return 'android/releases/' + filename
+  const filename = kind === 'beta22'
+    ? 'ECFC-1.0.0-beta.22-release-beta22-'
+    : kind === 'beta23'
+      ? 'ECFC-1.0.0-beta.23-release-beta23-'
+      : 'ECFC-1.0.0-beta.21-release-beta21-' + kind + '-'
+  return 'android/releases/' + filename + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
 }
 
 export function validateVersionedObjectKey(key, kind, { runId, runAttempt } = {}) {
@@ -213,6 +218,8 @@ export function validateVersionedObjectKey(key, kind, { runId, runAttempt } = {}
           ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc14-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
           : kind === 'beta22'
             ? /^android\/releases\/ECFC-1\.0\.0-beta\.22-release-beta22-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
+            : kind === 'beta23'
+              ? /^android\/releases\/ECFC-1\.0\.0-beta\.23-release-beta23-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
       : null
   if (!pattern || !pattern.test(key)) throw new Error('COS_OBJECT_KEY_INVALID')
   if (runId !== undefined && !key.includes('-run' + runId + '-attempt' + runAttempt + '.apk')) {
@@ -326,7 +333,8 @@ export async function verifyRollbackSourceRange(candidate, fetchImpl) {
     : candidate === 'rc12' ? { key: CODE31_ROLLBACK_OBJECT_KEY, size: CODE31_BASELINE.size, code: 31 }
       : candidate === 'rc13' ? { key: CODE32_ROLLBACK_OBJECT_KEY, size: CODE32_BASELINE.size, code: 32 }
         : candidate === 'rc14' ? { key: RC13_BASELINE.objectKey, size: RC13_BASELINE.size, code: 33 }
-          : candidate === 'beta22' ? { key: RC14_BASELINE.objectKey, size: RC14_BASELINE.size, code: 34 } : null
+          : candidate === 'beta22' ? { key: RC14_BASELINE.objectKey, size: RC14_BASELINE.size, code: 34 }
+            : candidate === 'beta23' ? { key: BETA22_BASELINE.objectKey, size: BETA22_BASELINE.size, code: 35 } : null
   if (!source) throw new Error('RELEASE_CANDIDATE_INVALID')
   const url = createCdnObjectUrl(source.key).toString()
   let response
@@ -352,7 +360,8 @@ export async function captureVersionApiBaseline({ candidate = process.env.RELEAS
   if (candidate === 'rc13') loadRc13Pin()
   if (candidate === 'rc14') loadRc14Pin()
   if (candidate === 'beta22') loadBeta22Pin()
-  const expectedVersionCode = candidate === 'rc11' ? 30 : candidate === 'rc12' ? 31 : candidate === 'rc13' ? 32 : candidate === 'rc14' ? 33 : candidate === 'beta22' ? 34 : null
+  if (candidate === 'beta23') loadBeta23Pin()
+  const expectedVersionCode = candidate === 'rc11' ? 30 : candidate === 'rc12' ? 31 : candidate === 'rc13' ? 32 : candidate === 'rc14' ? 33 : candidate === 'beta22' ? 34 : candidate === 'beta23' ? 35 : null
   if (expectedVersionCode === null) throw new Error('RELEASE_CANDIDATE_INVALID')
   const body = await runReleaseStage(`PRODUCTION_VERSION_API_CODE${expectedVersionCode}`, async () => {
     let response
@@ -364,7 +373,7 @@ export async function captureVersionApiBaseline({ candidate = process.env.RELEAS
     if (!response.ok) throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
     let body
     try { body = await response.json() } catch { throw new Error('PRODUCTION_VERSION_API_INVALID') }
-    return expectedVersionCode === 30 ? validateCode30VersionApi(body) : expectedVersionCode === 31 ? validateCode31VersionApi(body) : expectedVersionCode === 32 ? validateCode32VersionApi(body) : expectedVersionCode === 33 ? validateCode33VersionApi(body) : validateCode34VersionApi(body)
+    return expectedVersionCode === 30 ? validateCode30VersionApi(body) : expectedVersionCode === 31 ? validateCode31VersionApi(body) : expectedVersionCode === 32 ? validateCode32VersionApi(body) : expectedVersionCode === 33 ? validateCode33VersionApi(body) : expectedVersionCode === 34 ? validateCode34VersionApi(body) : validateCode35VersionApi(body)
   })
   const rollbackSource = await verifyRollbackSourceRange(candidate, fetchImpl)
   const fileName = `android-version-api-code${expectedVersionCode}-baseline.json`
@@ -662,9 +671,9 @@ function writeOutput(name, value, env = process.env) {
 }
 
 async function readIngressArtifact(env, candidate = env.RELEASE_CANDIDATE || 'rc11') {
-  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : candidate === 'rc13' ? loadRc13Pin() : candidate === 'rc14' ? loadRc14Pin() : candidate === 'beta22' ? loadBeta22Pin() : null
-  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : candidate === 'rc13' ? 'RC13' : candidate === 'rc14' ? 'RC14' : candidate === 'beta22' ? 'BETA22' : null
-  const fileName = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : candidate === 'rc13' || candidate === 'rc14' || candidate === 'beta22' ? baseline?.sourceFile : null
+  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : candidate === 'rc13' ? loadRc13Pin() : candidate === 'rc14' ? loadRc14Pin() : candidate === 'beta22' ? loadBeta22Pin() : candidate === 'beta23' ? loadBeta23Pin() : null
+  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : candidate === 'rc13' ? 'RC13' : candidate === 'rc14' ? 'RC14' : candidate === 'beta22' ? 'BETA22' : candidate === 'beta23' ? 'BETA23' : null
+  const fileName = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : candidate === 'rc13' || candidate === 'rc14' || candidate === 'beta22' || candidate === 'beta23' ? baseline?.sourceFile : null
   if (!baseline || !prefix || !fileName) throw new Error('RELEASE_CANDIDATE_INVALID')
   const ingressDir = env.RC11_INGRESS_DIRECTORY
   if (!ingressDir) throw new Error(prefix + '_INGRESS_DIRECTORY_MISSING')
@@ -836,6 +845,21 @@ export async function publishBeta22Artifact({ env = process.env, fetchImpl = fet
   return { key, cdnUrl: createCdnObjectUrl(key).toString() }
 }
 
+export async function publishBeta23Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
+  // Never request credentials or upload unless the reviewed pin and ingress match.
+  const baseline = loadBeta23Pin()
+  const ids = runIdentifiers(env)
+  const { apkPath } = await readIngressArtifact(env, 'beta23')
+  const { cos, credentialsExpiredTime } = await getCos(env, fetchImpl)
+  const key = createVersionedObjectKey('beta23', { ...ids, date })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: baseline, stage: 'BETA23_RELEASE', credentialsExpiredTime })
+  await writeOutput('BETA23_OBJECT_KEY', key, env)
+  await writeOutput('BETA23_CDN_URL', createCdnObjectUrl(key).toString(), env)
+  await writeOutput('BETA23_SHA256', baseline.sha256, env)
+  await writeOutput('BETA23_SIZE', baseline.size, env)
+  return { key, cdnUrl: createCdnObjectUrl(key).toString() }
+}
+
 async function main() {
   const command = process.argv[2]
   if (command === 'verify-oidc') {
@@ -876,6 +900,11 @@ async function main() {
   if (command === 'publish-beta22') {
     const result = await publishBeta22Artifact()
     console.log('BETA22_CDN_VERIFIED=YES\nBETA22_OBJECT_KEY=' + result.key)
+    return
+  }
+  if (command === 'publish-beta23') {
+    const result = await publishBeta23Artifact()
+    console.log('BETA23_CDN_VERIFIED=YES\nBETA23_OBJECT_KEY=' + result.key)
     return
   }
   throw new Error('COS_PUBLISH_COMMAND_INVALID')

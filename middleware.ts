@@ -243,6 +243,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/music\/albums\/[^/]+$/.test(pathname)
       || /^\/api\/music\/songs\/[^/]+$/.test(pathname)
       || /^\/api\/music\/songs\/[^/]+\/playback$/.test(pathname)
+      || /^\/api\/music\/songs\/[^/]+\/playback\/audio$/.test(pathname)
+      || pathname === '/api/music/listening'
       || pathname === '/api/music/search'
       || pathname === '/api/music/live'
       || pathname === '/api/music/live/categories'
@@ -314,6 +316,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/notifications/read-all'
       || /^\/api\/notifications\/[^/]+\/read$/.test(pathname)
       || /^\/api\/music\/(?:songs|albums)\/[^/]+\/like$/.test(pathname)
+      || pathname === '/api/music/listening'
       || pathname === '/api/ratings/reviews'
       || /^\/api\/ratings\/reviews\/[^/]+\/like$/.test(pathname)
       || /^\/api\/music\/reviews\/[^/]+\/interactions$/.test(pathname)
@@ -366,6 +369,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'HEAD') {
     return /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/audio$/.test(pathname)
+      || /^\/api\/music\/songs\/[^/]+\/playback\/audio$/.test(pathname)
   }
   return false
 }

@@ -3092,16 +3092,23 @@ model MusicFavorite {
 }
 
 model MusicPlayRecord {
-  id              String     @id @default(cuid())
-  durationSeconds Int        @default(0)
-  playedAt        DateTime   @default(now())
-  trackId         String
+  id              String          @id @default(cuid())
+  durationSeconds Int             @default(0)
+  playedAt        DateTime        @default(now())
+  source          MusicPlaySource @default(ONLINE)
+  eventId         String?         @db.VarChar(191)
+  startedAt       DateTime?
+  endedAt         DateTime?
+  trackId         String?
   userId          String
-  MusicTrack      MusicTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  User            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  MusicTrack      MusicTrack?     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  User            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([trackId, playedAt])
   @@index([userId, playedAt])
+  @@index([userId, source, playedAt])
+  @@index([userId, startedAt, endedAt])
+  @@unique([userId, eventId], map: "MusicPlayRecord_userId_eventId_key")
 }
 
 model MusicSong {
@@ -5816,6 +5823,11 @@ enum MessageType {
 enum MusicPublicationStatus {
   DRAFT
   PUBLISHED
+}
+
+enum MusicPlaySource {
+  ONLINE
+  LOCAL
 }
 
 enum CantoneseReviewStatus {

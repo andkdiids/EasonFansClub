@@ -126,7 +126,11 @@ test('MusicSong 预览字段和 migration 仅做增量新增', () => {
 test('歌曲详情播放器最多播放60秒且全站共享单一音频实例', () => {
   assert.match(player, /previewDuration = 60/)
   assert.match(player, /Math\.min\(60, previewDuration \|\| 60\)/)
-  assert.match(playerProvider, /const audio = new Audio\(\)/)
+  assert.match(playerProvider, /const audio = createBrowserAudioElement\(\)/)
+  assert.match(playerProvider, /rebuildBrowserAudioElement\(/)
+  const browserPlayback = read('lib/music-browser-playback.ts')
+  assert.equal((browserPlayback.match(/new Audio\(\)/g) || []).length, 1)
+  assert.match(browserPlayback, /current\.pause\(\)[\s\S]*current\.removeAttribute\('src'\)[\s\S]*dispose\(current\)[\s\S]*const next = create\(\)/)
   assert.match(playerProvider, /audio\.pause\(\)/)
 })
 

@@ -4,6 +4,24 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { usePathname } from 'next/navigation'
 import { MusicMiniPlayer } from '@/components/music/MusicMiniPlayer'
 import type { MusicPlaybackResponse } from '@/lib/music-playback'
+import {
+  appendBrowserListeningEvent,
+  BROWSER_LISTENING_MAX_UPLOAD_EVENTS,
+  consumeBrowserListeningSegment,
+  createBrowserAudioElement,
+  getNextBrowserQueueTrack,
+  getPreviousBrowserQueueTrack,
+  readBrowserListeningEvents,
+  readBrowserRejectedListeningEvents,
+  rebuildBrowserAudioElement,
+  removeBrowserAcknowledgedEvents,
+  writeBrowserListeningEvents,
+  writeBrowserRejectedListeningEvents,
+  type BrowserListeningEvent,
+  type BrowserRejectedListeningEvent,
+  type BrowserListeningSegment,
+  type BrowserRepeatMode,
+} from '@/lib/music-browser-playback'
 import type { AudioAnalysisMode, AudioAnalysisModeDetails } from '@/types/music-cassette'
 
 export type MusicPreviewTrack = {
@@ -210,6 +228,9 @@ type PlayerContextValue = {
   playInsertionSound: () => void
   previous: () => Promise<void>
   next: () => Promise<void>
+  seek: (seconds: number) => void
+  repeatMode: BrowserRepeatMode
+  cycleRepeatMode: () => void
 }
 
 type MiniPlayerPosition = { x: number; y: number }
@@ -220,12 +241,14 @@ const MusicPlayerContext = createContext<PlayerContextValue | null>(null)
 
 export function MusicPlayerProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const pathname = usePathname()
-  const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname)
+  const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname || '')
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const analysisRef = useRef<AudioAnalysis | null>(null)
   const queueRef = useRef<MusicPreviewTrack[]>([])
   const playbackCacheRef = useRef(new Map<string, Promise<PlaybackResolution>>())
   const trackRef = useRef<MusicPreviewTrack | null>(null)
+  const repeatModeRef = useRef<BrowserRepeatMode>('list')
+  const autoAdvancedTrackRef = useRef<string | null>(null)
   const durationRef = useRef(60)
   const fullPlaybackRef = useRef(false)
   const prepareGenerationRef = useRef(0)
@@ -233,6 +256,18 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   const loadingTimedOutRef = useRef(false)
   const audioAnalysisModeRef = useRef<AudioAnalysisMode>('idle')
   const canAnalyzeAudioRef = useRef(false)
+  const audioBindingRef = useRef<{ audio: HTMLAudioElement; dispose: () => void } | null>(null)
+  const bindAudioElementRef = useRef<((audio: HTMLAudioElement) => void) | null>(null)
+  const listeningUserIdRef = useRef<string | null>(null)
+  const listeningPendingRef = useRef<BrowserListeningEvent[]>([])
+  const listeningSegmentRef = useRef<BrowserListeningSegment | null>(null)
+  const listeningFlushTimerRef = useRef<number | null>(null)
+  const listeningSyncRef = useRef<Promise<void> | null>(null)
+  const listeningAuthRequestRef = useRef<Promise<string | null> | null>(null)
+  const resolveListeningUserRef = useRef<() => Promise<string | null>>(async () => null)
+  const playTrackRef = useRef<(nextTrack: MusicPreviewTrack, queue?: MusicPreviewTrack[]) => Promise<void>>(async () => undefined)
+  const flushListeningRef = useRef<(discard?: boolean) => void>(() => undefined)
+  const beginListeningRef = useRef<(audio: HTMLAudioElement) => void>(() => undefined)
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null)
   const [audioAnalysisMode, setAudioAnalysisMode] = useState<AudioAnalysisMode>('idle')
   const [canAnalyzeAudio, setCanAnalyzeAudio] = useState(false)
@@ -244,6 +279,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   const [muted, setMuted] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [duration, setDuration] = useState(60)
+  const [repeatMode, setRepeatMode] = useState<BrowserRepeatMode>('list')
   const [expanded, setExpanded] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [miniPlayerPosition, setMiniPlayerPosition] = useState<MiniPlayerPosition | null>(null)
@@ -281,6 +317,16 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       // Position persistence is optional and must not affect playback.
     }
   }, [collapsed, miniPlayerHydrated, miniPlayerPosition])
+
+  useEffect(() => {
+    void resolveListeningUserRef.current()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void resolveListeningUserRef.current()
+      else flushListeningRef.current(true)
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [])
 
   const reportAudioAnalysisMode = useCallback((mode: AudioAnalysisMode, details: AudioAnalysisModeDetails = {}) => {
     const previousMode = audioAnalysisModeRef.current
@@ -327,6 +373,213 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       if (currentTrack) logPlaybackState('audio-load-timeout', currentTrack, audioRef.current)
     }, 15_000)
   }
+
+  function clearListeningFlushTimer() {
+    if (listeningFlushTimerRef.current !== null) {
+      window.clearInterval(listeningFlushTimerRef.current)
+      listeningFlushTimerRef.current = null
+    }
+  }
+
+  function getListeningStorage() {
+    try {
+      return window.localStorage
+    } catch {
+      return null
+    }
+  }
+
+  function syncPendingListening(userId: string) {
+    if (listeningSyncRef.current) return
+    const storage = getListeningStorage()
+    const pending = listeningUserIdRef.current === userId && listeningPendingRef.current.length
+      ? listeningPendingRef.current
+      : storage
+        ? readBrowserListeningEvents(storage, userId)
+        : listeningPendingRef.current
+    if (!pending.length) return
+    const batch = pending.slice(0, BROWSER_LISTENING_MAX_UPLOAD_EVENTS)
+    let continueSync = false
+    const request = (async () => {
+      try {
+        const response = await fetch('/api/music/listening', {
+          method: 'POST',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-ECFC-Listening-Owner': userId,
+          },
+          body: JSON.stringify({ events: batch }),
+        })
+        if (!response.ok) {
+          if (response.status === 409) void resolveListeningUserRef.current()
+          return
+        }
+        const payload: unknown = await response.json()
+        if (!payload || typeof payload !== 'object') return
+        const body = payload as {
+          acknowledgedEventIds?: unknown
+          rejectedEventIds?: unknown
+          rejectedEvents?: unknown
+        }
+        const acknowledgedEventIds = Array.isArray(body.acknowledgedEventIds)
+          ? body.acknowledgedEventIds.filter((id): id is string => typeof id === 'string')
+          : []
+        const rejectedEventIds = Array.isArray(body.rejectedEventIds)
+          ? body.rejectedEventIds.filter((id): id is string => typeof id === 'string')
+          : []
+        if (!acknowledgedEventIds.length && !rejectedEventIds.length) return
+        const current = listeningUserIdRef.current === userId && listeningPendingRef.current.length
+          ? listeningPendingRef.current
+          : storage
+            ? readBrowserListeningEvents(storage, userId)
+            : listeningPendingRef.current
+        const rejectedDetails = Array.isArray(body.rejectedEvents)
+          ? body.rejectedEvents.filter((item): item is { eventId: string; reason: string } => Boolean(item)
+            && typeof item === 'object'
+            && 'eventId' in item
+            && typeof item.eventId === 'string'
+            && 'reason' in item
+            && typeof item.reason === 'string')
+          : []
+        const rejectedById = new Map(rejectedDetails.map((item) => [item.eventId, item.reason]))
+        const rejectedEvents: BrowserRejectedListeningEvent[] = current
+          .filter((event: BrowserListeningEvent) => rejectedEventIds.includes(event.eventId))
+          .map((event: BrowserListeningEvent) => ({ ...event, reason: rejectedById.get(event.eventId) || 'REJECTED' }))
+        let rejectedArchiveReady = rejectedEventIds.length === 0
+        if (rejectedEventIds.length && storage) {
+          const previousRejected = readBrowserRejectedListeningEvents(storage, userId)
+          const previousRejectedIds = new Set(previousRejected.map((event) => event.eventId))
+          const alreadyArchived = rejectedEvents.length === rejectedEventIds.length
+            && rejectedEvents.every((event) => previousRejectedIds.has(event.eventId))
+          if (alreadyArchived) {
+            rejectedArchiveReady = true
+          } else if (rejectedEvents.length === rejectedEventIds.length) {
+            const mergedRejected = [...previousRejected]
+            for (const event of rejectedEvents) {
+              if (!mergedRejected.some((item) => item.eventId === event.eventId)) mergedRejected.push(event)
+            }
+            rejectedArchiveReady = writeBrowserRejectedListeningEvents(storage, userId, mergedRejected)
+          }
+        }
+        const acknowledgedToRemove = acknowledgedEventIds.filter((eventId) => !rejectedEventIds.includes(eventId))
+        const rejectedToRemove = rejectedArchiveReady ? rejectedEventIds : []
+        const remaining = removeBrowserAcknowledgedEvents(current, acknowledgedToRemove, rejectedToRemove)
+        const persisted = storage ? writeBrowserListeningEvents(storage, userId, remaining) : false
+        if (listeningUserIdRef.current === userId) {
+          listeningPendingRef.current = persisted ? remaining : current
+        }
+        continueSync = persisted && rejectedArchiveReady && remaining.length > 0
+      } catch {
+        // Keep the account-scoped queue for the next authenticated attempt.
+      }
+    })()
+    listeningSyncRef.current = request
+    void request.finally(() => {
+      if (listeningSyncRef.current === request) {
+        listeningSyncRef.current = null
+        if (continueSync && listeningUserIdRef.current === userId) syncPendingListening(userId)
+      }
+    })
+  }
+
+  function appendListeningEvents(userId: string, events: readonly BrowserListeningEvent[]) {
+    if (!events.length) return
+    const storage = getListeningStorage()
+    let pending = listeningUserIdRef.current === userId && listeningPendingRef.current.length
+      ? listeningPendingRef.current
+      : storage ? readBrowserListeningEvents(storage, userId) : []
+    for (const event of events) pending = appendBrowserListeningEvent(pending, event)
+    if (storage) writeBrowserListeningEvents(storage, userId, pending)
+    if (listeningUserIdRef.current === userId) listeningPendingRef.current = pending
+    syncPendingListening(userId)
+  }
+
+  function flushListeningSegment(discard = false) {
+    const segment = listeningSegmentRef.current
+    if (!segment) {
+      if (discard) clearListeningFlushTimer()
+      return
+    }
+    const consumed = consumeBrowserListeningSegment(segment, performance.now())
+    appendListeningEvents(segment.userId, consumed.events)
+    listeningSegmentRef.current = discard ? null : consumed.segment
+    if (discard) clearListeningFlushTimer()
+  }
+
+  function beginListeningSegment(audio: HTMLAudioElement) {
+    const userId = listeningUserIdRef.current
+    if (!userId || audio !== audioRef.current || audio.paused) return
+    const existing = listeningSegmentRef.current
+    if (existing?.userId === userId) return
+    if (existing) flushListeningSegment(true)
+    const nowWallMs = Date.now()
+    listeningSegmentRef.current = {
+      userId,
+      startedAtMs: nowWallMs,
+      cursorAtMs: nowWallMs,
+      cursorPerfMs: performance.now(),
+    }
+    clearListeningFlushTimer()
+    listeningFlushTimerRef.current = window.setInterval(() => flushListeningRef.current(), 5_000)
+  }
+
+  async function resolveListeningUser() {
+    if (listeningAuthRequestRef.current) return listeningAuthRequestRef.current
+    const request = (async () => {
+      let response: Response
+      try {
+        response = await fetch('/api/auth/me', {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+      } catch {
+        return listeningUserIdRef.current
+      }
+      if (!response.ok) return listeningUserIdRef.current
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch {
+        return listeningUserIdRef.current
+      }
+      if (!payload || typeof payload !== 'object' || !('user' in payload)) return listeningUserIdRef.current
+      const user = (payload as { user?: unknown }).user
+      const nextUserId = user && typeof user === 'object' && 'id' in user && typeof user.id === 'string'
+        ? user.id
+        : null
+      const previousUserId = listeningUserIdRef.current
+      if (previousUserId !== nextUserId) {
+        if (listeningSegmentRef.current?.userId === previousUserId && previousUserId) flushListeningSegment(true)
+        else {
+          listeningSegmentRef.current = null
+          clearListeningFlushTimer()
+        }
+        listeningUserIdRef.current = nextUserId
+        const storage = getListeningStorage()
+        listeningPendingRef.current = nextUserId && storage
+          ? readBrowserListeningEvents(storage, nextUserId)
+          : []
+      }
+      if (nextUserId) {
+        syncPendingListening(nextUserId)
+        const audio = audioRef.current
+        if (audio && !audio.paused) beginListeningSegment(audio)
+      }
+      return nextUserId
+    })()
+    listeningAuthRequestRef.current = request
+    void request.finally(() => {
+      if (listeningAuthRequestRef.current === request) listeningAuthRequestRef.current = null
+    })
+    return request
+  }
+
+  resolveListeningUserRef.current = resolveListeningUser
 
   async function requestPlayback(nextTrack: MusicPreviewTrack): Promise<PlaybackResolution> {
     if (!nextTrack.previewUrl) {
@@ -417,7 +670,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     }
   }
 
-  function prepareAudioSource(audio: HTMLAudioElement, url: string, canAnalyzeAudio: boolean) {
+  function prepareAudioSource(currentAudio: HTMLAudioElement, url: string, canAnalyzeAudio: boolean) {
     let sameOrigin = false
     try {
       sameOrigin = new URL(url, window.location.href).origin === window.location.origin
@@ -428,6 +681,27 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     const shouldAnalyzeAudio = sameOrigin || canAnalyzeAudio
     canAnalyzeAudioRef.current = shouldAnalyzeAudio
     setCanAnalyzeAudio(shouldAnalyzeAudio)
+    let audio = currentAudio
+    if (!shouldAnalyzeAudio) {
+      const previousAnalysis = analysisRef.current || audioAnalysisCache.get(audio) || null
+      if (previousAnalysis) {
+        audio = rebuildBrowserAudioElement(
+          audio,
+          createBrowserAudioElement,
+          (oldAudio: HTMLAudioElement) => {
+            if (audioBindingRef.current?.audio === oldAudio) {
+              audioBindingRef.current.dispose()
+              audioBindingRef.current = null
+            }
+            disposeAudioAnalysis(oldAudio, previousAnalysis)
+          },
+          (nextAudio: HTMLAudioElement) => bindAudioElementRef.current?.(nextAudio),
+        )
+        audioRef.current = audio
+        analysisRef.current = null
+        setAnalyserNode(null)
+      }
+    }
     audio.pause()
     audio.removeAttribute('src')
     audio.load()
@@ -443,6 +717,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       analysisRef.current = null
       setAnalyserNode(null)
     }
+    return audio
   }
 
   function resumeAudioContext() {
@@ -452,9 +727,20 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     }
   }
 
+  function primeAudioAnalysisForGesture(audio: HTMLAudioElement) {
+    audio.crossOrigin = 'anonymous'
+    const analysis = createAudioAnalysis(audio)
+    if (analysis) {
+      analysisRef.current = analysis
+      setAnalyserNode(analysis.analyser)
+      void analysis.context.resume().catch(() => undefined)
+    }
+  }
+
   function stop(resetTrack = false) {
     prepareGenerationRef.current += 1
     clearLoadingTimeout()
+    flushListeningSegment(true)
     const audio = audioRef.current
     if (audio) {
       audio.pause()
@@ -473,98 +759,139 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     if (resetTrack) setTrack(null)
   }
 
+  flushListeningRef.current = flushListeningSegment
+  beginListeningRef.current = beginListeningSegment
+
   useEffect(() => {
-    const audio = new Audio()
-    audio.preload = 'metadata'
+    const bindAudioElement = (audio: HTMLAudioElement) => {
+      const advanceQueue = () => {
+        const currentTrack = trackRef.current
+        if (currentTrack?.id && autoAdvancedTrackRef.current === currentTrack.id) return
+        const target = currentTrack
+          ? getNextBrowserQueueTrack(queueRef.current, currentTrack.id, repeatModeRef.current)
+          : null
+        if (target) {
+          autoAdvancedTrackRef.current = currentTrack?.id || null
+          void playTrackRef.current(target, queueRef.current)
+        }
+      }
+      const onTimeUpdate = () => {
+        if (audio !== audioRef.current) return
+        const cappedTime = fullPlaybackRef.current ? audio.currentTime : Math.min(audio.currentTime, durationRef.current)
+        setElapsed(cappedTime)
+        if (!fullPlaybackRef.current && audio.currentTime >= durationRef.current) {
+          audio.pause()
+          audio.currentTime = durationRef.current
+          setEnded(true)
+          advanceQueue()
+        }
+      }
+      const onLoadedMetadata = () => {
+        if (audio !== audioRef.current || !fullPlaybackRef.current || !Number.isFinite(audio.duration) || audio.duration <= 0) return
+        durationRef.current = audio.duration
+        setDuration(audio.duration)
+      }
+      const onPlaying = () => {
+        if (audio !== audioRef.current) return
+        clearLoadingTimeout()
+        setPlaying(true)
+        setLoading(false)
+        setEnded(false)
+        setError(null)
+        autoAdvancedTrackRef.current = null
+        beginListeningRef.current(audio)
+      }
+      const onPause = () => {
+        if (audio !== audioRef.current) return
+        flushListeningRef.current(true)
+        setPlaying(false)
+        reportAudioAnalysisMode('idle')
+      }
+      const onEnded = () => {
+        if (audio !== audioRef.current) return
+        flushListeningRef.current(true)
+        setElapsed(fullPlaybackRef.current && Number.isFinite(audio.duration) ? audio.duration : durationRef.current)
+        setPlaying(false)
+        setEnded(true)
+        reportAudioAnalysisMode('idle')
+        advanceQueue()
+      }
+      const onError = () => {
+        if (audio !== audioRef.current) return
+        flushListeningRef.current(true)
+        clearLoadingTimeout()
+        setLoading(false)
+        setPlaying(false)
+        reportAudioAnalysisMode('idle')
+        const currentTrack = trackRef.current
+        const mediaError = audio.error?.code === 1
+          ? new DOMException('Playback was aborted', 'AbortError')
+          : audio.error?.code === 4
+            ? new DOMException('The audio source is not supported', 'NotSupportedError')
+            : undefined
+        setError(getPlaybackErrorMessage(mediaError, audio))
+        if (currentTrack) logPlaybackState('audio-error', currentTrack, audio, { error: mediaError })
+      }
+      const onPauseAll = () => {
+        if (audio === audioRef.current) audio.pause()
+      }
+      audio.addEventListener('timeupdate', onTimeUpdate)
+      audio.addEventListener('loadedmetadata', onLoadedMetadata)
+      audio.addEventListener('playing', onPlaying)
+      audio.addEventListener('pause', onPause)
+      audio.addEventListener('ended', onEnded)
+      audio.addEventListener('error', onError)
+      window.addEventListener('easmusic:pause-all', onPauseAll)
+      audioBindingRef.current = {
+        audio,
+        dispose: () => {
+          window.removeEventListener('easmusic:pause-all', onPauseAll)
+          audio.removeEventListener('timeupdate', onTimeUpdate)
+          audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+          audio.removeEventListener('playing', onPlaying)
+          audio.removeEventListener('pause', onPause)
+          audio.removeEventListener('ended', onEnded)
+          audio.removeEventListener('error', onError)
+        },
+      }
+    }
+
+    bindAudioElementRef.current = bindAudioElement
+    const audio = createBrowserAudioElement()
     audioRef.current = audio
     analysisRef.current = null
     canAnalyzeAudioRef.current = false
     setAnalyserNode(null)
     setCanAnalyzeAudio(false)
     resetAudioAnalysisMode()
-
-    const onTimeUpdate = () => {
-      const cappedTime = fullPlaybackRef.current ? audio.currentTime : Math.min(audio.currentTime, durationRef.current)
-      setElapsed(cappedTime)
-      if (!fullPlaybackRef.current && audio.currentTime >= durationRef.current) {
-        audio.pause()
-        audio.currentTime = durationRef.current
-        setEnded(true)
-      }
-    }
-    const onLoadedMetadata = () => {
-      if (!fullPlaybackRef.current || !Number.isFinite(audio.duration) || audio.duration <= 0) return
-      durationRef.current = audio.duration
-      setDuration(audio.duration)
-    }
-    const onPlaying = () => {
-      clearLoadingTimeout()
-      setPlaying(true)
-      setLoading(false)
-      setEnded(false)
-      setError(null)
-    }
-    const onPause = () => {
-      setPlaying(false)
-      reportAudioAnalysisMode('idle')
-    }
-    const onEnded = () => {
-      setElapsed(fullPlaybackRef.current && Number.isFinite(audio.duration) ? audio.duration : durationRef.current)
-      setPlaying(false)
-      setEnded(true)
-      reportAudioAnalysisMode('idle')
-    }
-    const onError = () => {
-      clearLoadingTimeout()
-      setLoading(false)
-      setPlaying(false)
-      reportAudioAnalysisMode('idle')
-      const currentTrack = trackRef.current
-      const mediaError = audio.error?.code === 1
-        ? new DOMException('Playback was aborted', 'AbortError')
-        : audio.error?.code === 4
-          ? new DOMException('The audio source is not supported', 'NotSupportedError')
-          : undefined
-      setError(getPlaybackErrorMessage(mediaError, audio))
-      if (currentTrack) logPlaybackState('audio-error', currentTrack, audio, { error: mediaError })
-    }
-    const onPauseAll = () => audio.pause()
-    audio.addEventListener('timeupdate', onTimeUpdate)
-    audio.addEventListener('loadedmetadata', onLoadedMetadata)
-    audio.addEventListener('playing', onPlaying)
-    audio.addEventListener('pause', onPause)
-    audio.addEventListener('ended', onEnded)
-    audio.addEventListener('error', onError)
-    window.addEventListener('easmusic:pause-all', onPauseAll)
+    bindAudioElement(audio)
 
     return () => {
       clearLoadingTimeout()
-      window.removeEventListener('easmusic:pause-all', onPauseAll)
-      audio.removeEventListener('timeupdate', onTimeUpdate)
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata)
-      audio.removeEventListener('playing', onPlaying)
-      audio.removeEventListener('pause', onPause)
-      audio.removeEventListener('ended', onEnded)
-      audio.removeEventListener('error', onError)
-      audio.pause()
+      flushListeningRef.current(true)
+      const activeAudio = audioRef.current || audio
+      audioBindingRef.current?.dispose()
+      audioBindingRef.current = null
+      activeAudio.pause()
       fullPlaybackRef.current = false
       canAnalyzeAudioRef.current = false
       setCanAnalyzeAudio(false)
       reportAudioAnalysisMode('idle')
-      const analysis = analysisRef.current || audioAnalysisCache.get(audio) || null
-      disposeAudioAnalysis(audio, analysis)
+      const analysis = analysisRef.current || audioAnalysisCache.get(activeAudio) || null
+      disposeAudioAnalysis(activeAudio, analysis)
       analysisRef.current = null
       setAnalyserNode(null)
       audioRef.current = null
+      bindAudioElementRef.current = null
     }
   }, [reportAudioAnalysisMode, resetAudioAnalysisMode])
 
   async function playResolvedTrack(nextTrack: MusicPreviewTrack, queue = queueRef.current) {
-    const audio = audioRef.current
+    let audio = audioRef.current
     if (!audio) return
-    prepareGenerationRef.current += 1
+    const generation = ++prepareGenerationRef.current
     audio.muted = muted
-    if (track?.id === nextTrack.id && audio.src) {
+    if (trackRef.current?.id === nextTrack.id && audio.currentSrc) {
       if (audio.paused) {
         if (audio.ended || ended) {
           audio.currentTime = 0
@@ -577,7 +904,12 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         resumeAudioContext()
         try {
           await audio.play()
+          if (prepareGenerationRef.current !== generation || audioRef.current !== audio) {
+            audio.pause()
+            return
+          }
         } catch (playError) {
+          if (prepareGenerationRef.current !== generation || audioRef.current !== audio) return
           setPlaying(false)
           setError(getPlaybackErrorMessage(playError, audio))
           logPlaybackState('audio-play-rejected', nextTrack, audio, {
@@ -585,8 +917,10 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
             error: playError,
           })
         } finally {
-          clearLoadingTimeout()
-          setLoading(false)
+          if (prepareGenerationRef.current === generation && audioRef.current === audio) {
+            clearLoadingTimeout()
+            setLoading(false)
+          }
         }
       } else {
         audio.pause()
@@ -607,14 +941,21 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     setDuration(nextDuration)
     setLoading(true)
     startLoadingTimeout()
-    prepareAudioSource(audio, nextTrack.previewUrl, nextTrack.canAnalyzeAudio === true)
+    audio = prepareAudioSource(audio, nextTrack.previewUrl, nextTrack.canAnalyzeAudio === true)
+    if (prepareGenerationRef.current !== generation || audioRef.current !== audio) return
+    audio.muted = muted
     audio.src = nextTrack.previewUrl
     audio.currentTime = 0
     audio.load()
     resumeAudioContext()
     try {
       await audio.play()
+      if (prepareGenerationRef.current !== generation || audioRef.current !== audio) {
+        audio.pause()
+        return
+      }
     } catch (playError) {
+      if (prepareGenerationRef.current !== generation || audioRef.current !== audio) return
       setPlaying(false)
       setError(getPlaybackErrorMessage(playError, audio))
       logPlaybackState('audio-play-rejected', nextTrack, audio, {
@@ -622,16 +963,17 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
         error: playError,
       })
     } finally {
-      clearLoadingTimeout()
-      setLoading(false)
+      if (prepareGenerationRef.current === generation && audioRef.current === audio) {
+        clearLoadingTimeout()
+        setLoading(false)
+      }
     }
   }
 
   async function prepareResolvedTrack(nextTrack: MusicPreviewTrack, queue = queueRef.current) {
-    const audio = audioRef.current
+    let audio = audioRef.current
     if (!audio) return
-    const generation = prepareGenerationRef.current + 1
-    prepareGenerationRef.current = generation
+    const generation = ++prepareGenerationRef.current
     audio.pause()
     queueRef.current = queue.length ? queue : [nextTrack]
     fullPlaybackRef.current = nextTrack.isFullPlayback === true
@@ -640,7 +982,8 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
       : Math.max(1, Math.min(60, nextTrack.previewDuration || 60))
     durationRef.current = preparedDuration
     setDuration(preparedDuration)
-    prepareAudioSource(audio, nextTrack.previewUrl, nextTrack.canAnalyzeAudio === true)
+    audio = prepareAudioSource(audio, nextTrack.previewUrl, nextTrack.canAnalyzeAudio === true)
+    if (prepareGenerationRef.current !== generation || audioRef.current !== audio) return
     audio.src = nextTrack.previewUrl
     audio.currentTime = 0
     audio.load()
@@ -649,13 +992,13 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     resumeAudioContext()
     try {
       await audio.play()
-      if (prepareGenerationRef.current !== generation) return
+      if (prepareGenerationRef.current !== generation || audioRef.current !== audio) return
       audio.pause()
       audio.currentTime = 0
     } catch {
       // The visible play control remains available if a browser declines priming.
     } finally {
-      if (prepareGenerationRef.current === generation) audio.muted = intendedMuted
+      if (prepareGenerationRef.current === generation && audioRef.current === audio) audio.muted = intendedMuted
     }
   }
 
@@ -666,7 +1009,8 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     // Resuming an already resolved source stays on the click path. This also
     // lets a second click recover from a browser NotAllowedError without a
     // second playback API request.
-    if (track?.id === nextTrack.id && audio.currentSrc) {
+    if (trackRef.current?.id === nextTrack.id && audio.currentSrc) {
+      primeAudioAnalysisForGesture(audio)
       await playResolvedTrack(nextTrack, queue)
       return
     }
@@ -676,6 +1020,11 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     audio.pause()
     setLoading(true)
     startLoadingTimeout()
+    // Create/resume the analysis context while the click gesture is still
+    // active. The playback endpoint may require an async request before it
+    // returns the actual URL; waiting until after that request can leave the
+    // browser AudioContext suspended and produce a silent player.
+    primeAudioAnalysisForGesture(audio)
     try {
       const resolution = await requestPlayback(nextTrack)
       if (prepareGenerationRef.current !== generation) return
@@ -703,7 +1052,7 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
   }
 
   async function prepareTrack(nextTrack: MusicPreviewTrack, queue = queueRef.current) {
-    const generation = prepareGenerationRef.current
+    const generation = ++prepareGenerationRef.current
     try {
       const resolution = await requestPlayback(nextTrack)
       if (prepareGenerationRef.current !== generation) return
@@ -747,13 +1096,38 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     }
   }
 
+  function seek(nextSeconds: number) {
+    const audio = audioRef.current
+    if (!audio || !Number.isFinite(nextSeconds)) return
+    flushListeningSegment(true)
+    const nextTime = Math.max(0, Math.min(durationRef.current, nextSeconds))
+    audio.currentTime = nextTime
+    setElapsed(nextTime)
+    setEnded(false)
+    if (!audio.paused) beginListeningSegment(audio)
+  }
+
+  function cycleRepeatMode() {
+    const nextMode: BrowserRepeatMode = repeatModeRef.current === 'list'
+      ? 'single'
+      : repeatModeRef.current === 'single'
+        ? 'shuffle'
+        : 'list'
+    repeatModeRef.current = nextMode
+    setRepeatMode(nextMode)
+  }
+
   async function move(direction: -1 | 1) {
-    if (!track) return
+    const currentTrack = trackRef.current
+    if (!currentTrack) return
     const queue = queueRef.current
-    const index = queue.findIndex((item) => item.id === track.id)
-    const target = queue[index + direction]
+    const target = direction < 0
+      ? getPreviousBrowserQueueTrack(queue, currentTrack.id)
+      : getNextBrowserQueueTrack(queue, currentTrack.id, repeatModeRef.current)
     if (target) await playTrack(target, queue)
   }
+
+  playTrackRef.current = playTrack
 
   const value: PlayerContextValue = {
     track,
@@ -781,6 +1155,9 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
     playInsertionSound,
     previous: () => move(-1),
     next: () => move(1),
+    seek,
+    repeatMode,
+    cycleRepeatMode,
   }
 
   return (
@@ -797,12 +1174,17 @@ export function MusicPlayerProvider({ children }: Readonly<{ children: React.Rea
           collapsed={collapsed}
           position={miniPlayerPosition}
           progress={Math.min(100, elapsed / duration * 100)}
+           elapsed={elapsed}
+           duration={duration}
+           repeatMode={repeatMode}
           onToggleExpanded={() => setExpanded((value) => !value)}
           onToggleCollapsed={() => setCollapsed((value) => !value)}
           onPositionChange={setMiniPlayerPosition}
           onTogglePlayback={() => void playTrack(track)}
           onPrevious={() => void move(-1)}
           onNext={() => void move(1)}
+           onSeek={seek}
+           onCycleRepeat={cycleRepeatMode}
           onClose={() => stop(true)}
         />
       ) : null}
