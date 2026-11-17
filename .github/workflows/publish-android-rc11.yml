@@ -304,11 +304,57 @@ jobs:
           Write-Output "$($releaseCandidate)_SOURCE_SIZE=VERIFIED"
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "RC11_INGRESS_DIRECTORY=$stage`n", [Text.UTF8Encoding]::new($false))
 
+      - name: Package the reviewed Beta23 COS publisher with this run's ingress artifact
+        if: inputs.release_candidate == 'beta23'
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = (& git -C $env:GITHUB_WORKSPACE rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:EXPECTED_MAIN_SHA) { throw 'BETA23_COS_SOURCE_MAIN_SHA_MISMATCH' }
+          $stage = Join-Path $env:RUNNER_TEMP "rc11-ingress-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceRoot = Join-Path $stage 'source'
+          $sourcePaths = @(
+            'package.json',
+            'pnpm-lock.yaml',
+            'pnpm-workspace.yaml',
+            'scripts/assert-release-main.mjs',
+            'scripts/android-rc11-cos-publish.mjs',
+            'scripts/android-rc13-release.mjs',
+            'scripts/android-rc13-release.json',
+            'scripts/android-rc14-release.mjs',
+            'scripts/android-rc14-release.json',
+            'scripts/android-beta22-release.mjs',
+            'scripts/android-beta22-release.json',
+            'scripts/android-beta23-release.mjs',
+            'scripts/android-beta23-release.json',
+            'scripts/android-rc13-multipart.mjs'
+          )
+          $fileManifest = @()
+          foreach ($relativePath in $sourcePaths) {
+            $sourcePath = Join-Path $env:GITHUB_WORKSPACE $relativePath
+            if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'BETA23_COS_SOURCE_FILE_MISSING' }
+            $destinationPath = Join-Path $sourceRoot $relativePath
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null
+            Copy-Item -LiteralPath $sourcePath -Destination $destinationPath
+            $fileManifest += [ordered]@{
+              path = $relativePath
+              sha256 = (Get-FileHash -LiteralPath $destinationPath -Algorithm SHA256).Hash.ToUpperInvariant()
+            }
+          }
+          $sourceManifest = [ordered]@{ workflow_sha = $head; files = $fileManifest }
+          [IO.File]::WriteAllText((Join-Path $sourceRoot 'source-manifest.json'), ($sourceManifest | ConvertTo-Json -Depth 5 -Compress), [Text.UTF8Encoding]::new($false))
+          $sourceArchive = Join-Path $stage 'cos-source.zip'
+          Compress-Archive -Path (Join-Path $sourceRoot '*') -DestinationPath $sourceArchive -CompressionLevel Optimal -Force
+          if (-not (Test-Path -LiteralPath $sourceArchive -PathType Leaf)) { throw 'BETA23_COS_SOURCE_ARCHIVE_MISSING' }
+          Write-Output 'BETA23_COS_SOURCE=PACKAGED'
+
       - name: Store the verified bytes as a same-run, short-lived Actions artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-${{ inputs.release_candidate }}-apk-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/rc11-ingress-${{ github.run_id }}-${{ github.run_attempt }}/*
+          path: ${{ runner.temp }}/rc11-ingress-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
           compression-level: 0
           overwrite: false
@@ -343,22 +389,71 @@ jobs:
       beta23_cdn_url: ${{ steps.beta23.outputs.BETA23_CDN_URL }}
     steps:
       - name: Check out the exact protected-main workflow revision
+        if: inputs.release_candidate != 'beta23'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Require protected current main before any COS request
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/assert-release-main.mjs
-
       - name: Download this run's single Android release ingress artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android-${{ inputs.release_candidate }}-apk-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rc11-ingress
+
+      - name: Prepare the reviewed Beta23 publisher source from this run's artifact
+        if: inputs.release_candidate == 'beta23'
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceArchive = Join-Path $env:RUNNER_TEMP 'rc11-ingress\cos-source.zip'
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "beta23-cos-source-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (-not (Test-Path -LiteralPath $sourceArchive -PathType Leaf)) { throw 'BETA23_COS_SOURCE_ARCHIVE_MISSING' }
+          Expand-Archive -LiteralPath $sourceArchive -DestinationPath $sourceRoot
+          $manifestPath = Join-Path $sourceRoot 'source-manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'BETA23_COS_SOURCE_MANIFEST_MISSING' }
+          $sourceManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ($sourceManifest.workflow_sha -ne $env:EXPECTED_MAIN_SHA) { throw 'BETA23_COS_SOURCE_MAIN_SHA_MISMATCH' }
+          $expectedPaths = @(
+            'package.json',
+            'pnpm-lock.yaml',
+            'pnpm-workspace.yaml',
+            'scripts/assert-release-main.mjs',
+            'scripts/android-rc11-cos-publish.mjs',
+            'scripts/android-rc13-release.mjs',
+            'scripts/android-rc13-release.json',
+            'scripts/android-rc14-release.mjs',
+            'scripts/android-rc14-release.json',
+            'scripts/android-beta22-release.mjs',
+            'scripts/android-beta22-release.json',
+            'scripts/android-beta23-release.mjs',
+            'scripts/android-beta23-release.json',
+            'scripts/android-rc13-multipart.mjs'
+          )
+          if (@($sourceManifest.files).Count -ne $expectedPaths.Count) { throw 'BETA23_COS_SOURCE_MANIFEST_INVALID' }
+          foreach ($entry in $sourceManifest.files) {
+            if ($entry.path -notin $expectedPaths) { throw 'BETA23_COS_SOURCE_MANIFEST_INVALID' }
+            $sourcePath = Join-Path $sourceRoot $entry.path
+            if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'BETA23_COS_SOURCE_FILE_MISSING' }
+            $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToUpperInvariant()
+            if ($sourceHash -ne $entry.sha256) { throw 'BETA23_COS_SOURCE_FILE_HASH_MISMATCH' }
+            $destinationPath = Join-Path $env:GITHUB_WORKSPACE $entry.path
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null
+            Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+            if ((Get-FileHash -LiteralPath $destinationPath -Algorithm SHA256).Hash.ToUpperInvariant() -ne $entry.sha256) { throw 'BETA23_COS_SOURCE_COPY_HASH_MISMATCH' }
+          }
+          $actualFileList = @($sourceManifest.files.path | Sort-Object) -join "`n"
+          $expectedFileList = @($expectedPaths | Sort-Object) -join "`n"
+          if ($actualFileList -ne $expectedFileList) { throw 'BETA23_COS_SOURCE_MANIFEST_INVALID' }
+          Write-Output 'BETA23_COS_SOURCE=RESTORED_AND_VERIFIED'
+
+      - name: Require protected current main before any COS request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
 
       - name: Set up the lockfile-pinned Node and pnpm versions
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
