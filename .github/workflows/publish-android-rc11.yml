@@ -505,15 +505,15 @@ jobs:
           $manifestPath = Join-Path $ingress 'manifest.json'
           if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'BETA23_INGRESS_MANIFEST_INVALID' }
           $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($manifest.release_candidate -ne 'beta23'
-            -or [string]$manifest.run_id -ne $env:GITHUB_RUN_ID
-            -or [string]$manifest.run_attempt -ne $env:GITHUB_RUN_ATTEMPT
-            -or $manifest.ref -ne 'refs/heads/main'
-            -or $manifest.workflow_ref -ne $env:EXPECTED_WORKFLOW_REF
-            -or $manifest.workflow_sha -ne $env:EXPECTED_MAIN_SHA
-            -or $manifest.sha256 -ne $digest
-            -or [string]$manifest.size -ne [string]$source.Length
-            -or $manifest.signer_sha256 -ne '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B') {
+          if ($manifest.release_candidate -ne 'beta23' -or
+            [string]$manifest.run_id -ne $env:GITHUB_RUN_ID -or
+            [string]$manifest.run_attempt -ne $env:GITHUB_RUN_ATTEMPT -or
+            $manifest.ref -ne 'refs/heads/main' -or
+            $manifest.workflow_ref -ne $env:EXPECTED_WORKFLOW_REF -or
+            $manifest.workflow_sha -ne $env:EXPECTED_MAIN_SHA -or
+            $manifest.sha256 -ne $digest -or
+            [string]$manifest.size -ne [string]$source.Length -or
+            $manifest.signer_sha256 -ne '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B') {
             throw 'BETA23_INGRESS_MANIFEST_INVALID'
           }
 
@@ -548,12 +548,12 @@ jobs:
           $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
           $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-beta23-release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
           $fallbackApk = Join-Path $fallback $pin.sourceFile
-          if ($manifest.release_candidate -ne 'beta23'
-            -or [string]$manifest.run_id -ne $env:GITHUB_RUN_ID
-            -or [string]$manifest.run_attempt -ne $env:GITHUB_RUN_ATTEMPT
-            -or $manifest.sha256 -ne $pin.sha256
-            -or [string]$manifest.size -ne [string]$pin.size
-            -or -not (Test-Path -LiteralPath $fallbackApk -PathType Leaf)) {
+          if ($manifest.release_candidate -ne 'beta23' -or
+            [string]$manifest.run_id -ne $env:GITHUB_RUN_ID -or
+            [string]$manifest.run_attempt -ne $env:GITHUB_RUN_ATTEMPT -or
+            $manifest.sha256 -ne $pin.sha256 -or
+            [string]$manifest.size -ne [string]$pin.size -or
+            -not (Test-Path -LiteralPath $fallbackApk -PathType Leaf)) {
             throw 'BETA23_INGRESS_ARTIFACT_INVALID'
           }
           $digest = (Get-FileHash -LiteralPath $fallbackApk -Algorithm SHA256).Hash.ToUpperInvariant()
