@@ -308,6 +308,7 @@ jobs:
         if: inputs.release_candidate == 'beta23'
         env:
           EXPECTED_MAIN_SHA: ${{ github.sha }}
+          PSExecutionPolicyPreference: RemoteSigned
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -406,6 +407,7 @@ jobs:
         if: inputs.release_candidate == 'beta23'
         env:
           EXPECTED_MAIN_SHA: ${{ github.sha }}
+          PSExecutionPolicyPreference: RemoteSigned
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
