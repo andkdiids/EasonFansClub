@@ -361,6 +361,19 @@ jobs:
           overwrite: false
           retention-days: 1
 
+      - name: Store the Beta23 publisher manifest as a small same-run artifact
+        if: inputs.release_candidate == 'beta23'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta23-publisher-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/rc11-ingress-${{ github.run_id }}-${{ github.run_attempt }}/cos-source.zip
+            ${{ runner.temp }}/rc11-ingress-${{ github.run_id }}-${{ github.run_attempt }}/manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+          retention-days: 1
+
   cos:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
     name: Stage the candidate without copying the current release
@@ -398,9 +411,17 @@ jobs:
           persist-credentials: false
 
       - name: Download this run's single Android release ingress artifact
+        if: inputs.release_candidate != 'beta23'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android-${{ inputs.release_candidate }}-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rc11-ingress
+
+      - name: Download the small Beta23 publisher artifact for same-run staging
+        if: inputs.release_candidate == 'beta23'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-beta23-publisher-source-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rc11-ingress
 
       - name: Prepare the reviewed Beta23 publisher source from this run's artifact
@@ -451,6 +472,96 @@ jobs:
           $expectedFileList = @($expectedPaths | Sort-Object) -join "`n"
           if ($actualFileList -ne $expectedFileList) { throw 'BETA23_COS_SOURCE_MANIFEST_INVALID' }
           Write-Output 'BETA23_COS_SOURCE=RESTORED_AND_VERIFIED'
+
+      - name: Reuse the pinned Beta23 APK already verified on this runner
+        if: inputs.release_candidate == 'beta23'
+        id: beta23_local_apk
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+          EXPECTED_WORKFLOW_REF: andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main
+          PSExecutionPolicyPreference: RemoteSigned
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pinPath = Join-Path $env:GITHUB_WORKSPACE 'scripts/android-beta23-release.json'
+          $validator = Join-Path $env:GITHUB_WORKSPACE 'scripts/android-beta23-release.mjs'
+          if (-not (Test-Path -LiteralPath $pinPath -PathType Leaf) -or -not (Test-Path -LiteralPath $validator -PathType Leaf)) {
+            throw 'BETA23_ARTIFACT_PIN_NOT_READY'
+          }
+          $pin = Get-Content -LiteralPath $pinPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if (-not (Test-Path -LiteralPath $pin.sourcePath -PathType Leaf)) {
+            [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "source_path_present=false`n", [Text.UTF8Encoding]::new($false))
+            Write-Output 'BETA23_LOCAL_SOURCE=UNAVAILABLE_FALLBACK_TO_RUN_ARTIFACT'
+            exit 0
+          }
+          & node $validator validate $pin.sha256 ([string]$pin.size)
+          if ($LASTEXITCODE -ne 0) { throw 'BETA23_ARTIFACT_PIN_NOT_READY' }
+          $source = Get-Item -LiteralPath $pin.sourcePath
+          if ($source.Length.ToString() -ne [string]$pin.size) { throw 'BETA23_LOCAL_APK_SIZE_MISMATCH' }
+          $digest = (Get-FileHash -LiteralPath $pin.sourcePath -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($digest -ne $pin.sha256) { throw 'BETA23_LOCAL_APK_SHA256_MISMATCH' }
+
+          $ingress = Join-Path $env:RUNNER_TEMP 'rc11-ingress'
+          $manifestPath = Join-Path $ingress 'manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'BETA23_INGRESS_MANIFEST_INVALID' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($manifest.release_candidate -ne 'beta23'
+            -or [string]$manifest.run_id -ne $env:GITHUB_RUN_ID
+            -or [string]$manifest.run_attempt -ne $env:GITHUB_RUN_ATTEMPT
+            -or $manifest.ref -ne 'refs/heads/main'
+            -or $manifest.workflow_ref -ne $env:EXPECTED_WORKFLOW_REF
+            -or $manifest.workflow_sha -ne $env:EXPECTED_MAIN_SHA
+            -or $manifest.sha256 -ne $digest
+            -or [string]$manifest.size -ne [string]$source.Length
+            -or $manifest.signer_sha256 -ne '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B') {
+            throw 'BETA23_INGRESS_MANIFEST_INVALID'
+          }
+
+          $stagedApk = Join-Path $ingress $pin.sourceFile
+          Copy-Item -LiteralPath $pin.sourcePath -Destination $stagedApk
+          $staged = Get-Item -LiteralPath $stagedApk
+          $stagedDigest = (Get-FileHash -LiteralPath $stagedApk -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($staged.Length.ToString() -ne [string]$pin.size -or $stagedDigest -ne $pin.sha256) {
+            throw 'BETA23_LOCAL_APK_COPY_MISMATCH'
+          }
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "source_path_present=true`n", [Text.UTF8Encoding]::new($false))
+          Write-Output 'BETA23_LOCAL_SOURCE=REUSED_AND_VERIFIED'
+
+      - name: Download this run's full Beta23 ingress artifact when local source is unavailable
+        if: inputs.release_candidate == 'beta23' && steps.beta23_local_apk.outputs.source_path_present != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-beta23-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rc11-ingress-fallback
+
+      - name: Restore the Beta23 APK from the run artifact fallback
+        if: inputs.release_candidate == 'beta23' && steps.beta23_local_apk.outputs.source_path_present != 'true'
+        env:
+          PSExecutionPolicyPreference: RemoteSigned
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ingress = Join-Path $env:RUNNER_TEMP 'rc11-ingress'
+          $fallback = Join-Path $env:RUNNER_TEMP 'rc11-ingress-fallback'
+          $manifestPath = Join-Path $fallback 'manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'BETA23_INGRESS_MANIFEST_INVALID' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          $pin = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'scripts/android-beta23-release.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          $fallbackApk = Join-Path $fallback $pin.sourceFile
+          if ($manifest.release_candidate -ne 'beta23'
+            -or [string]$manifest.run_id -ne $env:GITHUB_RUN_ID
+            -or [string]$manifest.run_attempt -ne $env:GITHUB_RUN_ATTEMPT
+            -or $manifest.sha256 -ne $pin.sha256
+            -or [string]$manifest.size -ne [string]$pin.size
+            -or -not (Test-Path -LiteralPath $fallbackApk -PathType Leaf)) {
+            throw 'BETA23_INGRESS_ARTIFACT_INVALID'
+          }
+          $digest = (Get-FileHash -LiteralPath $fallbackApk -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($digest -ne $pin.sha256 -or (Get-Item -LiteralPath $fallbackApk).Length.ToString() -ne [string]$pin.size) {
+            throw 'BETA23_INGRESS_ARTIFACT_MISMATCH'
+          }
+          Copy-Item -LiteralPath $fallbackApk -Destination (Join-Path $ingress $pin.sourceFile)
+          Write-Output 'BETA23_INGRESS_ARTIFACT=RESTORED_AND_VERIFIED'
 
       - name: Require protected current main before any COS request
         env:
