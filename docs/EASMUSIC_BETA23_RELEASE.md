@@ -20,9 +20,9 @@ Android 当前回滚基线为 beta.22/code35：完整公开下载183859547字节
 
 ## 本地证据与未完成验收
 
-- Mobile来源 ede686dcbff12887a745fc39c5fbac58a3d8611e，Git tree c4fccd533bbb472de580aeabb448744ffdc18f74。
-- 正式脚本构建：E:\ECFC-Release-Artifacts\ECFC-1.0.0-beta.23-release-beta23-code36-final-20261117-141006.apk。
-- 大小183952296；SHA256 F03DEAF2B2DCC7A8862D2613435344B237EA583CBA9532DAA7798BE704B38048。
+- Mobile来源 2ea16fecedeb25b7d81ce91179b8bd325536c9d0，最终系统控制兼容修复 PR #22，代码树以合并后的实际读取结果核对。
+- 正式脚本构建：E:\ECFC-Release-Artifacts\ECFC-1.0.0-beta.23-release-beta23-code36-system-controls-20261117-142731.apk。
+- 大小183952296；SHA256 5FDFF851DD3A0A5C79E70EF02BF18928F59E486765175C5C7039995216260900。
 - fans.ecfc.app / 1.0.0-beta.23 / code36 / min24 / target36 / 四ABI / 正式证书 / v2通过。v3未启用，不声称通过。
 - TypeScript、ESLint、Prisma validate/generate、Next.js生产构建、原生模块编译与Manifest合并通过；原生统计8/8；Mobile全量789通过、27既有条件跳过、0失败；隐私规则追加回归2/2通过；Web真实隔离MySQL幂等、并发与跨午夜通过，临时容器清理。
 - PR、完整CI、Web生产部署、COS/CDN及Version API结果待实际执行后补充。

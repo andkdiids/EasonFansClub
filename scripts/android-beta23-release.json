@@ -2,12 +2,12 @@
   "applicationId": "fans.ecfc.app",
   "versionName": "1.0.0-beta.23",
   "versionCode": 36,
-  "sha256": "F03DEAF2B2DCC7A8862D2613435344B237EA583CBA9532DAA7798BE704B38048",
+  "sha256": "5FDFF851DD3A0A5C79E70EF02BF18928F59E486765175C5C7039995216260900",
   "size": 183952296,
   "signerSha256": "12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B",
   "sourceFile": "ECFC-1.0.0-beta.23-release-code36.apk",
   "sourcePath": "E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta23\\ECFC-1.0.0-beta.23-release-code36.apk",
-  "mobileCommit": "ede686dcbff12887a745fc39c5fbac58a3d8611e",
+  "mobileCommit": "2ea16fecedeb25b7d81ce91179b8bd325536c9d0",
   "releaseNotes": [
     "支持 EasMUSIC 在线修复播放问题",
     "支持 EasMUSIC 本地导入音乐",
@@ -16,6 +16,6 @@
     "补充隐私时长统计",
     "Beta.23 正式版本"
   ],
-  "buildCompletedAt": "2026-11-17T06:10:06.000Z",
+  "buildCompletedAt": "2026-11-17T06:27:31.000Z",
   "provenance": "Local official scripts/android-build.ps1 Release; Windows credential-backed signing; embedded JS, four ABIs and official certificate verified. Physical device QA pending."
 }
