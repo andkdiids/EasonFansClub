@@ -12,6 +12,9 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const touch = useRef<number | null>(null)
+  const exporting = useRef(false)
+  const [exportProgress, setExportProgress] = useState<number | null>(null)
+  const [download, setDownload] = useState<Blob | null>(null)
   const url = `/activities/${encodeURIComponent(activityId)}`
   async function generate() {
     setBusy(true)
@@ -42,6 +45,31 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
     ['明年今日', report.nickname, report.title, report.message],
   ]
   const move = (offset: number) => setPage((current) => Math.min(9, Math.max(0, current + offset)))
+  async function save() {
+    if (!chapters || exporting.current) return
+    exporting.current = true
+    setError('')
+    setExportProgress(0)
+    try {
+      const { renderMemoirZip } = await import('@/lib/annual-memoir-export')
+      const zip = download ?? await renderMemoirZip(chapters, year, setExportProgress)
+      setDownload(zip)
+      const objectUrl = URL.createObjectURL(zip)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `葡萄成熟时-${year}.zip`
+      document.body.appendChild(anchor)
+      try { anchor.click() } finally {
+        anchor.remove()
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+      }
+    } catch {
+      setError('导出失败，请重试。如果内置浏览器无法下载，请用系统浏览器打开。')
+    } finally {
+      exporting.current = false
+      setExportProgress(null)
+    }
+  }
   return <main className="mx-auto max-w-lg p-4 text-[#4a243e]">
     <header className="mb-4"><h1 className="text-2xl font-bold">葡萄成熟时</h1><p>私家E院 {year} 年度回忆录</p></header>
     {chapters && page >= 0 ? <>
@@ -62,6 +90,9 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
         <progress aria-label="阅读进度" value={page + 1} max={10} /><span>{page + 1} / 10</span>
         <button type="button" disabled={page === 9} onClick={() => move(1)}>下一页</button>
       </nav>
+      {page === 9 && <button type="button" disabled={exportProgress !== null} onClick={save}>
+        {exportProgress === null ? '保存我的年度报告' : `正在导出 ${exportProgress} / 10`}
+      </button>}
     </> : report ? <button type="button" onClick={() => setPage(0)}>查看我的年度报告</button>
       : canGenerate ? <button type="button" disabled={busy} onClick={generate}>{busy ? '正在生成…' : '生成我的年度报告'}</button>
         : <p>当前不在年度报告生成时段。</p>}
