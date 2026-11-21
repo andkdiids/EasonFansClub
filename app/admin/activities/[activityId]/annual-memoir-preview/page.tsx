@@ -32,7 +32,7 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
       <p>预约成功后，将获得本次活动的预约奖励。预约不可取消，也不能重复预约。</p>
     </details>
     <MemoirReader activityId={activityId} year={2026} canGenerate={false} initialReport={{
-      nickname: '年度回忆录预览用户', uid: 42, registered: '2026-01-01', firstRecordedDay: null,
+      nickname: '年度回忆录预览用户', uid: 42, registered: '2026-01-01', firstRecordedDay: '',
       activeDays: 12, checkIns: 8, checkInExperience: 20, posts: 3, replies: 6, likesGiven: 20,
       likesReceived: 9, friends: 2, followers: 3, games: 2, bestScore: 8, badges: 1, topics: 2,
       verified: 1, title: '故事记录者', message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',
