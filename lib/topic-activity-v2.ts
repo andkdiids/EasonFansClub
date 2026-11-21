@@ -282,12 +282,22 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
   return withTopicV2Transaction(async (tx) => {
     const activity = await lockTopicV2Activity(tx, input.activityId)
     requireTopicV2Active(activity, now)
+    const memoir = await tx.annualMemoirConfig.findUnique({ where: { activityId: activity.id } })
+    if (memoir) {
+      const snapshot = await tx.annualMemoirSnapshot.findUnique({
+        where: { userId_year: { userId: input.userId, year: memoir.year } }, select: { activityId: true },
+      })
+      if (!memoir.enabled || now < memoir.reportOpensAt || now >= memoir.endsAt || snapshot?.activityId !== activity.id) {
+        fail('ANNUAL_MEMOIR_SHARE_UNAVAILABLE', '请在活动期间生成年度报告后再提交截图', 403)
+      }
+    }
     const program = requireTopicV2Program(activity)
     if (!program.platformRewards.enabled) fail('TOPIC_V2_PLATFORM_DISABLED', '平台奖励未开放')
     if (!activity.activityPostId) fail('TOPIC_V2_POST_UNAVAILABLE', '活动主帖尚未创建')
     const row = await tx.topicActivityRewardEntry.findFirst({ where: { id: input.rewardEntryId, activityId: activity.id, enabled: true } })
     if (!row) fail('TOPIC_V2_ENTRY_NOT_FOUND', '奖励入口未开放', 404)
     const entry = entryFromSnapshot(row.config)
+    if (memoir && ids.length === 0) fail('ANNUAL_MEMOIR_SCREENSHOT_REQUIRED', '请上传年度报告分享截图', 400)
     requireWindow(entry.startsAt, entry.endsAt, now)
     if (ids.length < entry.minImages || ids.length > entry.maxImages) fail('TOPIC_V2_SCREENSHOT_COUNT_INVALID', '截图数量不符合任务要求', 400)
     if (ids.length && !activity.allowImageAttachments) fail('TOPIC_V2_IMAGES_DISABLED', '活动未启用图片附件', 403)
