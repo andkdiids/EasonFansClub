@@ -161,10 +161,20 @@ async function createGrant(tx: Prisma.TransactionClient, input: {
 async function grantPoints(tx: Prisma.TransactionClient, activity: Pick<Activity, 'id' | 'title'>, grant: TopicActivityRewardGrant, now: Date) {
   if (grant.status === 'GRANTED' || grant.status === 'CANCELLED') return grant
   if (!grant.points || grant.points <= 0) fail('TOPIC_V2_REWARD_INVALID', '奖励金额无效')
-  await grantTopicActivityPointsInTransaction(tx, {
-    userId: grant.userId, activityId: activity.id, points: grant.points, businessKey: grant.grantKey,
+  const platform = grant.origin === 'PLATFORM' ? platformKey(grant.rewardSnapshot) : null
+  const memoir = platform && await tx.annualMemoirConfig.findUnique({ where: { activityId: activity.id }, select: { activityId: true } })
+  const businessKey = memoir && platform
+    ? 'annual-memoir-share:' + createHash('sha256').update(JSON.stringify([activity.id, grant.userId, platform.toLowerCase()])).digest('hex')
+    : grant.grantKey
+  const result = await grantTopicActivityPointsInTransaction(tx, {
+    userId: grant.userId, activityId: activity.id, points: grant.points, businessKey,
     reason: '话题活动「' + activity.title + '」奖励', sourceEventId: grant.id, now,
   })
+  if (memoir && !result.granted) {
+    return tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: {
+      status: 'CANCELLED', errorMessage: '此平台的年度分享奖励已发放',
+    } })
+  }
   return tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'GRANTED', grantedAt: now, errorMessage: null } })
 }
 
@@ -282,12 +292,22 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
   return withTopicV2Transaction(async (tx) => {
     const activity = await lockTopicV2Activity(tx, input.activityId)
     requireTopicV2Active(activity, now)
+    const memoir = await tx.annualMemoirConfig.findUnique({ where: { activityId: activity.id } })
+    if (memoir) {
+      const snapshot = await tx.annualMemoirSnapshot.findUnique({
+        where: { userId_year: { userId: input.userId, year: memoir.year } }, select: { activityId: true },
+      })
+      if (!memoir.enabled || now < memoir.reportOpensAt || now >= memoir.endsAt || snapshot?.activityId !== activity.id) {
+        fail('ANNUAL_MEMOIR_SHARE_UNAVAILABLE', '请在活动期间生成年度报告后再提交截图', 403)
+      }
+    }
     const program = requireTopicV2Program(activity)
     if (!program.platformRewards.enabled) fail('TOPIC_V2_PLATFORM_DISABLED', '平台奖励未开放')
     if (!activity.activityPostId) fail('TOPIC_V2_POST_UNAVAILABLE', '活动主帖尚未创建')
     const row = await tx.topicActivityRewardEntry.findFirst({ where: { id: input.rewardEntryId, activityId: activity.id, enabled: true } })
     if (!row) fail('TOPIC_V2_ENTRY_NOT_FOUND', '奖励入口未开放', 404)
     const entry = entryFromSnapshot(row.config)
+    if (memoir && ids.length === 0) fail('ANNUAL_MEMOIR_SCREENSHOT_REQUIRED', '请上传年度报告分享截图', 400)
     requireWindow(entry.startsAt, entry.endsAt, now)
     if (ids.length < entry.minImages || ids.length > entry.maxImages) fail('TOPIC_V2_SCREENSHOT_COUNT_INVALID', '截图数量不符合任务要求', 400)
     if (ids.length && !activity.allowImageAttachments) fail('TOPIC_V2_IMAGES_DISABLED', '活动未启用图片附件', 403)

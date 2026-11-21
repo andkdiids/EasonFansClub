@@ -45,7 +45,64 @@ model Achievement {
   @@index([rarity])
 }
 
+model AnnualMemoirConfig {
+  activityId String @id
+  year Int @unique
+  enabled Boolean @default(false)
+  previewAt DateTime
+  reservationOpensAt DateTime
+  reservationClosesAt DateTime
+  statisticsStartAt DateTime
+  statisticsEndAt DateTime
+  reportOpensAt DateTime
+  notificationAt DateTime
+  endsAt DateTime
+  settlementAt DateTime
+  reservationPoints Int @default(74)
+  reservationBadgeId String?
+  annualBadgeId String?
+  templateVersion Int @default(1)
+  statisticsLockedAt DateTime?
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+}
+
+model AnnualMemoirReservation {
+  id String @id @default(cuid())
+  activityId String
+  userId String
+  createdAt DateTime @default(now())
+  points Int
+  badgeId String?
+  pointsGrantedAt DateTime?
+  badgeGrantedAt DateTime?
+  notifiedAt DateTime?
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([activityId, userId])
+  @@index([activityId, notifiedAt, id])
+}
+
+model AnnualMemoirSnapshot {
+  id String @id @default(cuid())
+  activityId String
+  userId String
+  year Int
+  statisticsStartAt DateTime
+  statisticsEndAt DateTime
+  templateVersion Int
+  payload Json
+  createdAt DateTime @default(now())
+  settledAt DateTime?
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, year])
+  @@index([activityId, settledAt, id])
+}
+
 model Activity {
+  annualMemoirConfig AnnualMemoirConfig?
+  annualMemoirReservations AnnualMemoirReservation[]
+  annualMemoirSnapshots AnnualMemoirSnapshot[]
   id                           String                            @id @default(cuid())
   title                        String
   subtitle                     String?                           @db.VarChar(300)
@@ -4984,6 +5041,8 @@ model Task {
 }
 
 model User {
+  annualMemoirReservations AnnualMemoirReservation[]
+  annualMemoirSnapshots AnnualMemoirSnapshot[]
   id                                                     String                             @id @default(cuid())
   /// 后台显示为“内部账号”；手机号、邮箱编辑不得写入此字段。
   username                                               String

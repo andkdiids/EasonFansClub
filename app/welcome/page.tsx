@@ -11,6 +11,8 @@ import { prisma } from '@/lib/prisma'
 import { getPublicConcertEvent } from '@/lib/concert-events'
 import { loadWelcomeOptionalData } from '@/lib/welcome-optional-data'
 import { RecordingSessionsSpotlight } from '@/components/concerts/RecordingSessionsSpotlight'
+import { AnnualMemoirEntry } from '@/components/activities/AnnualMemoirEntry'
+import { readMemoirEntry } from '@/lib/annual-memoir-entry'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +26,7 @@ export default async function WelcomePage() {
     loadWelcomeOptionalData('featured-event-query', () => prisma.concertEvent.findFirst({ where: { homepageFeatured: true, status: { in: ['UPCOMING', 'REGISTRATION', 'WAITING_DRAW', 'SHOWING'] } }, orderBy: { updatedAt: 'desc' }, select: { slug: true } })),
   ])
   if (!user) redirect('/login?redirect=%2Fwelcome')
+  const memoir = await loadWelcomeOptionalData('annual-memoir-entry', () => readMemoirEntry(undefined, user.id))
 
   const visual = config.heroVisuals.welcome
   const fallbackImageUrl = config.images.checkinBackgroundUrl || config.images.loginBackgroundUrl
@@ -51,6 +54,7 @@ export default async function WelcomePage() {
         <p className="hero-slogan">NOW IS THE ONLY REALITY.</p>
         <p className="hero-script">C’mon in~</p>
         <Link href="/community" className="hero-primary-button" aria-label="进入社区首页">进入社区 <span aria-hidden>›</span></Link>
+        {memoir && (memoir.config.activity.isFeatured || memoir.hasSnapshot) && <AnnualMemoirEntry entry={memoir} />}
         {featuredEvent ? <div className="mt-4 w-full max-w-xl"><RecordingSessionsSpotlight event={featuredEvent} /></div> : <Link href="/activities" className="mt-4 text-sm font-bold text-white/80 underline underline-offset-4">查看活动中心</Link>}
       </section>
     </main>

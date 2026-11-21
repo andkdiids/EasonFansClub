@@ -220,6 +220,21 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   }
   comparableBlocks.delete('CantoneseLearnerQuestionProgress')
   comparableBlocks.delete('ProfilePostViewHistory')
+  const memoirRelations = {
+    Activity: ['annualMemoirConfig AnnualMemoirConfig?', 'annualMemoirReservations AnnualMemoirReservation[]', 'annualMemoirSnapshots AnnualMemoirSnapshot[]'],
+    User: ['annualMemoirReservations AnnualMemoirReservation[]', 'annualMemoirSnapshots AnnualMemoirSnapshot[]'],
+  }
+  for (const [model, fields] of Object.entries(memoirRelations)) {
+    assert.deepEqual(comparableBlocks.get(model)!.filter((field) => field.startsWith('annualMemoir')), fields)
+    comparableBlocks.set(model, comparableBlocks.get(model)!.filter((field) => !fields.includes(field)))
+  }
+  for (const name of ['AnnualMemoirConfig', 'AnnualMemoirReservation', 'AnnualMemoirSnapshot']) {
+    assert.ok(comparableBlocks.delete(name), `required memoir model retained: ${name}`)
+  }
+  const memoirMigration = read('prisma/migrations/20261121120000_add_annual_memoir/migration.sql')
+  assert.doesNotMatch(memoirMigration, /\b(?:DROP|RENAME|TRUNCATE|DELETE\s+FROM|UPDATE\s+`)\b/i)
+  assert.match(memoirMigration, /UNIQUE INDEX `AnnualMemoirReservation_activityId_userId_key`/)
+  assert.match(memoirMigration, /UNIQUE INDEX `AnnualMemoirSnapshot_userId_year_key`/)
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
   for (const name of concertSchemaBlocks) assert.ok(newBlocks.has(name), `concert schema block retained: ${name}`)
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)
