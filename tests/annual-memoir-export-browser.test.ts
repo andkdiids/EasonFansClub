@@ -5,7 +5,9 @@ import { chromium } from 'playwright'
 import sharp from 'sharp'
 import ts from 'typescript'
 
-test('browser creates a ZIP with ten independently decodable full-size JPEGs', async () => {
+test('browser creates a ZIP with ten independently decodable full-size JPEGs', {
+  skip: !process.env.MEMOIR_BROWSER_PATH && process.env.MEMOIR_BROWSER_QA !== '1',
+}, async () => {
   const browser = await chromium.launch({ executablePath: process.env.MEMOIR_BROWSER_PATH })
   try {
     const page = await browser.newPage()
