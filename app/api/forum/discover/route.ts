@@ -23,6 +23,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { getTrendingTopics } from '@/lib/topic-service'
 import { expireTopicActivityPins } from '@/lib/topic-activity'
+import { visibleMemoirActivities } from '@/lib/annual-memoir-entry'
 
 export const dynamic = 'force-dynamic'
 
@@ -291,6 +292,7 @@ function buildWhere({ boardId, boardSlug, query, excludedPostIds, excludedAuthor
   return {
     AND: [
       publicPostWhere(),
+      { OR: [{ TopicActivity: { is: null } }, { TopicActivity: { is: visibleMemoirActivities(new Date()) } }] },
       {
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         Board: boardSlug

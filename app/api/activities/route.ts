@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { activityDisplayStatusLabels, activityTypeValues, sortActivities, type ActivityDisplayStatus, type ActivityStatusValue, type ActivityTypeValue } from '@/lib/activity'
 import { activitySelect, serializeActivityRow } from '@/lib/activity-data'
 import { prisma } from '@/lib/prisma'
+import { visibleMemoirActivities } from '@/lib/annual-memoir-entry'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(params.get('pageSize') || '24', 10) || 24))
 
   const rows = await prisma.activity.findMany({
-    where: { status: { in: publicDatabaseStatuses } },
+    where: { status: { in: publicDatabaseStatuses }, ...visibleMemoirActivities(new Date()) },
     orderBy: [{ isPinned: 'desc' }, { sortOrder: 'asc' }, { startsAt: 'asc' }, { createdAt: 'desc' }],
     take: 300,
     select: activitySelect,

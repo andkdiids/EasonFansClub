@@ -14,7 +14,7 @@ import { migrateTopicActivityWeightsToRoles, topicActivityResultReferenceCount }
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-2 text-sm'
 const buttonClass = 'min-h-9 rounded-sm border border-[var(--border)] px-3 text-sm font-bold disabled:opacity-40'
-const platforms = [['weibo', '微博'], ['xiaohongshu', '小红书'], ['douyin', '抖音'], ['instagram', 'Instagram'], ['bilibili', 'B 站'], ['wechat-channels', '视频号']]
+const platforms = [['weibo', '微博'], ['xiaohongshu', '小红书'], ['douyin', '抖音'], ['instagram', 'Instagram'], ['NETEASE_EASON_FAN_CLUB', '网易云陈奕迅乐迷团'], ['bilibili', 'B 站'], ['wechat-channels', '视频号']]
 function uid(prefix: string) { return prefix + '-' + crypto.randomUUID().slice(0, 12) }
 function localTime(value: string | null) {
   if (!value) return ''
