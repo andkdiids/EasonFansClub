@@ -12,7 +12,9 @@ export type MemoirSchedule = {
 
 export function isValidMemoirSchedule(schedule: MemoirSchedule) {
   const s = schedule
-  return Object.values(s).every((date) => Number.isFinite(date.getTime())) &&
+  return [s.previewAt, s.reservationOpensAt, s.reservationClosesAt, s.statisticsStartAt,
+    s.statisticsEndAt, s.reportOpensAt, s.notificationAt, s.endsAt, s.settlementAt]
+    .every((date) => date instanceof Date && Number.isFinite(date.getTime())) &&
     s.previewAt <= s.reservationOpensAt &&
     s.reservationOpensAt < s.reservationClosesAt &&
     s.reservationClosesAt <= s.reportOpensAt &&

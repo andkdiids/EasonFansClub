@@ -12,6 +12,14 @@ const schedule = {
 const state = (now: Date, hasSnapshot = false, configuredAndPublished = true) =>
   getMemoirAvailability({ schedule, now, hasSnapshot, configuredAndPublished })
 
+test('a persisted configuration row may contain fields besides the schedule', () => {
+  const row = { ...schedule, activityId: 'synthetic', enabled: true, statisticsLockedAt: null }
+  assert.equal(isValidMemoirSchedule(row), true)
+  assert.equal(getMemoirAvailability({
+    schedule: row, now: at('02'), hasSnapshot: false, configuredAndPublished: true,
+  }).canReserve, true)
+})
+
 test('preview and reservation are separately gated at Beijing boundaries', () => {
   assert.equal(state(new Date(at('01').getTime() - 1)).visible, false)
   assert.equal(state(at('01')).visible, true)
