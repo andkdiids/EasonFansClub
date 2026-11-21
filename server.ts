@@ -378,6 +378,11 @@ async function start() {
         drawDueTopicLotteries({ batchSize: 50 }),
         concertReminderTask,
       ])
+      await import('./lib/annual-memoir-worker')
+        .then(({ runAnnualMemoirMaintenance }) => runAnnualMemoirMaintenance())
+        .catch((error) => console.error('[annual-memoir.maintenance.failed]', {
+          errorName: error instanceof Error ? error.name : 'UNKNOWN',
+        }))
       // Results commit before notices; retryable outbox and retention use the
       // existing heartbeat, without a new worker/service/workflow.
       const [topicLotteryNotices, topicLotteryPii] = await Promise.all([deliverTopicLotteryNotices({ batchSize: 100 }), purgeExpiredTopicLotteryPII({ batchSize: 100 })])
