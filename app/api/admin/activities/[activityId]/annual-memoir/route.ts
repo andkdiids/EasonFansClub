@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { isValidMemoirSchedule } from '@/lib/annual-memoir-policy'
+import { parseMemoirAdminInput } from '@/lib/annual-memoir-admin'
 import { fulfillMemoirReservation } from '@/lib/annual-memoir-reservation'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
@@ -33,27 +33,8 @@ export async function PUT(request: Request, { params }: Context) {
   if (!guard.user) return guard.response
   const actorId = guard.user.id
   const { activityId } = await params
-  const input = await request.json().catch(() => null)
-  const date = (key: string) => {
-    const value = input?.[key]
-    if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(value)) return new Date(NaN)
-    const parsed = new Date(value + '+08:00')
-    if (!Number.isFinite(parsed.getTime()) || !new Date(parsed.getTime() + 28_800_000).toISOString().startsWith(value)) return new Date(NaN)
-    return parsed
-  }
-  const schedule = {
-    previewAt: date('previewAt'), reservationOpensAt: date('reservationOpensAt'), reservationClosesAt: date('reservationClosesAt'),
-    statisticsStartAt: date('statisticsStartAt'), statisticsEndAt: date('statisticsEndAt'), reportOpensAt: date('reportOpensAt'),
-    notificationAt: date('notificationAt'), endsAt: date('endsAt'), settlementAt: date('settlementAt'),
-  }
-  const points = input?.reservationPoints
-  if (!isValidMemoirSchedule(schedule) || typeof input?.enabled !== 'boolean' ||
-      typeof points !== 'number' || !Number.isInteger(points) || points < 0 || points > 2_147_483_647) {
-    return reply({ message: '请检查北京时间及奖励金额。' }, 400)
-  }
-  const badge = (key: string) => typeof input[key] === 'string' ? String(input[key]).trim() || null : null
-  const data = { ...schedule, enabled: input.enabled as boolean, reservationPoints: points,
-    reservationBadgeId: badge('reservationBadgeId'), annualBadgeId: badge('annualBadgeId') }
+  const data = parseMemoirAdminInput(await request.json().catch(() => null))
+  if (!data) return reply({ message: '请检查北京时间及奖励金额。' }, 400)
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT activityId FROM AnnualMemoirConfig WHERE activityId = ${activityId} FOR UPDATE`
     const current = await tx.annualMemoirConfig.findUnique({ where: { activityId } })
