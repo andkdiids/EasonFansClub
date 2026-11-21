@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 const dates = [
@@ -51,6 +52,7 @@ export function AnnualMemoirAdmin({ activityId }: { activityId: string }) {
   const config = data?.config
   return <details className="my-5 space-y-3 border p-4">
     <summary>葡萄成熟时 · 年度回忆录配置</summary>
+    <Link className="underline" href={`/admin/activities/${encodeURIComponent(activityId)}/annual-memoir-preview`}>打开只读预览</Link>
     <p>先用上方现有活动设置保存名称、介绍、封面、首页精选和广场置顶，再保存年度配置。</p>
     {message && <p role="status">{message}</p>}
     {data && <fieldset disabled={busy} className="grid gap-2 sm:grid-cols-2">
