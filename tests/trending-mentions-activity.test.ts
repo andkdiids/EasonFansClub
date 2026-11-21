@@ -86,7 +86,7 @@ test('活动入口统一命名且 Hero 不再链接生日专题', () => {
 })
 
 test('真实活动只展示已发布数据并可进入详情', () => {
-  assert.match(activities, /where: \{ status: 'PUBLISHED' \}/)
+  assert.match(activities, /where: \{ status: 'PUBLISHED', \.\.\.visibleMemoirActivities\(new Date\(\)\) \}/)
   assert.match(activities, /href=\{`\/activities\/\$\{item\.id\}`\}/)
   assert.match(read('app/activities/[activityId]/page.tsx'), /status: 'PUBLISHED'/)
 })

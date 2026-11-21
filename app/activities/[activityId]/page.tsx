@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import type { Prisma } from '@prisma/client'
 import { ActivityDetailView } from '@/components/activities/ActivityDetailView'
+import { AnnualMemoirEntry } from '@/components/activities/AnnualMemoirEntry'
+import { readMemoirEntry, visibleMemoirActivities } from '@/lib/annual-memoir-entry'
 import { ActivityViewCounter } from '@/components/activities/ActivityViewCounter'
 import { getCurrentUser } from '@/lib/auth'
 import { activitySelect, serializeActivityRow } from '@/lib/activity-data'
@@ -42,7 +44,7 @@ export async function generateMetadata({ params }: Readonly<{ params: Promise<{ 
   const { activityId } = await params
   try {
     const activity = await prisma.activity.findFirst({
-      where: { id: activityId, status: { in: ['PUBLISHED', 'CANCELLED'] } },
+      where: { id: activityId, status: { in: ['PUBLISHED', 'CANCELLED'] }, ...visibleMemoirActivities(new Date()) },
       select: activityMetadataSelect,
     })
     if (!activity) return buildActivityMetadata({ activityId, isPublic: false })
@@ -82,6 +84,8 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
     select: { ...activitySelect, topicProgram: true },
   })
   if (!activity) notFound()
+  const memoir = await readMemoirEntry(activityId, viewer?.id)
+  if (memoir && !memoir.state.visible) notFound()
   const view = serializeActivityRow(activity)
   const topicV2Enabled = view.type === 'TOPIC_ACTIVITY' && Boolean(readTopicActivityV2Program(activity.topicProgram)?.enabled)
   let shareAuthor = { name: view.organizer || '私家E院', avatarUrl: null as string | null }
@@ -138,6 +142,7 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
 
   return (
     <main className="site-page-main flat-page mx-auto w-full max-w-[1440px] space-y-5 px-4 py-6 sm:px-5 sm:py-8" style={{ maxWidth: '1440px' }}>
+      {memoir && <AnnualMemoirEntry entry={memoir} detail />}
       <ActivityDetailView activity={view} shareAuthor={shareAuthor} isAuthenticated={Boolean(viewer)} currentUserId={viewer?.id} topicV2Enabled={topicV2Enabled} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && activityMaterialAvailable && Boolean(viewer) && registration?.status !== 'ACTIVE' && registration?.status !== 'CANCELLED'} initialTopicParticipation={topicStatus} lotteries={lotteries} />
       <p className="text-right text-xs font-bold text-[var(--foreground-muted)]"><ActivityViewCounter activityId={view.id} initialCount={view.viewCount} /></p>
     </main>

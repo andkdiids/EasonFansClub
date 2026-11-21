@@ -1,7 +1,7 @@
-export type WelcomeOptionalDataStage = 'featured-event-query' | 'featured-event-load'
+export type WelcomeOptionalDataStage = 'featured-event-query' | 'featured-event-load' | 'annual-memoir-entry'
 
 type SafeErrorDetails = {
-  feature: 'featured-concert'
+  feature: 'featured-concert' | 'annual-memoir'
   stage: WelcomeOptionalDataStage
   errorName: string
   errorCode?: string
@@ -21,7 +21,7 @@ function safeErrorDetails(error: unknown, stage: WelcomeOptionalDataStage): Safe
     : undefined
 
   return {
-    feature: 'featured-concert',
+    feature: stage === 'annual-memoir-entry' ? 'annual-memoir' : 'featured-concert',
     stage,
     errorName,
     ...(errorCode ? { errorCode } : {}),

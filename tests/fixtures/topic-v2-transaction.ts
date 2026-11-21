@@ -81,6 +81,7 @@ export function fixture(entries = [rewardEntry('weibo')]) {
     post: { findFirst: async () => ({ id: 'post-one', authorId: 'admin-one' }), update: async ({ data }: any) => { if (data.lastCommentFloor) state.floor++; return { lastCommentFloor: state.floor } } },
     reply: { create: async ({ data }: any) => ({ id: 'reply-' + state.submissions.length, ...data }) },
     topicActivitySubmission: table('submissions', { status: 'PENDING', commentDeletedAt: null }),
+    annualMemoirConfig: { findUnique: async () => null },
     topicActivityParticipation: table('participations'), topicActivityRewardGrant: table('grants', { status: 'PENDING' }),
     topicActivityRewardEntry: table('entries'), topicActivityImageAsset: table('assets'), topicActivityFormSubmission: table('forms'),
     topicActivityReviewLog: table('reviews'), adminActionLog: table('audits'), pointLog: table('logs'),
