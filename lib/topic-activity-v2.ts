@@ -161,10 +161,20 @@ async function createGrant(tx: Prisma.TransactionClient, input: {
 async function grantPoints(tx: Prisma.TransactionClient, activity: Pick<Activity, 'id' | 'title'>, grant: TopicActivityRewardGrant, now: Date) {
   if (grant.status === 'GRANTED' || grant.status === 'CANCELLED') return grant
   if (!grant.points || grant.points <= 0) fail('TOPIC_V2_REWARD_INVALID', '奖励金额无效')
-  await grantTopicActivityPointsInTransaction(tx, {
-    userId: grant.userId, activityId: activity.id, points: grant.points, businessKey: grant.grantKey,
+  const platform = grant.origin === 'PLATFORM' ? platformKey(grant.rewardSnapshot) : null
+  const memoir = platform && await tx.annualMemoirConfig.findUnique({ where: { activityId: activity.id }, select: { activityId: true } })
+  const businessKey = memoir && platform
+    ? 'annual-memoir-share:' + createHash('sha256').update(JSON.stringify([activity.id, grant.userId, platform.toLowerCase()])).digest('hex')
+    : grant.grantKey
+  const result = await grantTopicActivityPointsInTransaction(tx, {
+    userId: grant.userId, activityId: activity.id, points: grant.points, businessKey,
     reason: '话题活动「' + activity.title + '」奖励', sourceEventId: grant.id, now,
   })
+  if (memoir && !result.granted) {
+    return tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: {
+      status: 'CANCELLED', errorMessage: '此平台的年度分享奖励已发放',
+    } })
+  }
   return tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'GRANTED', grantedAt: now, errorMessage: null } })
 }
 
