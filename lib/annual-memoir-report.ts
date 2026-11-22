@@ -53,7 +53,7 @@ export async function generateMemoir(activityId: string, userId: string) {
     const now = new Date()
     const configuredAndPublished = config.enabled && config.activity.type === 'TOPIC_ACTIVITY' &&
       config.activity.status === 'PUBLISHED' && !!config.activity.coverUrl &&
-      !!config.reservationBadgeId && !!config.annualBadgeId && config.reservationPoints >= 0
+      !!config.annualBadgeId && config.reservationPoints >= 0
     if (!getMemoirAvailability({ configuredAndPublished, schedule: config, now, hasSnapshot: false }).canGenerate) return null
     const payload = await collect(tx, userId, config.statisticsStartAt, config.statisticsEndAt, now)
     const snapshot = await tx.annualMemoirSnapshot.create({

@@ -25,7 +25,7 @@ export function parseMemoirAdminInput(value: unknown) {
   if (!isValidMemoirSchedule(schedule) || typeof input.enabled !== 'boolean' ||
     typeof points !== 'number' || !Number.isInteger(points) || points < 0 || points > 2_147_483_647) return null
   const badge = (key: string) => typeof input[key] === 'string' ? input[key].trim() || null : null
-  return { ...schedule, enabled: input.enabled, reservationPoints: points, reservationBadgeId: badge('reservationBadgeId'), annualBadgeId: badge('annualBadgeId') }
+  return { ...schedule, enabled: input.enabled, ...(typeof input.showInActivityCenter === 'boolean' ? { showInActivityCenter: input.showInActivityCenter } : {}), reservationPoints: points, reservationBadgeId: badge('reservationBadgeId'), annualBadgeId: badge('annualBadgeId') }
 }
 
 export function toMemoirShanghaiInput(value: Date | string) {

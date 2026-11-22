@@ -1,3 +1,10 @@
+import { annualMemoirPlatforms } from '@/lib/annual-memoir-platforms'
+import { parseMemoirPlatformPoints, syncMemoirPlatforms } from '@/lib/annual-memoir-platform-admin'
+import { readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
+import { normalizeActivityInput } from '@/lib/activity-validation'
+import { syncActivityPostInTransaction } from '@/lib/topic-activity'
+import { checkBannedWords } from '@/lib/content-moderation'
+import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { parseMemoirAdminInput } from '@/lib/annual-memoir-admin'
 import { fulfillMemoirReservation } from '@/lib/annual-memoir-reservation'
@@ -23,7 +30,10 @@ export async function GET(_request: Request, { params }: Context) {
     prisma.annualMemoirReservation.count({ where: { activityId, badgeGrantedAt: { not: null } } }),
     prisma.annualMemoirReservation.aggregate({ where: { activityId, pointsGrantedAt: { not: null } }, _sum: { points: true } }),
   ])
-  return reply({ config, badges, outstanding, stats: { reservations, reports, notified, settled, medals, points: points._sum.points ?? 0 } })
+  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { topicProgram: true } })
+  const entries = readTopicActivityV2Program(activity?.topicProgram)?.entries ?? []
+  const platformPoints = annualMemoirPlatforms.map(([key]) => entries.find((entry) => entry.enabled && entry.platformKey === key)?.points ?? 74)
+  return reply({ config, badges, outstanding, platformPoints, stats: { reservations, reports, notified, settled, medals, points: points._sum.points ?? 0 } })
 }
 
 export async function PUT(request: Request, { params }: Context) {
@@ -33,9 +43,21 @@ export async function PUT(request: Request, { params }: Context) {
   if (!guard.user) return guard.response
   const actorId = guard.user.id
   const { activityId } = await params
-  const data = parseMemoirAdminInput(await request.json().catch(() => null))
+  const body = await request.json().catch(() => null)
+  const data = parseMemoirAdminInput(body)
+  const points = body?.platformPoints === undefined ? undefined : parseMemoirPlatformPoints(body.platformPoints)
+  if (points === null) return reply({ message: '请为五个平台设置有效的挂号费。' }, 400)
   if (!data) return reply({ message: '请检查北京时间及奖励金额。' }, 400)
+  const normalized = body.activity ? normalizeActivityInput({
+    ...body.activity, type: 'TOPIC_ACTIVITY', status: 'DRAFT',
+    startsAt: data.previewAt.toISOString(), endsAt: data.endsAt.toISOString(),
+  }) : null
+  if (normalized && !normalized.valid) return reply({ message: normalized.message }, 400)
+  if (normalized?.valid && (await checkBannedWords([normalized.value.title, normalized.value.subtitle, normalized.value.description].join(' '))).blocked) {
+    return reply({ message: '请检查活动文本。' }, 400)
+  }
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM Activity WHERE id = ${activityId} FOR UPDATE`
     await tx.$queryRaw`SELECT activityId FROM AnnualMemoirConfig WHERE activityId = ${activityId} FOR UPDATE`
     const current = await tx.annualMemoirConfig.findUnique({ where: { activityId } })
     if (current?.statisticsLockedAt && (current.statisticsStartAt.getTime() !== data.statisticsStartAt.getTime() ||
@@ -44,13 +66,25 @@ export async function PUT(request: Request, { params }: Context) {
     if (activity?.type !== 'TOPIC_ACTIVITY') return 'INVALID'
     const ids = [data.reservationBadgeId, data.annualBadgeId].filter((id): id is string => !!id)
     if (new Set(ids).size !== ids.length || (ids.length && await tx.badge.count({ where: { id: { in: ids } } }) !== ids.length) ||
-      (data.enabled && (!activity.coverUrl?.trim() || ids.length !== 2))) return 'INVALID'
+      (data.enabled && (!(normalized?.valid ? normalized.value.coverUrl : activity.coverUrl)?.trim() || !data.annualBadgeId))) return 'INVALID'
     await tx.annualMemoirConfig.upsert({ where: { activityId }, update: data, create: { activityId, year: 2026, ...data } })
+    if (normalized?.valid) {
+      const { title, subtitle, description, coverUrl, isFeatured, startsAt, endsAt } = normalized.value
+      const pinToPlaza = body.activity.pinToPlaza === true
+      await tx.activity.update({ where: { id: activityId }, data: {
+        title, subtitle, description, coverUrl, isFeatured, pinToPlaza, startsAt, endsAt,
+        allowImageAttachments: true, updatedById: actorId,
+      } })
+      await syncActivityPostInTransaction(tx, activityId)
+    }
+    if (!current?.enabled || points) await syncMemoirPlatforms(tx, activityId, points)
     await tx.adminActionLog.create({ data: { adminId: actorId, targetUserId: actorId,
       action: 'ANNUAL_MEMOIR_CONFIG_UPDATED', detail: { activityId, enabled: data.enabled } } })
     return 'SAVED'
   })
   if (result !== 'SAVED') return reply({ message: result === 'LOCKED' ? '首份报告已生成，统计范围已锁定。' : '请检查话题活动、正式封面及两种勋章。' }, 409)
+  revalidatePath('/activities')
+  revalidatePath('/')
   return reply({ ok: true })
 }
 

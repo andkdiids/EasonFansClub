@@ -1,3 +1,6 @@
+import { parseMemoirAdminInput } from '@/lib/annual-memoir-admin'
+import { parseMemoirPlatformPoints, syncMemoirPlatforms } from '@/lib/annual-memoir-platform-admin'
+import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
@@ -60,7 +63,18 @@ export async function POST(request: Request) {
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
-  const normalized = normalizeActivityInput(body)
+  const annual = input.annualMemoir != null
+  const memoir = annual ? parseMemoirAdminInput(input.annualMemoir) : null
+  const points = annual ? parseMemoirPlatformPoints(input.platformPoints) : null
+  if (annual) {
+    const blocked = rejectInvalidRequestOrigin(request)
+    if (blocked) return blocked
+    if (!memoir || !points) return NextResponse.json({ message: '请检查年度活动时间和奖励配置。' }, { status: 400 })
+  }
+  const normalized = normalizeActivityInput(memoir ? {
+    ...input, type: 'TOPIC_ACTIVITY', status: 'DRAFT',
+    startsAt: memoir.previewAt.toISOString(), endsAt: memoir.endsAt.toISOString(),
+  } : body)
   if (!normalized.valid) return NextResponse.json({ message: normalized.message }, { status: 400 })
   const topicConfig = normalizeTopicActivityConfig(input, normalized.value.type)
   if (!topicConfig.valid) return NextResponse.json({ message: topicConfig.message }, { status: 400 })
@@ -78,6 +92,7 @@ export async function POST(request: Request) {
         data: {
           ...activityData,
           ...topicConfig.value,
+          ...(memoir ? { allowImageAttachments: true, pinToPlaza: input.pinToPlaza === true, participationRule: '上传分享截图，由管理员审核。' } : {}),
           publishedAt: normalized.value.status === 'PUBLISHED' ? now : null,
           createdById: guard.user.id,
           updatedById: guard.user.id,
@@ -90,6 +105,17 @@ export async function POST(request: Request) {
       if (topicConfig.value.rewardBadgeIds.length) {
         const availableBadges = await tx.badge.count({ where: { id: { in: topicConfig.value.rewardBadgeIds }, isEnabled: true, isActive: true } })
         if (availableBadges !== topicConfig.value.rewardBadgeIds.length) throw new ActivityConfigurationError('奖励勋章中包含不存在或已停用的勋章')
+      }
+      if (memoir && points) {
+        if (await tx.annualMemoirConfig.findUnique({ where: { year: 2026 }, select: { activityId: true } })) {
+          throw new ActivityConfigurationError('2026 年度活动已存在，请编辑现有活动。')
+        }
+        const badgeIds = [memoir.reservationBadgeId, memoir.annualBadgeId].filter((id): id is string => !!id)
+        if (new Set(badgeIds).size !== badgeIds.length || await tx.badge.count({ where: { id: { in: badgeIds } } }) !== badgeIds.length) {
+          throw new ActivityConfigurationError('请选择有效且不同的预约和年度勋章。')
+        }
+        await tx.annualMemoirConfig.create({ data: { ...memoir, activityId: created.id, year: 2026, enabled: false } })
+        await syncMemoirPlatforms(tx, created.id, points)
       }
       await syncActivityPostInTransaction(tx, created.id, now)
       await createAdminActionAudit(tx, {
