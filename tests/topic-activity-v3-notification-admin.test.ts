@@ -101,7 +101,7 @@ test('dangerous cascade deletion is not expanded; existing cancelled/active reje
   const schema = readFileSync('prisma/schema.prisma', 'utf8')
   assert.match(schema, /model TopicActivitySubmission \{[\s\S]*?Activity\s+Activity\s+@relation\([^\n]*onDelete: Cascade/)
   const admin = readFileSync('app/admin/activities/ActivityAdminManager.tsx', 'utf8')
-  assert.match(admin, /useState<ActivityAdminSection>\('CURRENT'\)/)
+  assert.match(admin, /useState<ActivityAdminSection>\(initialDrafts \? 'DRAFT' : 'CURRENT'\)/)
   assert.match(admin, /避免级联删除历史数据/)
   assert.match(admin, /activity.status === 'DRAFT' && activity.type !== 'TOPIC_ACTIVITY' \? <button[^\n]*kind: 'delete'/)
 })

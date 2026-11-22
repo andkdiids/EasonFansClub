@@ -8,8 +8,9 @@ let rewardCursor: string | undefined
 let noticeCursor: string | undefined
 let settlementCursor: string | undefined
 
-async function settleSnapshot(id: string, now: Date) {
+async function settleSnapshot(id: string, activityId: string, now: Date) {
   await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT activityId FROM AnnualMemoirConfig WHERE activityId = ${activityId} FOR UPDATE`
     await tx.$queryRaw`SELECT id FROM AnnualMemoirSnapshot WHERE id = ${id} FOR UPDATE`
     const row = await tx.annualMemoirSnapshot.findUnique({
       where: { id }, include: { activity: { include: { annualMemoirConfig: true } } },
@@ -62,6 +63,7 @@ export async function runAnnualMemoirMaintenance(now = new Date()) {
   const rewards = await prisma.annualMemoirReservation.findMany({
     where: {
       id: rewardCursor ? { gt: rewardCursor } : undefined,
+      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true } },
       OR: [{ points: { gt: 0 }, pointsGrantedAt: null }, { badgeId: { not: null }, badgeGrantedAt: null }],
     },
     orderBy: { id: 'asc' }, take: 25, select: { id: true },
@@ -73,7 +75,7 @@ export async function runAnnualMemoirMaintenance(now = new Date()) {
     where: {
       id: noticeCursor ? { gt: noticeCursor } : undefined,
       notifiedAt: null,
-      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, notificationAt: { lte: now }, reportOpensAt: { lte: now }, endsAt: { gt: now } } },
+      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, notificationAt: { lte: now }, reportOpensAt: { lte: now }, OR: [{ endsAt: { gt: now } }, { notificationAt: { equals: prisma.annualMemoirConfig.fields.endsAt } }] } },
     },
     orderBy: { id: 'asc' }, take: 50, select: { id: true },
   })
@@ -92,12 +94,12 @@ export async function runAnnualMemoirMaintenance(now = new Date()) {
       settledAt: null,
       activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, annualBadgeId: { not: null }, settlementAt: { lte: now }, endsAt: { lte: now } } },
     },
-    orderBy: { id: 'asc' }, take: 25, select: { id: true },
+    orderBy: { id: 'asc' }, take: 25, select: { id: true, activityId: true },
   })
   settlementCursor = snapshots.length === 25 ? snapshots.at(-1)?.id : undefined
   for (const row of snapshots) {
     try {
-      await settleSnapshot(row.id, now)
+      await settleSnapshot(row.id, row.activityId, now)
     } catch (error) {
       console.error('[annual-memoir.settlement.pending]', { id: row.id, errorName: error instanceof Error ? error.name : 'UNKNOWN' })
     }

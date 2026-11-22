@@ -7,9 +7,9 @@ export function readMemoir(activityId: string, userId: string) {
   return prisma.annualMemoirSnapshot.findFirst({ where: { activityId, userId } })
 }
 
-async function collect(tx: Prisma.TransactionClient, userId: string, start: Date, end: Date, now: Date) {
+async function collect(tx: Prisma.TransactionClient, userId: string, start: Date, end: Date) {
   const range = { gte: start, lt: end }
-  const publicPost = buildPublicPostWhere(now)
+  const publicPost = buildPublicPostWhere(end)
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { uid: true, nickname: true, createdAt: true } })
   const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, topics, verified] = await Promise.all([
     tx.checkIn.findMany({ where: { userId, checkDate: range }, select: { checkDate: true, exp: true } }),
@@ -55,7 +55,7 @@ export async function generateMemoir(activityId: string, userId: string) {
       config.activity.status === 'PUBLISHED' && !!config.activity.coverUrl &&
       !!config.annualBadgeId && config.reservationPoints >= 0
     if (!getMemoirAvailability({ configuredAndPublished, schedule: config, now, hasSnapshot: false }).canGenerate) return null
-    const payload = await collect(tx, userId, config.statisticsStartAt, config.statisticsEndAt, now)
+    const payload = await collect(tx, userId, config.statisticsStartAt, config.statisticsEndAt)
     const snapshot = await tx.annualMemoirSnapshot.create({
       data: { activityId, userId, year: config.year, templateVersion: config.templateVersion,
         statisticsStartAt: config.statisticsStartAt, statisticsEndAt: config.statisticsEndAt,

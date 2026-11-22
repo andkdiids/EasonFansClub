@@ -16,12 +16,12 @@ export function isValidMemoirSchedule(schedule: MemoirSchedule) {
     s.statisticsEndAt, s.reportOpensAt, s.notificationAt, s.endsAt, s.settlementAt]
     .every((date) => date instanceof Date && Number.isFinite(date.getTime())) &&
     s.previewAt <= s.reservationOpensAt &&
-    s.reservationOpensAt < s.reservationClosesAt &&
+    s.reservationOpensAt <= s.reservationClosesAt &&
     s.reservationClosesAt <= s.reportOpensAt &&
     s.statisticsStartAt < s.statisticsEndAt &&
     s.statisticsEndAt <= s.reportOpensAt &&
     s.reportOpensAt <= s.notificationAt &&
-    s.notificationAt < s.endsAt &&
+    s.notificationAt <= s.endsAt &&
     s.endsAt <= s.settlementAt
 }
 
@@ -40,7 +40,7 @@ export function getMemoirAvailability(input: {
     canGenerate: active && now >= schedule.reportOpensAt && !hasSnapshot,
     canViewSnapshot: hasSnapshot,
     canSubmitShare: active && hasSnapshot && now >= schedule.reportOpensAt,
-    canNotify: active && now >= schedule.notificationAt,
+    canNotify: visible && now >= schedule.notificationAt && (now < schedule.endsAt || schedule.notificationAt.getTime() === schedule.endsAt.getTime()),
     canSettle: visible && now >= schedule.settlementAt,
   }
 }
