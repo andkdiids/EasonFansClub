@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-export const memoirPrimary = 'inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-[#69354d] px-4 py-3 text-center font-bold leading-snug text-[#fff6e8] hover:bg-[#54283d] disabled:opacity-70'
+export const memoirPrimary = 'inline-flex min-h-12 w-full items-center justify-center rounded-sm bg-[#69354d] px-4 py-3 text-center font-bold leading-snug text-[#fff6e8] hover:bg-[#54283d] disabled:opacity-70'
 
 type Reservation = { points: number; badgeId: string | null; pointsGrantedAt: string | null; badgeGrantedAt: string | null }
 type Props = {
@@ -66,14 +66,14 @@ export function AnnualMemoirActions(props: Props) {
   }
 
   return <div className="min-w-0 space-y-4">
-    {!ended && !canGenerate && !hasSnapshot && serverNow < reportOpens && <p aria-label="距年度报告开放" className="font-mono text-[clamp(1.6rem,8vw,2.75rem)] font-semibold leading-none tabular-nums tracking-tight text-[#69354d]">
+    {!ended && !canGenerate && !hasSnapshot && serverNow < reportOpens && <div className="space-y-2"><p className="text-sm font-semibold">距离你的年度回忆开启，还有</p><p aria-label="距年度报告开放" className="font-mono text-[clamp(1.6rem,8vw,2.75rem)] font-semibold leading-none tabular-nums tracking-tight text-[#69354d]">
       {clockText(Math.max(0, Math.ceil((reportOpens - Math.max(serverNow, serverClock)) / 1000)))}
-    </p>}
+    </p></div>}
     {hasSnapshot || canGenerate ? <Link className={memoirPrimary} href={href + '/annual-memoir'}>{hasSnapshot ? '查看我的年度回忆' : '开启我在私家E院的年度回忆'}</Link> :
-      reservation ? <p className={'flex min-h-12 items-center justify-center rounded-xl bg-[#e9d8d9] px-3 py-2 text-center font-semibold text-[#54283d]'}>{ended ? '已预约 · 活动已结束' : '已预约 · 等待回忆开启'}</p> :
+      reservation ? <p className={'flex min-h-12 items-center justify-center rounded-sm bg-[#e9d8d9] px-3 py-2 text-center font-semibold text-[#54283d]'}>{ended ? '已预约 · 活动已结束' : '已预约 · 等待回忆开启'}</p> :
       canReserve && serverClock < reservationCloses && !confirm ? <button type="button" className={memoirPrimary} onClick={() => setConfirm(true)}>预约我在私家E院的年度回忆</button> :
       !confirm ? <p className="text-sm text-[#58434b]">{ended ? '活动已结束' : '预约已截止'}</p> : null}
-    {confirm && !reservation && <section aria-label="确认预约" className="space-y-3 rounded-xl border border-[#d9bec2] bg-[#fff8ee] p-4">
+    {confirm && !reservation && <section aria-label="确认预约" className="space-y-3 rounded-sm border border-[#d9bec2] bg-[#fff8ee] p-4">
       <h2 className="break-words font-bold">预约「{title}」</h2>
       {points > 0 && <p>预约成功可获得 {points} 挂号费。</p>}
       {badge && <p>预约勋章：{badge}</p>}
