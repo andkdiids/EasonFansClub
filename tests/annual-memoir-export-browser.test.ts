@@ -19,10 +19,10 @@ test('browser creates a ZIP with ten independently decodable full-size JPEGs', {
     })
     const titles = ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日']
     const result = await page.evaluate(async (compiled) => {
-      const module = { exports: {} as typeof import('../lib/annual-memoir-export') }
-      new Function('module', compiled)(module)
+      const bundleModule = { exports: {} as typeof import('../lib/annual-memoir-export') }
+      new Function('module', compiled)(bundleModule)
       const progress: number[] = []
-      const zip = await module.exports.renderMemoirZip({ nickname: '中文测试', uid: 747272, registered: '2026-08-19', title: '故事记录者', message: '年度寄语' }, 2026, (n) => progress.push(n))
+      const zip = await bundleModule.exports.renderMemoirZip({ nickname: '中文测试', uid: 747272, registered: '2026-08-19', title: '故事记录者', message: '年度寄语' }, 2026, (n) => progress.push(n))
       return { archive: Array.from(new Uint8Array(await zip.arrayBuffer())), progress }
     }, compiled)
     const zip = Buffer.from(result.archive)
