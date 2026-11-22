@@ -12,12 +12,12 @@ export function AnnualMemoirEntry({ entry, description }: {
   const cover = publicImageUrl(config.activity.coverUrl)
   const detail = description !== undefined
   const Heading = detail ? 'h1' : 'h2'
-  return <article className="grid min-w-0 [overflow-wrap:anywhere] border border-[#d9bdbb] bg-[#f7eddf] text-[#43253a] md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
-    <div className="relative min-w-0 bg-[radial-gradient(ellipse_at_80%_32%,#ba8996,transparent_52%),radial-gradient(ellipse_at_20%_60%,#754b6b,transparent_72%),linear-gradient(135deg,#3a233a,#69384c)] px-4 py-5 sm:px-7 md:flex md:flex-col md:justify-center">
+  return <article className="grid min-w-0 items-start [overflow-wrap:anywhere] border border-[#d9bdbb] bg-[#f7eddf] text-[#43253a] md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+    <div className="min-w-0">
       {cover ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={cover} alt="" className="mx-auto block h-auto max-h-72 w-full max-w-full rounded-sm object-contain" />
-      ) : <p className="py-10 text-center font-serif text-2xl text-[#fff1df]">{config.year} 年度回忆录</p>}
+        <img src={cover} alt={config.activity.title + '活动海报'} className="block h-auto w-full" />
+      ) : <p className="bg-[#69384c] py-10 text-center font-serif text-2xl text-[#fff1df]">{config.year} 年度回忆录</p>}
     </div>
     <div className="min-w-0 space-y-4 break-words px-4 py-5 sm:px-7 sm:py-8">
       <p className="font-semibold text-[#784b5d]">私家E院 · {config.year} 年度回忆录</p>

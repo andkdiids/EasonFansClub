@@ -31,12 +31,13 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
       <summary>预览预约确认</summary>
       <p>预约成功后，将获得本次活动的预约奖励。预约不可取消，也不能重复预约。</p>
     </details>
-    <MemoirReader activityId={activityId} year={2026} canGenerate={false} initialReport={{
-      nickname: '葡萄树下的阿晴', uid: 747272, registered: '2026-08-19', firstRecordedDay: '2026-08-20', longestCheckInRun: 6, featuredBadge: '日子有功', featuredBadgeDate: '2026-09-05',
-      featuredActivity: '葡萄树下的留言簿', featuredActivityDate: '2026-10-18',
+    <MemoirReader activityId={activityId} year={2026} canGenerate={false} preview initialReport={{
+      nickname: '葡萄树下的阿晴', uid: 747272, registered: '2026-08-19', longestCheckInRun: 6, featuredBadge: '日子有功', featuredBadgeDate: '2026-09-05',
+      communityMemory: { kind: 'POST', excerpt: '散场以后，大家一边哼着歌，一边慢慢走回地铁站。', date: '2026-10-18' },
+      bestGame: { score: 128, mode: '粤语残片' }, monthlyFirsts: 1, weeklyFirsts: 3,
       activeDays: 12, checkIns: 8, checkInExperience: 20, posts: 3, replies: 6, likesGiven: 20,
-      likesReceived: 9, friends: 2, followers: 3, games: 2, bestScore: 8, badges: 1, topics: 2,
-      verified: 1, title: '故事记录者', message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',
+      likesReceived: 9, friends: 2, badges: 1, topics: 2,
+      offlineMeetups: 1, title: '故事记录者', message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',
     }} />
   </main>
 }
