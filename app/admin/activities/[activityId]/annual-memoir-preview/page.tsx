@@ -21,7 +21,7 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
   return <main className="mx-auto max-w-xl p-4">
     <Link href="/admin/activities">返回活动管理</Link>
     <h1 className="my-3 text-xl font-bold">年度活动只读预览 · {activity.title}</h1>
-    <p>报告使用合成数据。预约、截图审核及奖励写入请在隔离测试环境验证。</p>
+    <p>只读预览使用示例数据。昵称、UID、加入日期和活动记录均为示例。</p>
     {cover && (
       // eslint-disable-next-line @next/next/no-img-element
       <img src={cover} alt={activity.title} className="my-4 max-h-56 w-full object-contain" />
@@ -32,7 +32,8 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
       <p>预约成功后，将获得本次活动的预约奖励。预约不可取消，也不能重复预约。</p>
     </details>
     <MemoirReader activityId={activityId} year={2026} canGenerate={false} initialReport={{
-      nickname: '年度回忆录预览用户', uid: 42, registered: '2026-01-01', firstRecordedDay: '',
+      nickname: '葡萄树下的阿晴', uid: 747272, registered: '2026-08-19', firstRecordedDay: '2026-08-20', longestCheckInRun: 6, featuredBadge: '日子有功', featuredBadgeDate: '2026-09-05',
+      featuredActivity: '葡萄树下的留言簿', featuredActivityDate: '2026-10-18',
       activeDays: 12, checkIns: 8, checkInExperience: 20, posts: 3, replies: 6, likesGiven: 20,
       likesReceived: 9, friends: 2, followers: 3, games: 2, bestScore: 8, badges: 1, topics: 2,
       verified: 1, title: '故事记录者', message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',

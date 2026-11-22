@@ -11,7 +11,7 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
   const range = { gte: start, lt: end }
   const publicPost = buildPublicPostWhere(end)
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { uid: true, nickname: true, createdAt: true } })
-  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, topics, verified] = await Promise.all([
+  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, featuredBadge, topics, featuredActivity, verified] = await Promise.all([
     tx.checkIn.findMany({ where: { userId, checkDate: range }, select: { checkDate: true, exp: true } }),
     tx.post.findMany({ where: { ...publicPost, authorId: userId, publishedAt: range }, select: { publishedAt: true } }),
     tx.reply.findMany({ where: { authorId: userId, createdAt: range, isDeleted: false, moderationStatus: 'NORMAL', Post: publicPost }, select: { createdAt: true } }),
@@ -21,20 +21,39 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     tx.friendFollow.count({ where: { followedId: userId, createdAt: range } }),
     tx.guessSongSession.aggregate({ where: { userId, completedAt: range, status: 'COMPLETED', isValid: true }, _count: true, _max: { score: true } }),
     tx.userBadge.count({ where: { userId, obtainedAt: range, revokedAt: null } }),
+    tx.userBadge.findFirst({ where: { userId, obtainedAt: range, revokedAt: null, isHidden: false },
+      orderBy: [{ obtainedAt: 'desc' }, { id: 'asc' }], select: { obtainedAt: true, Badge: { select: { name: true } } } }),
     tx.topicActivityParticipation.count({ where: { userId, firstApprovedAt: range, approvedSubmissionCount: { gt: 0 } } }),
+    tx.topicActivityParticipation.findFirst({
+      where: { userId, firstApprovedAt: range, approvedSubmissionCount: { gt: 0 }, Activity: { status: 'PUBLISHED' } },
+      orderBy: [{ firstApprovedAt: 'desc' }, { id: 'asc' }],
+      select: { firstApprovedAt: true, Activity: { select: { title: true } } },
+    }),
     tx.activityRegistration.count({ where: { userId, verifiedAt: range, cancelledAt: null, Activity: { type: 'OFFLINE' } } }),
   ])
   const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', dateStyle: 'short' })
   const dates = [...checkIns.map((row) => row.checkDate), ...posts.flatMap((row) => row.publishedAt ? [row.publishedAt] : []), ...replies.map((row) => row.createdAt)]
   const days = [...new Set(dates.map((date) => formatter.format(date)))].sort()
+  const checkInDays = [...new Set(checkIns.map((row) => formatter.format(row.checkDate)))].sort()
+  let run = 0
+  let longestCheckInRun = 0
+  let previous = Number.NEGATIVE_INFINITY
+  for (const day of checkInDays) {
+    const current = Date.parse(day)
+    run = current - previous === 86_400_000 ? run + 1 : 1
+    longestCheckInRun = Math.max(longestCheckInRun, run)
+    previous = current
+  }
   const title = posts.length >= 5 ? '故事记录者' : friends >= 3 ? '最佳损友' : games._count >= 5 ? '游戏冒险家' : badges >= 3 ? '勋章收藏家' : days.length ? '默默陪伴者' : '故事刚刚开始'
   return {
     nickname: user.nickname, uid: user.uid, registered: formatter.format(user.createdAt),
     firstRecordedDay: days[0] ?? null, activeDays: days.length,
-    checkIns: new Set(checkIns.map((row) => formatter.format(row.checkDate))).size,
+    checkIns: checkInDays.length, longestCheckInRun,
     checkInExperience: checkIns.reduce((sum, row) => sum + row.exp, 0),
     posts: posts.length, replies: replies.length, likesGiven, likesReceived, friends, followers,
-    games: games._count, bestScore: games._max.score, badges, topics, verified, title,
+    games: games._count, bestScore: games._max.score, badges, featuredBadge: featuredBadge?.Badge.name ?? null, featuredBadgeDate: featuredBadge ? formatter.format(featuredBadge.obtainedAt) : null,
+    topics, featuredActivity: featuredActivity?.Activity.title ?? null,
+    featuredActivityDate: featuredActivity?.firstApprovedAt ? formatter.format(featuredActivity.firstApprovedAt) : null, verified, title,
     message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',
   }
 }

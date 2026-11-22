@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import test from 'node:test'
 import { chromium } from 'playwright'
 import sharp from 'sharp'
-import ts from 'typescript'
 
 test('browser creates a ZIP with ten independently decodable full-size JPEGs', {
   skip: !process.env.MEMOIR_BROWSER_PATH && process.env.MEMOIR_BROWSER_QA !== '1',
@@ -11,18 +10,21 @@ test('browser creates a ZIP with ten independently decodable full-size JPEGs', {
   const browser = await chromium.launch({ executablePath: process.env.MEMOIR_BROWSER_PATH })
   try {
     const page = await browser.newPage()
-    const source = readFileSync('lib/annual-memoir-export.ts', 'utf8')
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-    }).outputText
-    const titles = ['初次见面', '日子有功', '有话好说', '最佳损友', '好久不见', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日']
-    const result = await page.evaluate(async ({ compiled, titles }) => {
-      const exports = {} as typeof import('../lib/annual-memoir-export')
-      new Function('exports', compiled)(exports)
+    const esbuild = createRequire(require.resolve('tsx/package.json'))('esbuild') as {
+      build(options: Record<string, unknown>): Promise<{ outputFiles: { text: string }[] }>
+    }
+    const { outputFiles: [{ text: compiled }] } = await esbuild.build({
+      entryPoints: ['lib/annual-memoir-export.ts'], bundle: true, write: false,
+      platform: 'browser', format: 'cjs', alias: { '@': process.cwd() },
+    })
+    const titles = ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日']
+    const result = await page.evaluate(async (compiled) => {
+      const module = { exports: {} as typeof import('../lib/annual-memoir-export') }
+      new Function('module', compiled)(module)
       const progress: number[] = []
-      const zip = await exports.renderMemoirZip(titles.map((title) => [title, '中文测试 · 私家E院']), 2026, (n) => progress.push(n))
+      const zip = await module.exports.renderMemoirZip({ nickname: '中文测试', uid: 747272, registered: '2026-08-19', title: '故事记录者', message: '年度寄语' }, 2026, (n) => progress.push(n))
       return { archive: Array.from(new Uint8Array(await zip.arrayBuffer())), progress }
-    }, { compiled, titles })
+    }, compiled)
     const zip = Buffer.from(result.archive)
     const end = zip.length - 22
     assert.equal(zip.readUInt32LE(end), 0x06054b50)
