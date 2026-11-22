@@ -44,7 +44,8 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     }),
     tx.activityRegistration.findMany({
       where: { userId, status: 'ACTIVE', cancelledAt: null, Activity: { type: 'OFFLINE' },
-        OR: [{ verifiedAt: range, OR: [{ checkInSource: null }, { checkInSource: { in: ['MANUAL', 'QR'] } }] },
+        OR: [{ verifiedAt: range, OR: [{ checkInSource: { in: ['MANUAL', 'QR'] } },
+          { checkInSource: null, verificationMethod: { in: ['MANUAL', 'QR'] } }] },
           { checkedInAt: range, checkInSource: { in: ['MANUAL', 'QR'] } }] },
       select: { activityId: true },
     }),
