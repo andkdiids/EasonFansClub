@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 import { chromium } from 'playwright'
@@ -17,10 +18,12 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
         import { createRoot } from 'react-dom/client'
         import { MemoirReader } from './app/activities/[activityId]/annual-memoir/MemoirReader'
         createRoot(document.getElementById('root')).render(<MemoirReader activityId="fixture-activity" year={2026}
-          canGenerate={false} initialReport={{ nickname: '想把故事留在葡萄树下的长昵称合成测试用户', uid: 747272, registered: '2026-01-01',
-            firstRecordedDay: null, activeDays: 987654321, checkIns: 8, checkInExperience: 20, posts: 3,
+          preview canGenerate={false} initialReport={{ nickname: '想把故事留在葡萄树下的长昵称合成测试用户', uid: 747272, registered: '2026-01-01',
+            communityMemory: { kind: 'POST', excerpt: '散场后我们一路哼着歌。', date: '2026-10-18' },
+            bestGame: { score: 128, mode: '粤语残片' }, monthlyFirsts: 1, weeklyFirsts: 3,
+            activeDays: 987654321, checkIns: 8, checkInExperience: 20, posts: 3,
             replies: 6, likesGiven: 20, likesReceived: 9, friends: 2, followers: 3, games: 2,
-            bestScore: 8, badges: 1, topics: 2, verified: 1, title: '故事记录者', message: '年度寄语' }} />)
+            bestScore: 8, badges: 1, topics: 2, offlineMeetups: 1, title: '故事记录者', message: '年度寄语' }} />)
       `,
     },
     bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
@@ -28,7 +31,9 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
     define: { 'process.env.NODE_ENV': '"production"' },
   })
   const browser = await chromium.launch({ executablePath: process.env.MEMOIR_BROWSER_PATH })
+  const output = process.env.MEMOIR_QA_OUTPUT
   try {
+    if (output) await mkdir(output, { recursive: true })
     for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
       const page = await browser.newPage({ viewport, acceptDownloads: true, reducedMotion: viewport.width === 390 ? 'reduce' : 'no-preference' })
       await page.setContent('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><div id="root"></div>')
@@ -64,14 +69,20 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
       const chapters = ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日']
       for (const [index, chapter] of chapters.entries()) {
         await page.getByRole('heading', { name: chapter, exact: true }).waitFor()
+        if (output && [4, 5, 7].includes(index)) {
+          await stage.locator('[data-memoir-layer="stable"]').waitFor()
+          await stage.locator('canvas').screenshot({ path: join(output, `chapter-${index + 1}-${viewport.width}.png`) })
+        }
         if (index !== 9) await next.click()
       }
+      await stage.locator('[data-memoir-layer="stable"]').waitFor()
       const [download] = await Promise.all([
         page.waitForEvent('download'),
         page.getByRole('button', { name: '保存我的年度报告' }).click(),
       ])
       assert.equal(download.suggestedFilename(), '葡萄成熟时-2026.zip')
       const archive = await readFile((await download.path())!)
+      if (output && viewport.width === 390) await writeFile(join(output, download.suggestedFilename()), archive)
       const end = archive.length - 22
       assert.equal(archive.readUInt32LE(end), 0x06054b50)
       assert.equal(archive.readUInt16LE(end + 10), chapters.length)

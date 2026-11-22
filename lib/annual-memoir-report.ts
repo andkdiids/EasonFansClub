@@ -2,16 +2,27 @@ import type { Prisma } from '@prisma/client'
 import { getMemoirAvailability } from '@/lib/annual-memoir-policy'
 import { buildPublicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
+import { collectBestGame, collectCommunityMemory, isMemoirMemoryVisible } from '@/lib/annual-memoir-moments'
 
-export function readMemoir(activityId: string, userId: string) {
-  return prisma.annualMemoirSnapshot.findFirst({ where: { activityId, userId } })
+async function presentSnapshot(snapshot: Awaited<ReturnType<typeof prisma.annualMemoirSnapshot.findFirst>>) {
+  if (!snapshot) return null
+  const payload = snapshot.payload as unknown as MemoirReport
+  if (!payload.communityMemory) return snapshot
+  const { kind, excerpt, date } = payload.communityMemory
+  const visible = await isMemoirMemoryVisible(prisma, snapshot.userId, payload.communityMemory)
+  return { ...snapshot, payload: { ...payload, communityMemory: visible ? { kind, excerpt, date } : null } }
+}
+
+export async function readMemoir(activityId: string, userId: string) {
+  return presentSnapshot(await prisma.annualMemoirSnapshot.findFirst({ where: { activityId, userId } }))
 }
 
 async function collect(tx: Prisma.TransactionClient, userId: string, start: Date, end: Date) {
   const range = { gte: start, lt: end }
   const publicPost = buildPublicPostWhere(end)
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { uid: true, nickname: true, createdAt: true } })
-  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, featuredBadge, topics, featuredActivity, verified] = await Promise.all([
+  const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', dateStyle: 'short' })
+  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, featuredBadge, topicApprovals, topicRegistrations, attendance, communityMemory, bestGame] = await Promise.all([
     tx.checkIn.findMany({ where: { userId, checkDate: range }, select: { checkDate: true, exp: true } }),
     tx.post.findMany({ where: { ...publicPost, authorId: userId, publishedAt: range }, select: { publishedAt: true } }),
     tx.reply.findMany({ where: { authorId: userId, createdAt: range, isDeleted: false, moderationStatus: 'NORMAL', Post: publicPost }, select: { createdAt: true } }),
@@ -23,15 +34,23 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     tx.userBadge.count({ where: { userId, obtainedAt: range, revokedAt: null } }),
     tx.userBadge.findFirst({ where: { userId, obtainedAt: range, revokedAt: null, isHidden: false },
       orderBy: [{ obtainedAt: 'desc' }, { id: 'asc' }], select: { obtainedAt: true, Badge: { select: { name: true } } } }),
-    tx.topicActivityParticipation.count({ where: { userId, firstApprovedAt: range, approvedSubmissionCount: { gt: 0 } } }),
-    tx.topicActivityParticipation.findFirst({
-      where: { userId, firstApprovedAt: range, approvedSubmissionCount: { gt: 0 }, Activity: { status: 'PUBLISHED' } },
-      orderBy: [{ firstApprovedAt: 'desc' }, { id: 'asc' }],
-      select: { firstApprovedAt: true, Activity: { select: { title: true } } },
+    tx.topicActivityParticipation.findMany({
+      where: { userId, firstApprovedAt: range, approvedSubmissionCount: { gt: 0 }, Activity: { type: 'TOPIC_ACTIVITY' } },
+      select: { activityId: true },
     }),
-    tx.activityRegistration.count({ where: { userId, verifiedAt: range, cancelledAt: null, Activity: { type: 'OFFLINE' } } }),
+    tx.activityRegistration.findMany({
+      where: { userId, registeredAt: range, status: 'ACTIVE', cancelledAt: null, Activity: { type: 'TOPIC_ACTIVITY' } },
+      select: { activityId: true },
+    }),
+    tx.activityRegistration.findMany({
+      where: { userId, status: 'ACTIVE', cancelledAt: null, Activity: { type: 'OFFLINE' },
+        OR: [{ verifiedAt: range, OR: [{ checkInSource: null }, { checkInSource: { in: ['MANUAL', 'QR'] } }] },
+          { checkedInAt: range, checkInSource: { in: ['MANUAL', 'QR'] } }] },
+      select: { activityId: true },
+    }),
+    collectCommunityMemory(tx, userId, range, formatter),
+    collectBestGame(tx, userId, range),
   ])
-  const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', dateStyle: 'short' })
   const dates = [...checkIns.map((row) => row.checkDate), ...posts.flatMap((row) => row.publishedAt ? [row.publishedAt] : []), ...replies.map((row) => row.createdAt)]
   const days = [...new Set(dates.map((date) => formatter.format(date)))].sort()
   const checkInDays = [...new Set(checkIns.map((row) => formatter.format(row.checkDate)))].sort()
@@ -52,8 +71,11 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     checkInExperience: checkIns.reduce((sum, row) => sum + row.exp, 0),
     posts: posts.length, replies: replies.length, likesGiven, likesReceived, friends, followers,
     games: games._count, bestScore: games._max.score, badges, featuredBadge: featuredBadge?.Badge.name ?? null, featuredBadgeDate: featuredBadge ? formatter.format(featuredBadge.obtainedAt) : null,
-    topics, featuredActivity: featuredActivity?.Activity.title ?? null,
-    featuredActivityDate: featuredActivity?.firstApprovedAt ? formatter.format(featuredActivity.firstApprovedAt) : null, verified, title,
+    communityMemory, bestGame,
+    // Live leaderboard entries are mutable and do not record official settlements.
+    monthlyFirsts: null, weeklyFirsts: null,
+    topics: new Set([...topicApprovals, ...topicRegistrations].map((row) => row.activityId)).size,
+    offlineMeetups: new Set(attendance.map((row) => row.activityId)).size, title,
     message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',
   }
 }
@@ -61,7 +83,7 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
 export type MemoirReport = Awaited<ReturnType<typeof collect>>
 
 export async function generateMemoir(activityId: string, userId: string) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT activityId FROM AnnualMemoirConfig WHERE activityId = ${activityId} FOR UPDATE`
     const config = await tx.annualMemoirConfig.findUnique({
       where: { activityId }, include: { activity: true },
@@ -83,4 +105,5 @@ export async function generateMemoir(activityId: string, userId: string) {
     if (!config.statisticsLockedAt) await tx.annualMemoirConfig.update({ where: { activityId }, data: { statisticsLockedAt: now } })
     return snapshot
   }, { timeout: 20_000 })
+  return presentSnapshot(result)
 }

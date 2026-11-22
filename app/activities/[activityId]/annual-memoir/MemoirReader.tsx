@@ -2,14 +2,13 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { MemoirReport } from '@/lib/annual-memoir-report'
-import { describeMemoirPage, drawMemoirPage, memoirChapters } from '@/lib/annual-memoir-art'
+import { describeMemoirPage, drawMemoirPage, memoirChapters, type MemoirAlbum } from '@/lib/annual-memoir-art'
 
 const duration = 520
 const finalPage = memoirChapters.length - 1
 
 function AlbumPage({ report, year, page, layer }: {
-  report: MemoirReport; year: number; page: number; layer?: 'outgoing' | 'incoming'
+  report: MemoirAlbum; year: number; page: number; layer?: 'outgoing' | 'incoming'
 }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   useLayoutEffect(() => {
@@ -23,8 +22,8 @@ function AlbumPage({ report, year, page, layer }: {
   </div>
 }
 
-export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
-  activityId: string; year: number; initialReport: MemoirReport | null; canGenerate: boolean
+export function MemoirReader({ activityId, year, initialReport, canGenerate, preview = false }: {
+  activityId: string; year: number; initialReport: MemoirAlbum | null; canGenerate: boolean; preview?: boolean
 }) {
   const [report, setReport] = useState(initialReport)
   const [page, setPage] = useState(-1)
@@ -87,8 +86,18 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
     setExportProgress(0)
     try {
       const { renderMemoirZip } = await import('@/lib/annual-memoir-export')
-      const zip = download ?? await renderMemoirZip(report, year, setExportProgress)
-      setDownload(zip)
+      let exportReport = report
+      if (!preview && report.communityMemory) {
+        const response = await fetch('/api' + url + '/annual-memoir', { cache: 'no-store' })
+        if (!response.ok) throw new Error()
+        const data = await response.json()
+        if (!data.snapshot?.payload) throw new Error()
+        exportReport = data.snapshot.payload
+        setReport(exportReport)
+      }
+      const canCache = preview || !report.communityMemory
+      const zip = (canCache && download) || await renderMemoirZip(exportReport, year, setExportProgress)
+      if (preview || !exportReport.communityMemory) setDownload(zip)
       const objectUrl = URL.createObjectURL(zip)
       const anchor = document.createElement('a')
       anchor.href = objectUrl

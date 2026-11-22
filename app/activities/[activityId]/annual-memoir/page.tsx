@@ -1,7 +1,8 @@
 import { notFound, redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { getMemoirAvailability } from '@/lib/annual-memoir-policy'
-import { readMemoir, type MemoirReport } from '@/lib/annual-memoir-report'
+import { readMemoir } from '@/lib/annual-memoir-report'
+import type { MemoirAlbum } from '@/lib/annual-memoir-art'
 import { prisma } from '@/lib/prisma'
 import { MemoirReader } from './MemoirReader'
 
@@ -23,6 +24,6 @@ export default async function Page({ params }: { params: Promise<{ activityId: s
   })
   if (!snapshot && !availability?.visible) notFound()
   return <MemoirReader activityId={activityId} year={snapshot?.year ?? config!.year}
-    initialReport={snapshot ? snapshot.payload as unknown as MemoirReport : null}
+    initialReport={snapshot ? snapshot.payload as unknown as MemoirAlbum : null}
     canGenerate={!!availability?.canGenerate} />
 }

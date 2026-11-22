@@ -1,11 +1,14 @@
 export const memoirChapters = ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日'] as const
 
 export type MemoirAlbum = {
-  nickname: string; uid: number; registered: string; firstRecordedDay?: string | null
+  nickname: string; uid: number; registered: string
+  communityMemory?: { kind: 'POST' | 'REPLY'; excerpt: string; date: string } | null
+  bestGame?: { score: number; mode: string } | null
+  monthlyFirsts?: number | null; weeklyFirsts?: number | null
   activeDays?: number; checkIns?: number; checkInExperience?: number; posts?: number; replies?: number
   likesGiven?: number; likesReceived?: number; friends?: number; games?: number; bestScore?: number | null
   badges?: number; featuredBadge?: string | null; featuredBadgeDate?: string | null; longestCheckInRun?: number
-  topics?: number; verified?: number; featuredActivity?: string | null; featuredActivityDate?: string | null; title: string; message: string
+  topics?: number; offlineMeetups?: number; title: string; message: string
 }
 
 const W = 1080
@@ -25,6 +28,11 @@ const reflections = [
   '把闪过的光，郑重收藏。', '有些时刻，是我们一起抵达的。', '用一个词，把这一年的自己留住。', '',
 ]
 const number = (value?: number | null) => Number.isFinite(value) ? new Intl.NumberFormat('zh-CN').format(value!) : '—'
+const memoryLabel = (kind: 'POST' | 'REPLY') => kind === 'POST' ? '你写下的一篇帖子' : '你留下的一条评论'
+const memoryEmpty = '有些想说的话，正等着被写下来。'
+const bestGame = (r: MemoirAlbum) => r.bestGame === undefined && typeof r.bestScore === 'number'
+  ? { score: r.bestScore, mode: '听听' }
+  : r.bestGame
 const date = (value?: string | null) => {
   const parts = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   return parts ? parts[1] + ' 年 ' + Number(parts[2]) + ' 月 ' + Number(parts[3]) + ' 日' : value || '暂无日期记录'
@@ -36,10 +44,10 @@ export function describeMemoirPage(r: MemoirAlbum, i: number): string {
     ['活跃 ' + number(r.activeDays) + ' 天', '挂号 ' + number(r.checkIns) + ' 天', number(r.checkInExperience) + ' 挂号经验', r.longestCheckInRun !== undefined ? '最长连续挂号 ' + number(r.longestCheckInRun) + ' 天' : ''],
     [number(r.posts) + ' 篇公开帖子', number(r.replies) + ' 条公开评论', '送出 ' + number(r.likesGiven) + ' 赞', '收到 ' + number(r.likesReceived) + ' 赞'],
     [number(r.friends) + ' 段新友谊'],
-    [r.firstRecordedDay ? date(r.firstRecordedDay) + '，留下年度首个社区记录。' : '有些故事，还在等待被写下。'],
-    [number(r.games) + ' 局猜歌', '最高分 ' + number(r.bestScore)],
+    [r.communityMemory ? [memoryLabel(r.communityMemory.kind), r.communityMemory.excerpt, date(r.communityMemory.date)].join('。') : memoryEmpty],
+    ['最高单局分数 ' + number(bestGame(r)?.score), bestGame(r)?.mode, '月度第一 ' + number(r.monthlyFirsts), '周度第一 ' + number(r.weeklyFirsts)],
     [number(r.badges) + ' 枚获得的勋章', r.featuredBadge, r.featuredBadgeDate && date(r.featuredBadgeDate)],
-    [number(r.topics) + ' 场获审核通过的话题活动', number(r.verified) + ' 场线下核销', r.featuredActivity, r.featuredActivityDate && date(r.featuredActivityDate)],
+    ['参与过的话题活动 ' + number(r.topics) + ' 场', '和大家线下见面 ' + number(r.offlineMeetups) + ' 次'],
     [r.title, number(r.activeDays) + ' 个活跃日'],
     [r.nickname, r.title, r.message],
   ][i].concat(reflections[i]).filter(Boolean).join('。')
@@ -161,29 +169,33 @@ export function drawMemoirPage(canvas: HTMLCanvasElement, r: MemoirAlbum, year: 
       rect(176,1110,742,380,panel,18)
       stat(r.friends,'这一年结下的新友谊',230,1340,160,630)
       break
-    case 4:
+    case 4: {
+      const memory = r.communityMemory
       title(140,359)
       c.save(); c.translate(132,533); c.rotate(-.047)
       rect(0,0,834,922,'#fff4dc',6)
-      rect(30,31,774,594,'#876071')
-      c.beginPath(); c.rect(30,31,774,594); c.clip()
-      mist(451,311,490,'#d5a791aa')
-      vine(543,302,1.23)
+      rect(29,31,776,848,'#f5e4d1',4)
+      line(88,204,720,204,gold)
+      text(memory ? memoryLabel(memory.kind) : '留给未来的一页',88,153,43,658,true)
+      lines(memory ? memory.excerpt : memoryEmpty,88,350,48,658,8,true)
+      if (memory) text(date(memory.date),88,796,38,655)
       c.restore()
-      rect(128,1187,817,283,'#fff1d9',10)
-      text(r.firstRecordedDay ? '年度首个社区记录' : '留给未来的一页',166,1274,48,750,true)
-      lines(r.firstRecordedDay ? date(r.firstRecordedDay) : '有些故事，还在等待被写下。',166,1380,54,730,2,true)
       break
-    case 5:
+    }
+    case 5: {
+      const game = bestGame(r)
       title(x0,345)
-      for(let i=0;i<8;i++) {
-        const height=[175,310,225,410,280,355,175,235][i]
-        rect(126+i*106,590+410-height,68,height,i%2?'#edc39430':'#e2a3bb43',34)
-      }
-      line(125,1020,949,1020)
-      stat(r.games,'完成猜歌局数',125,1200,145,360)
-      stat(r.bestScore,'单局最高分',552,1420,145,397)
+      rect(125,513,830,522,panel,16)
+      stat(game?.score,'最高单局分数',182,799,185,710)
+      text(game?.mode ?? '暂无有效成绩',182,965,40,710)
+      rect(125,1110,396,346,panel,14)
+      rect(555,1110,400,346,panel,14)
+      line(163,1160,480,1160,gold)
+      line(593,1160,916,1160,gold)
+      stat(r.monthlyFirsts,'月度第一',163,1330,110,320)
+      stat(r.weeklyFirsts,'周度第一',593,1330,110,320)
       break
+    }
     case 6:
       title(148,351)
       rect(154,490,772,928,panel,365)
@@ -201,10 +213,8 @@ export function drawMemoirPage(canvas: HTMLCanvasElement, r: MemoirAlbum, year: 
       rect(112,529,854,940,'#fff6e4b8',20)
       for(let x=150;x<930;x+=38) line(x,1010,x+18,1010,gold)
       ellipse(102,1010,21,21,shade); ellipse(979,1010,21,21,shade)
-      stat(r.topics,'获审核通过的话题活动',156,790,157,742)
-      stat(r.verified,'线下活动核销',156,1218,140,742)
-      if (r.featuredActivity) text(r.featuredActivity,156,1395,46,742,true)
-      if (r.featuredActivityDate) text(date(r.featuredActivityDate),156,1445,33,742)
+      stat(r.topics,'参与过的话题活动 · 场',156,790,157,742)
+      stat(r.offlineMeetups,'和大家线下见面 · 次',156,1270,140,742)
       break
     case 8:
       title(142,390)
