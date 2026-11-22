@@ -185,6 +185,7 @@ export function PostRepliesSection({
   initialTopicReviewCounts = null,
   topicAllowImageAttachments = true,
   topicPlatformTabs = [],
+  wrapTopicPlatformTabs = false,
   topicCommentTab = 'ALL',
   topicPlatformFilter,
 }: Readonly<{
@@ -208,6 +209,7 @@ export function PostRepliesSection({
   topicReviewFilter?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
   initialTopicReviewCounts?: TopicReviewCounts | null
   topicAllowImageAttachments?: boolean
+  wrapTopicPlatformTabs?: boolean
   topicPlatformTabs?: Array<{ platformKey: string; platformName: string }>
   topicCommentTab?: 'ALL' | 'DISCUSSION' | 'PLATFORM'
   topicPlatformFilter?: string
@@ -999,7 +1001,7 @@ export function PostRepliesSection({
 
   return (
     <>
-    <section id={`post-comments-${postId}`} className="post-replies-section scroll-mt-16 space-y-3">
+    <section id={`post-comments-${postId}`} className="post-replies-section min-w-0 max-w-full scroll-mt-16 space-y-3">
       {topicCommentTab !== 'PLATFORM' && currentUserId && canInteract && !replyTo ? (
         <div id={`post-primary-composer-${postId}`} data-post-primary-composer={postId}>
           {!topicRootComposerUnlocked ? (
@@ -1085,8 +1087,8 @@ export function PostRepliesSection({
       {topicActivityId && canReviewTopicActivity ? <div role="tablist" aria-label="话题活动评论审核筛选" className="flex flex-wrap gap-2">
         {([['ALL', '全部'], ['PENDING', '待审核'], ['APPROVED', '已通过'], ['REJECTED', '已拒绝'], ['WITHDRAWN', '已撤回']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={topicReviewFilter === value} onClick={() => changeTopicReviewFilter(value)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicReviewFilter === value ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{label}{topicReviewCounts ? `（${topicReviewCountForFilter(topicReviewCounts, value)}）` : ''}</button>)}
       </div> : null}
-      {topicActivityId ? <div className="overflow-x-auto pb-1">
-        <div role="tablist" aria-label="话题活动评论分区" className="flex min-w-max gap-2">
+      {topicActivityId ? <div className={wrapTopicPlatformTabs ? 'min-w-0 pb-1' : 'min-w-0 overflow-x-auto pb-1'}>
+        <div role="tablist" aria-label="话题活动评论分区" className={wrapTopicPlatformTabs ? 'flex min-w-0 flex-wrap gap-2 [&>button]:min-w-0 [&>button]:max-w-full [&>button]:break-words' : 'flex min-w-max gap-2'}>
           <button type="button" role="tab" aria-selected={topicCommentTab === 'ALL'} onClick={() => changeTopicCommentTab('ALL')} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicCommentTab === 'ALL' ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>全部</button>
           <button type="button" role="tab" aria-selected={topicCommentTab === 'DISCUSSION'} onClick={() => changeTopicCommentTab('DISCUSSION')} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicCommentTab === 'DISCUSSION' ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>活动讨论</button>
           {topicPlatformTabs.map((tab) => <button key={tab.platformKey} type="button" role="tab" aria-selected={topicCommentTab === 'PLATFORM' && topicPlatformFilter === tab.platformKey} onClick={() => changeTopicCommentTab('PLATFORM', tab.platformKey)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicCommentTab === 'PLATFORM' && topicPlatformFilter === tab.platformKey ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{tab.platformName}</button>)}

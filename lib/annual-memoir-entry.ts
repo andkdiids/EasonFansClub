@@ -29,5 +29,7 @@ export async function readMemoirEntry(activityId: string | undefined, userId?: s
       config.activity.type === 'TOPIC_ACTIVITY' && !!config.activity.coverUrl &&
       !!config.annualBadgeId && config.reservationPoints >= 0,
   })
-  return { config, reservation, hasSnapshot, state, ended: now >= config.endsAt, serverNow: now.getTime() }
+  const badgeId = reservation ? reservation.badgeId : config.reservationBadgeId
+  const badge = badgeId ? await prisma.badge.findUnique({ where: { id: badgeId }, select: { name: true } }) : null
+  return { config, reservation, hasSnapshot, state, reservationBadgeName: badge?.name ?? null, ended: now >= config.endsAt, serverNow: now.getTime() }
 }

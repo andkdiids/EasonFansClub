@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { annualMemoirPlatforms } from '@/lib/annual-memoir-platforms'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { TopicActivityImagePicker } from '@/components/activities/TopicActivityImagePicker'
 import { TopicActivityV2PollPanel, TopicActivityV2TestRunner } from '@/components/activities/TopicActivityV2Interactive'
@@ -17,8 +18,9 @@ type Payload = { program: TopicActivityV2PublicProgram | null; entries: unknown;
 const button = 'min-h-10 rounded-sm border border-[var(--border)] px-4 text-sm font-bold disabled:opacity-40'
 function statusLabel(status: string) { return ({ PENDING: '待审核', APPROVED: '已通过', REJECTED: '未通过', WITHDRAWN: '已撤回，可重新提交', GRANTED: '奖励已发放', NOT_STARTED: '尚未提交' } as Record<string, string>)[status] || '暂不可用' }
 
-export function TopicActivityV2Panel({ activityId, isAuthenticated = false, currentUserId, mode = 'activity', showComments = true }: {
+export function TopicActivityV2Panel({ activityId, isAuthenticated = false, currentUserId, mode = 'activity', showComments = true, annualMemoir }: {
   activityId: string; isAuthenticated?: boolean; currentUserId?: string; mode?: 'activity' | 'test'; showComments?: boolean
+  annualMemoir?: { canShare: boolean; hasSnapshot: boolean; ended: boolean }
 }) {
   const [payload, setPayload] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -81,7 +83,7 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
           const state = normalizeTopicActivityV2Progress(value.myProgress).find((item) => item.rewardEntryId === entryId)?.status
           const now = Date.now()
           const within = (start: string | null, end: string | null) => (!start || now >= Date.parse(start)) && (!end || now <= Date.parse(end))
-          if (!value.program?.enabled || !value.program.platformRewards.enabled || !entry || state !== 'REJECTED' || !entry.allowResubmit || value.activity.status !== 'PUBLISHED' || !within(value.activity.startsAt, value.activity.endsAt) || !within(entry.startsAt, entry.endsAt) || (entry.maxImages > 0 && !value.activity.allowImageAttachments)) return
+          if ((annualMemoir && !annualMemoir.canShare) || !value.program?.enabled || !value.program.platformRewards.enabled || !entry || state !== 'REJECTED' || !entry.allowResubmit || value.activity.status !== 'PUBLISHED' || !within(value.activity.startsAt, value.activity.endsAt) || !within(entry.startsAt, entry.endsAt) || (entry.maxImages > 0 && !value.activity.allowImageAttachments)) return
           triggerRef.current = trigger; setAssets([]); setRemark(''); setActiveEntry(entryId)
         } catch (cause) { setError(cause instanceof Error ? cause.message : '任务加载失败') }
         finally { busy.current = false; setPending(false) }
@@ -89,7 +91,7 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
     }
     window.addEventListener('topic-activity-v2-open-task', openRejectedTask)
     return () => window.removeEventListener('topic-activity-v2-open-task', openRejectedTask)
-  }, [activityId, activeEntry, base, isAuthenticated])
+  }, [activityId, activeEntry, base, isAuthenticated, annualMemoir])
   async function write(url: string, body?: unknown) {
     if (busy.current) return
     busy.current = true; setPending(true); setError(''); setMessage('')
@@ -114,27 +116,31 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
   if (error && !payload) return <div role="alert">{error}<button type="button" onClick={() => void load()} className={button}>重试</button></div>
   const program = payload?.program
   if (!payload || !program?.enabled) return null
-  const entries = normalizeTopicActivityV2Entries(payload.entries)
+  const allEntries = normalizeTopicActivityV2Entries(payload.entries)
+  const entries = annualMemoir ? annualMemoirPlatforms.flatMap(([key]) => {
+    const entry = allEntries.find((item) => item.platformKey === key && item.enabled)
+    return entry ? [entry] : []
+  }) : allEntries
   const progress = normalizeTopicActivityV2Progress(payload.myProgress)
   const active = payload.activity.status === 'PUBLISHED' && (!payload.activity.startsAt || Date.now() >= Date.parse(payload.activity.startsAt)) && (!payload.activity.endsAt || Date.now() <= Date.parse(payload.activity.endsAt))
   const selected = entries.find((entry) => entry.id === activeEntry && entry.enabled)
   const selectedProgress = progress.find((item) => item.rewardEntryId === activeEntry)
   const selectedState = selectedProgress?.status || 'NOT_STARTED'
-  const selectedCanSubmit = Boolean(program.platformRewards.enabled && selected && isAuthenticated && active && canSubmitTopicActivityV2Entry(selectedState, selected.allowResubmit) && (!selected.startsAt || Date.now() >= Date.parse(selected.startsAt)) && (!selected.endsAt || Date.now() <= Date.parse(selected.endsAt)) && (selected.maxImages === 0 || payload.activity.allowImageAttachments))
+  const selectedCanSubmit = Boolean((!annualMemoir || annualMemoir.canShare) && program.platformRewards.enabled && selected && isAuthenticated && active && canSubmitTopicActivityV2Entry(selectedState, selected.allowResubmit) && (!selected.startsAt || Date.now() >= Date.parse(selected.startsAt)) && (!selected.endsAt || Date.now() <= Date.parse(selected.endsAt)) && (selected.maxImages === 0 || payload.activity.allowImageAttachments))
   const selectedCanWithdraw = Boolean(isAuthenticated && selectedState === 'PENDING' && selectedProgress?.submissionId)
   const selectedStatusLabel = selectedState === 'GRANTED' && selectedProgress?.grantedPoints !== null && selectedProgress?.grantedPoints !== undefined ? `已获得 ${selectedProgress.grantedPoints} 挂号费` : statusLabel(selectedState)
-  return <section aria-label="活动参与与进度" className="space-y-5 border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">参与活动</h2><button type="button" onClick={() => void load()} className={button} disabled={pending}>刷新进度</button></div>
-    {program.showRules && program.materials ? <p className="whitespace-pre-wrap text-sm">{program.materials}</p> : null}
+  return <section aria-label="活动参与与进度" className={annualMemoir ? 'min-w-0 space-y-5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-6' : 'min-w-0 space-y-5 border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6'}>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">{annualMemoir ? '分享我的年度回忆' : '参与活动'}</h2><button type="button" onClick={() => void load()} className={button} disabled={pending}>刷新进度</button></div>
+    {!annualMemoir && program.showRules && program.materials ? <p className="whitespace-pre-wrap text-sm">{program.materials}</p> : null}
     {!isAuthenticated ? <p className="text-sm"><Link href="/login" className="underline">登录</Link> 后可提交任务、领取奖励和查看参与进度。</p> : null}
-    {payload.myProgress ? <section className="space-y-2 border border-[var(--border)] p-3"><h3 className="font-bold">我的参与进度</h3><p className="text-sm">已提交 {payload.myProgress.submittedCount} 次 · 已通过 {payload.myProgress.approvedCount} 次</p><p className="text-sm">固定奖励：{payload.myProgress.fixedGrantedPoints} · 平台奖励：{payload.myProgress.platformGrantedPoints} · 累计：{payload.myProgress.totalGrantedPoints} 挂号费</p><p className="text-sm">{payload.myProgress.remainingPlatformCount === null ? '平台数量不设上限' : '剩余可领奖平台数量：' + payload.myProgress.remainingPlatformCount} · 限定勋章：{payload.myProgress.medal ? '已获得' : '尚未获得'}</p></section> : null}
-    {program.fixedReward.enabled ? <section className="space-y-2 border-t border-[var(--border)] pt-4"><h3 className="font-bold">固定奖励{program.showRewards ? ' · ' + program.fixedReward.points + ' 挂号费' : ''}</h3><p className="text-sm">{program.fixedReward.description}</p><p className="text-xs text-[var(--foreground-muted)]">完成指定站内行为后独立领取；不要求完成所有平台任务。</p>{isAuthenticated ? <button type="button" className={button} disabled={pending || Boolean(payload.myProgress?.fixedGrantedPoints)} onClick={() => void write(base + '/fixed-reward')}>{pending ? '处理中…' : payload.myProgress?.fixedGrantedPoints ? '固定奖励已获得' : '领取 / 申请固定奖励'}</button> : null}</section> : null}
-    {program.medal.enabled ? <section className="space-y-2 border-t border-[var(--border)] pt-4"><h3 className="font-bold">活动限定勋章</h3><p className="text-sm">{program.medal.description}</p><p className="text-xs text-[var(--foreground-muted)]">首次符合配置的有效参与后授予；多个平台或重复测试不会重复授予。</p></section> : null}
-    {program.platformRewards.enabled ? <section className="space-y-3 border-t border-[var(--border)] pt-4"><h3 className="font-bold">参与平台</h3><p className="text-xs text-[var(--foreground-muted)]">选择平台查看要求与提交状态；相同平台的不同入口分别计算奖励资格。</p><div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">{entries.filter((entry) => entry.enabled).map((entry) => {
+    {!annualMemoir && payload.myProgress ? <section className="space-y-2 border border-[var(--border)] p-3"><h3 className="font-bold">我的参与进度</h3><p className="text-sm">已提交 {payload.myProgress.submittedCount} 次 · 已通过 {payload.myProgress.approvedCount} 次</p><p className="text-sm">固定奖励：{payload.myProgress.fixedGrantedPoints} · 平台奖励：{payload.myProgress.platformGrantedPoints} · 累计：{payload.myProgress.totalGrantedPoints} 挂号费</p><p className="text-sm">{payload.myProgress.remainingPlatformCount === null ? '平台数量不设上限' : '剩余可领奖平台数量：' + payload.myProgress.remainingPlatformCount} · 限定勋章：{payload.myProgress.medal ? '已获得' : '尚未获得'}</p></section> : null}
+    {!annualMemoir && program.fixedReward.enabled ? <section className="space-y-2 border-t border-[var(--border)] pt-4"><h3 className="font-bold">固定奖励{program.showRewards ? ' · ' + program.fixedReward.points + ' 挂号费' : ''}</h3><p className="text-sm">{program.fixedReward.description}</p><p className="text-xs text-[var(--foreground-muted)]">完成指定站内行为后独立领取；不要求完成所有平台任务。</p>{isAuthenticated ? <button type="button" className={button} disabled={pending || Boolean(payload.myProgress?.fixedGrantedPoints)} onClick={() => void write(base + '/fixed-reward')}>{pending ? '处理中…' : payload.myProgress?.fixedGrantedPoints ? '固定奖励已获得' : '领取 / 申请固定奖励'}</button> : null}</section> : null}
+    {!annualMemoir && program.medal.enabled ? <section className="space-y-2 border-t border-[var(--border)] pt-4"><h3 className="font-bold">活动限定勋章</h3><p className="text-sm">{program.medal.description}</p><p className="text-xs text-[var(--foreground-muted)]">首次符合配置的有效参与后授予；多个平台或重复测试不会重复授予。</p></section> : null}
+    {program.platformRewards.enabled ? <section className="space-y-3 border-t border-[var(--border)] pt-4"><h3 className="font-bold">{annualMemoir ? '五平台分享进度' : '参与平台'}</h3><p className="text-sm text-[var(--foreground-muted)]">{annualMemoir ? '分享你的年度回忆，上传截图后可在这里查看审核结果。' : '选择平台查看要求与提交状态；相同平台的不同入口分别计算奖励资格。'}</p><div className={annualMemoir ? 'grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2' : 'grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'}>{entries.filter((entry) => entry.enabled).map((entry) => {
       const entryProgress = progress.find((item) => item.rewardEntryId === entry.id)
       const state = entryProgress?.status || 'NOT_STARTED'
       const label = state === 'GRANTED' && entryProgress?.grantedPoints !== null && entryProgress?.grantedPoints !== undefined ? `已获得 ${entryProgress.grantedPoints} 挂号费` : statusLabel(state)
-      return <button key={entry.id} type="button" aria-haspopup="dialog" className={button + ' min-w-0 px-3 py-2 text-left sm:max-w-xs'} disabled={pending || uploading} onClick={(event) => { triggerRef.current = event.currentTarget; setActiveEntry(entry.id); setAssets([]); setRemark('') }}><span className="block break-words">{entry.platformName}</span><span className="block text-xs font-normal">{label}</span></button>
+      return <button key={entry.id} type="button" aria-haspopup="dialog" className={button + (annualMemoir ? ' min-w-0 w-full rounded-xl border-[#ddbec4] bg-[#f9eee3] px-3 py-3 text-left text-[#4d2a3e] hover:bg-[#f4e4db]' : ' min-w-0 px-3 py-2 text-left sm:max-w-xs')} disabled={pending || uploading} onClick={(event) => { triggerRef.current = event.currentTarget; setActiveEntry(entry.id); setAssets([]); setRemark('') }}><span className="block break-words">{entry.platformName}</span><span className="block text-xs font-normal">{label}</span>{annualMemoir && <span className="mt-1 block text-sm font-normal">{entry.points} 挂号费 · {state !== 'NOT_STARTED' ? '查看审核结果' : annualMemoir.canShare ? '上传截图' : '查看分享要求'}</span>}</button>
     })}</div></section> : null}
     {selected ? <dialog ref={dialogRef} aria-labelledby="platform-task-title" aria-describedby="platform-task-status" onCancel={(event) => { event.preventDefault(); closeEntry() }} onKeyDown={(event) => {
       if (event.key !== 'Tab') return
@@ -144,7 +150,7 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
       if (!first) { event.preventDefault(); return }
       if ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) { event.preventDefault(); (event.shiftKey ? last : first).focus() }
     }} onClick={(event) => { if (event.target === event.currentTarget) closeEntry() }} className="m-auto max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-lg overflow-y-auto border border-[var(--border)] bg-[var(--surface)] p-0 text-[var(--foreground)] backdrop:bg-black/50">
-      <div className="space-y-4 p-5"><div className="flex items-start justify-between gap-3"><h3 id="platform-task-title" className="text-lg font-bold">{selected.platformName} · {selected.title}</h3><button type="button" className={button} onClick={closeEntry} disabled={pending || uploading || confirmTask}>关闭</button></div>
+      <div className="space-y-4 p-5"><div className="flex items-start justify-between gap-3"><h3 id="platform-task-title" className="min-w-0 break-words text-lg font-bold">{selected.platformName}{annualMemoir || selected.title === selected.platformName ? '' : ' · ' + selected.title}</h3><button type="button" className={button + ' shrink-0'} onClick={closeEntry} disabled={pending || uploading || confirmTask}>关闭</button></div>
         <p id="platform-task-status" role="status" className="text-sm font-bold">{selectedStatusLabel}</p>
         {program.showRewards ? <p className="text-sm">任务奖励：{selected.points} 挂号费{selectedState !== 'GRANTED' ? '（审核通过后按规则发放）' : ''}</p> : null}
         <p className="whitespace-pre-wrap text-sm">{selected.instructions}</p>{selected.materialRequirement ? <p className="text-sm">素材要求：{selected.materialRequirement}</p> : null}
@@ -152,13 +158,13 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
         {selectedProgress?.commentId && payload.activity.activityPostId ? <Link href={'/posts/' + encodeURIComponent(payload.activity.activityPostId) + '?focus=' + encodeURIComponent(selectedProgress.commentId) + '#reply-' + encodeURIComponent(selectedProgress.commentId)} className="inline-block text-sm underline">查看提交</Link> : null}
         {selectedState === 'REJECTED' && selectedProgress?.rejectReason ? <p className="text-sm text-rose-700">拒绝原因：{selectedProgress.rejectReason}</p> : null}
         {selectedCanWithdraw && selectedProgress?.submissionId ? <TopicActivityV2SubmissionWithdrawButton activityId={activityId} submissionId={selectedProgress.submissionId} /> : null}
-        {selectedCanSubmit ? <form onSubmit={submitTask} className="space-y-3"><label className="block text-sm">备注<textarea className="mt-1 w-full border border-[var(--border)] bg-[var(--surface)] p-2" maxLength={2000} value={remark} disabled={pending || uploading} onChange={(event) => setRemark(event.target.value)} /></label>{selected.maxImages ? <TopicActivityImagePicker activityId={activityId} rewardEntryId={selected.id} purpose="FORM_ANSWER" assets={assets} onChange={setAssets} onUploadingChange={(value) => { uploadBusy.current = value; setUploading(value) }} maxImages={selected.maxImages} disabled={pending || confirmTask} /> : null}<button type="submit" className={button} disabled={pending || uploading || assets.length < selected.minImages}>{selectedState === 'REJECTED' ? '重新提交待审核' : '提交审核'}</button></form> : !isAuthenticated ? <Link href="/login" className="text-sm underline">登录后参与</Link> : !active ? <p className="text-xs">当前不在活动参与时间内。</p> : null}
+        {selectedCanSubmit ? <form onSubmit={submitTask} className="space-y-3"><label className="block text-sm">备注<textarea className="mt-1 w-full min-w-0 max-w-full border border-[var(--border)] bg-[var(--surface)] p-2" maxLength={2000} value={remark} disabled={pending || uploading} onChange={(event) => setRemark(event.target.value)} /></label>{selected.maxImages ? <TopicActivityImagePicker activityId={activityId} rewardEntryId={selected.id} purpose="FORM_ANSWER" assets={assets} onChange={setAssets} onUploadingChange={(value) => { uploadBusy.current = value; setUploading(value) }} maxImages={selected.maxImages} allowPaste={Boolean(annualMemoir)} disabled={pending || confirmTask} /> : null}<button type="submit" className={button} disabled={pending || uploading || assets.length < selected.minImages}>{selectedState === 'REJECTED' ? '重新提交待审核' : '提交审核'}</button></form> : annualMemoir && isAuthenticated && !annualMemoir.canShare && !annualMemoir.hasSnapshot && !annualMemoir.ended ? <p className="text-sm">生成年度回忆后，即可上传分享截图。</p> : !isAuthenticated ? <Link href="/login" className="text-sm underline">登录后参与</Link> : !active ? <p className="text-xs">当前不在活动参与时间内。</p> : null}
         {error ? <p role="alert" className="text-red-600">{error}</p> : null}
       </div>
-      <ConfirmDialog open={confirmTask} title="确认提交这条参与评论？" description="提交会在活动主帖生成一级参与评论。仅在管理员审核前撤回平台截图提交后，才可重新上传；已审核记录仍按原有重提与奖励规则处理。审核通过后按此入口的历史奖励快照发放，同入口不会重复发奖。" confirmLabel="确认提交" loading={pending} error={error} onCancel={() => { if (!busy.current) setConfirmTask(false) }} onConfirm={() => { if (activeEntry && selectedCanSubmit && !uploading && assets.length >= selected.minImages) void write(base + '/tasks', { rewardEntryId: activeEntry, assetIds: assets.map((asset) => asset.assetId), remark }) }} />
+      <ConfirmDialog open={confirmTask} title={annualMemoir ? '确认提交分享截图？' : '确认提交这条参与评论？'} description={annualMemoir ? '确认提交这份分享截图。通过审核后将收到挂号费。' : '提交会在活动主帖生成一级参与评论。仅在管理员审核前撤回平台截图提交后，才可重新上传；已审核记录仍按原有重提与奖励规则处理。审核通过后按此入口的历史奖励快照发放，同入口不会重复发奖。'} confirmLabel="确认提交" loading={pending} error={error} onCancel={() => { if (!busy.current) setConfirmTask(false) }} onConfirm={() => { if (activeEntry && selectedCanSubmit && !uploading && assets.length >= selected.minImages) void write(base + '/tasks', { rewardEntryId: activeEntry, assetIds: assets.map((asset) => asset.assetId), remark }) }} />
     </dialog> : null}
-    {program.poll.enabled ? <TopicActivityV2PollPanel activityId={activityId} isAuthenticated={isAuthenticated} /> : null}
-    {program.test.enabled ? (() => {
+    {!annualMemoir && program.poll.enabled ? <TopicActivityV2PollPanel activityId={activityId} isAuthenticated={isAuthenticated} /> : null}
+    {!annualMemoir && program.test.enabled ? (() => {
       const attempts = Array.isArray(payload.myProgress?.testAttempts) ? payload.myProgress.testAttempts : []
       const latestAttempt = attempts.find((item): item is { id: string; testId: string; configVersion: number } => Boolean(item && typeof item === 'object' && typeof (item as Record<string, unknown>).id === 'string' && (item as Record<string, unknown>).testId === program.test.id && (item as Record<string, unknown>).configVersion === program.test.version))
       const href = '/activities/' + encodeURIComponent(activityId) + '/test' + (latestAttempt ? '?attemptId=' + encodeURIComponent(latestAttempt.id) : '')
@@ -166,6 +172,6 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
       return <Link href={href} className={button + ' inline-flex items-center'}>{label}</Link>
     })() : null}
     {error ? <p role="alert" className="text-red-600">{error}</p> : null}{message ? <p role="status" className="text-sm">{message}</p> : null}
-    {showComments && payload.activity.activityPostId && (program.discussionEnabled || program.platformRewards.enabled) ? <TopicActivityV2Comments postId={payload.activity.activityPostId} postAuthorId={payload.activity.postAuthorId || ''} activityId={activityId} currentUserId={currentUserId} allowDiscussion={program.discussionEnabled} platformTabs={Array.from(new Map(entries.filter((entry) => entry.enabled).map((entry) => [entry.platformKey, { platformKey: entry.platformKey, platformName: entry.platformName }])).values())} /> : null}
+    {showComments && payload.activity.activityPostId && (program.discussionEnabled || program.platformRewards.enabled) ? <TopicActivityV2Comments postId={payload.activity.activityPostId} postAuthorId={payload.activity.postAuthorId || ''} activityId={activityId} currentUserId={currentUserId} allowDiscussion={program.discussionEnabled} wrapPlatformTabs={Boolean(annualMemoir)} platformTabs={Array.from(new Map(entries.filter((entry) => entry.enabled).map((entry) => [entry.platformKey, { platformKey: entry.platformKey, platformName: entry.platformName }])).values())} /> : null}
   </section>
 }

@@ -13,7 +13,7 @@ test('the homepage and activity detail use the same activity-backed entry', () =
 })
 
 test('reservation confirmation uses the existing confirmed POST contract', () => {
-  const source = readFileSync('components/activities/AnnualMemoirReserve.tsx', 'utf8')
+  const source = readFileSync('components/activities/AnnualMemoirActions.tsx', 'utf8')
   assert.match(source, /确认预约/)
   assert.match(source, /method: 'POST'.*confirmed: true/)
   assert.match(source, /router.refresh\(\)/)
