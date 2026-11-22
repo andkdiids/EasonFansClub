@@ -19,7 +19,7 @@ type ActivityNotificationDb = PrismaClient | Prisma.TransactionClient
 
 export class ActivityNotificationError extends Error {
   constructor(
-    readonly code: 'ACTIVITY_NOT_FOUND' | 'INVALID_INPUT' | 'NO_RECIPIENTS' | 'IDEMPOTENCY_KEY_REUSED',
+    readonly code: 'ACTIVITY_NOT_FOUND' | 'ACTIVITY_NOT_ACTIVE' | 'INVALID_INPUT' | 'NO_RECIPIENTS' | 'IDEMPOTENCY_KEY_REUSED',
     message: string,
     readonly status: number,
   ) {
@@ -183,8 +183,12 @@ export async function sendActivityTargetedNotification(input: {
   if (!activityIdPattern.test(activityId)) throw new ActivityNotificationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
 
   const execute = () => prisma.$transaction(async (tx) => {
-    const activity = await tx.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, status: true } })
+    await tx.$queryRaw`SELECT id FROM Activity WHERE id = ${activityId} FOR UPDATE`
+    const activity = await tx.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, status: true,
+      annualMemoirConfig: { select: { enabled: true, publishedYear: true } } } })
     if (!activity) throw new ActivityNotificationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
+    if (activity.annualMemoirConfig && (activity.status !== 'PUBLISHED' || !activity.annualMemoirConfig.enabled ||
+      activity.annualMemoirConfig.publishedYear === null)) throw new ActivityNotificationError('ACTIVITY_NOT_ACTIVE', '年度活动未正式生效，不能发送通知', 409)
 
     const existing = await tx.activityNotificationBatch.findUnique({ where: { idempotencyKey: normalized.idempotencyKey }, select: batchViewSelect })
     if (existing) {

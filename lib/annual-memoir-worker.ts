@@ -10,13 +10,14 @@ let settlementCursor: string | undefined
 
 async function settleSnapshot(id: string, activityId: string, now: Date) {
   await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM Activity WHERE id = ${activityId} FOR UPDATE`
     await tx.$queryRaw`SELECT activityId FROM AnnualMemoirConfig WHERE activityId = ${activityId} FOR UPDATE`
     await tx.$queryRaw`SELECT id FROM AnnualMemoirSnapshot WHERE id = ${id} FOR UPDATE`
     const row = await tx.annualMemoirSnapshot.findUnique({
       where: { id }, include: { activity: { include: { annualMemoirConfig: true } } },
     })
     const config = row?.activity.annualMemoirConfig
-    if (!row || row.settledAt || !config?.enabled || !config.annualBadgeId ||
+    if (!row || row.settledAt || !config?.enabled || config.publishedYear !== config.year || !config.annualBadgeId ||
       row.activity.type !== 'TOPIC_ACTIVITY' || row.activity.status !== 'PUBLISHED' ||
       config.settlementAt < config.endsAt || now < config.settlementAt ||
       row.createdAt < config.reportOpensAt || row.createdAt >= config.endsAt) return
@@ -30,15 +31,16 @@ async function settleSnapshot(id: string, activityId: string, now: Date) {
   })
 }
 
-async function notifyReservation(id: string, now: Date) {
+async function notifyReservation(id: string, activityId: string, now: Date) {
   await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM Activity WHERE id = ${activityId} FOR UPDATE`
     await tx.$queryRaw`SELECT id FROM AnnualMemoirReservation WHERE id = ${id} FOR UPDATE`
     const row = await tx.annualMemoirReservation.findUnique({
       where: { id }, include: { activity: { include: { annualMemoirConfig: true } } },
     })
     const config = row?.activity.annualMemoirConfig
     if (!row || row.notifiedAt || !config) return
-    const configuredAndPublished = config.enabled && row.activity.status === 'PUBLISHED' &&
+    const configuredAndPublished = config.enabled && config.publishedYear === config.year && row.activity.status === 'PUBLISHED' &&
       row.activity.type === 'TOPIC_ACTIVITY' && !!row.activity.coverUrl &&
       !!config.annualBadgeId
     if (!getMemoirAvailability({ schedule: config, now, hasSnapshot: false, configuredAndPublished }).canNotify) return
@@ -63,7 +65,7 @@ export async function runAnnualMemoirMaintenance(now = new Date()) {
   const rewards = await prisma.annualMemoirReservation.findMany({
     where: {
       id: rewardCursor ? { gt: rewardCursor } : undefined,
-      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true } },
+      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, publishedYear: { not: null } } },
       OR: [{ points: { gt: 0 }, pointsGrantedAt: null }, { badgeId: { not: null }, badgeGrantedAt: null }],
     },
     orderBy: { id: 'asc' }, take: 25, select: { id: true },
@@ -75,14 +77,14 @@ export async function runAnnualMemoirMaintenance(now = new Date()) {
     where: {
       id: noticeCursor ? { gt: noticeCursor } : undefined,
       notifiedAt: null,
-      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, notificationAt: { lte: now }, reportOpensAt: { lte: now }, OR: [{ endsAt: { gt: now } }, { notificationAt: { equals: prisma.annualMemoirConfig.fields.endsAt } }] } },
+      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, publishedYear: { not: null }, notificationAt: { lte: now }, reportOpensAt: { lte: now }, OR: [{ endsAt: { gt: now } }, { notificationAt: { equals: prisma.annualMemoirConfig.fields.endsAt } }] } },
     },
-    orderBy: { id: 'asc' }, take: 50, select: { id: true },
+    orderBy: { id: 'asc' }, take: 50, select: { id: true, activityId: true },
   })
   noticeCursor = notices.length === 50 ? notices.at(-1)?.id : undefined
   for (const row of notices) {
     try {
-      await notifyReservation(row.id, now)
+      await notifyReservation(row.id, row.activityId, now)
     } catch (error) {
       console.error('[annual-memoir.notice.pending]', { id: row.id, errorName: error instanceof Error ? error.name : 'UNKNOWN' })
     }
@@ -92,7 +94,7 @@ export async function runAnnualMemoirMaintenance(now = new Date()) {
     where: {
       id: settlementCursor ? { gt: settlementCursor } : undefined,
       settledAt: null,
-      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, annualBadgeId: { not: null }, settlementAt: { lte: now }, endsAt: { lte: now } } },
+      activity: { status: 'PUBLISHED', annualMemoirConfig: { enabled: true, publishedYear: { not: null }, annualBadgeId: { not: null }, settlementAt: { lte: now }, endsAt: { lte: now } } },
     },
     orderBy: { id: 'asc' }, take: 25, select: { id: true, activityId: true },
   })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { memoirTimeFields, validateMemoirAdminInput } from '../lib/annual-memoir-admin'
+import { memoirTimeFields, parseMemoirYear, validateMemoirAdminInput } from '../lib/annual-memoir-admin'
 import { getMemoirAvailability } from '../lib/annual-memoir-policy'
 
 const input = {
@@ -43,4 +43,15 @@ test('invalid time input names the first bad field and ignores obsolete derived 
   assert.equal(result.field, 'reportOpensAt')
   assert.deepEqual(validateMemoirAdminInput({ ...input, reservationPoints: 0, statisticsEndAt: '2026-12-30T01:00' }),
     validateMemoirAdminInput({ ...input, reservationPoints: 0 }))
+})
+
+test('draft creation accepts an explicit year and retains the 2026 default for existing clients', () => {
+  assert.equal(parseMemoirYear(input), 2026)
+  assert.equal(parseMemoirYear({ year: 2027 }), 2027)
+  for (const year of [null, '2027', 2027.5, 999, 10000]) assert.equal(parseMemoirYear({ year }), null)
+  const schedule = Object.fromEntries(Object.entries(input).map(([key, value]) =>
+    [key, typeof value === 'string' ? value.replace('2026-', '2027-') : value]))
+  const result = validateMemoirAdminInput(schedule, 2027)
+  assert.ok(result.ok)
+  assert.equal(result.data.statisticsStartAt.toISOString(), '2026-12-31T16:00:00.000Z')
 })

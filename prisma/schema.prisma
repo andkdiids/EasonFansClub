@@ -47,7 +47,8 @@ model Achievement {
 
 model AnnualMemoirConfig {
   activityId String @id
-  year Int @unique
+  year Int
+  publishedYear Int? @unique
   enabled Boolean @default(false)
   showInActivityCenter Boolean @default(true)
   previewAt DateTime
@@ -65,6 +66,7 @@ model AnnualMemoirConfig {
   templateVersion Int @default(1)
   statisticsLockedAt DateTime?
   activity Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  @@index([year])
 }
 
 model AnnualMemoirReservation {

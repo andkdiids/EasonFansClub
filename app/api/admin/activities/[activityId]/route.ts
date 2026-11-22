@@ -213,6 +213,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       // an unrelated legacy lottery schedule that would otherwise prevent a
       // normal activity edit.
       if (normalized.value.status !== 'CANCELLED') await assertLotterySchedulesFitActivityEnd(tx, activityId, normalized.value.endsAt)
+      const memoir = await tx.annualMemoirConfig.findUnique({ where: { activityId }, select: { year: true, publishedYear: true } })
+      if (memoir) {
+        if (normalized.value.type !== 'TOPIC_ACTIVITY') throw new ActivityConfigurationError('年度活动必须保留年度活动类型。')
+        const publishedYear = normalized.value.status === 'PUBLISHED' ? memoir.year : null
+        if (memoir.publishedYear !== publishedYear && normalized.value.status !== 'CANCELLED') {
+          try {
+            // MySQL enforces the same unique slot for competing activity IDs.
+            await tx.annualMemoirConfig.update({ where: { activityId }, data: { publishedYear } })
+          } catch (error) {
+            if (publishedYear !== null && error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+              throw new ActivityRegistrationError('ANNUAL_MEMOIR_ALREADY_PUBLISHED', `${publishedYear} 年度回忆录已有正式活动，请先处理现有活动。`, 409)
+            }
+            throw error
+          }
+        }
+      }
       const updated = await tx.activity.update({
         where: { id: activityId },
         data: {
