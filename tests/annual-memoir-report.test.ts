@@ -20,9 +20,10 @@ test('report route derives owner from the session and requires a separate confir
   assert.match(api, /confirmed !== true/)
 })
 
-test('reader displays the ten named chapters and uses retained follow records for page five', () => {
-  const reader = read('app/activities/[activityId]/annual-memoir/MemoirReader.tsx')
-  for (const chapter of ['初次见面', '日子有功', '有话好说', '最佳损友', '好久不见', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日']) assert.ok(reader.includes(chapter))
-  assert.match(reader, /好久不见.*report.followers/)
+test('reader displays the ten named chapters and uses the frozen first recorded day for page five', () => {
+  const reader = read('lib/annual-memoir-art.ts')
+  for (const chapter of ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日']) assert.ok(reader.includes(chapter))
+  assert.match(reader, /firstRecordedDay/)
+  assert.doesNotMatch(reader, /好久不见|followers/)
   assert.doesNotMatch(read('lib/annual-memoir-report.ts'), /listening|playCount/i)
 })

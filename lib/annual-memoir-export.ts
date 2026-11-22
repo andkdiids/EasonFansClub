@@ -1,3 +1,5 @@
+import { drawMemoirPage, memoirChapters, type MemoirAlbum } from '@/lib/annual-memoir-art'
+
 const encoder = new TextEncoder()
 
 export function makeMemoirZip(files: { name: string; bytes: Uint8Array<ArrayBuffer> }[]) {
@@ -41,46 +43,14 @@ export function makeMemoirZip(files: { name: string; bytes: Uint8Array<ArrayBuff
   return new Blob([...entries, ...directory, end.buffer], { type: 'application/zip' })
 }
 
-export async function renderMemoirZip(chapters: string[][], year: number, onProgress: (count: number) => void) {
-  if (chapters.length !== 10) throw new Error('MEMOIR_INCOMPLETE')
+export async function renderMemoirZip(report: MemoirAlbum, year: number, onProgress: (count: number) => void) {
   await document.fonts.ready
   const canvas = document.createElement('canvas')
-  canvas.width = 1080
-  canvas.height = 1920
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('CANVAS_UNAVAILABLE')
   try {
     const files = []
-    for (const [index, [title, ...lines]] of chapters.entries()) {
+    for (const [index, title] of memoirChapters.entries()) {
       const number = String(index + 1).padStart(2, '0')
-      ctx.fillStyle = index % 2 ? '#50243f' : '#fff1dc'
-      ctx.fillRect(0, 0, 1080, 1920)
-      ctx.strokeStyle = '#c4a374'
-      ctx.lineWidth = 3
-      ctx.strokeRect(54, 54, 972, 1812)
-      ctx.fillStyle = index % 2 ? '#fff1dc' : '#4a243e'
-      const font = '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif'
-      ctx.font = `36px ${font}`
-      ctx.fillText(`葡萄成熟时 · ${year} · ${number}`, 112, 250)
-      ctx.font = `bold 100px ${font}`
-      ctx.fillText(title, 112, 570, 856)
-      ctx.font = `52px ${font}`
-      let y = 755
-      for (const line of lines) {
-        let row = ''
-        for (const character of Array.from(line)) {
-          if (row && ctx.measureText(row + character).width > 856) {
-            if (y > 1760) throw new Error('MEMOIR_TEXT_OVERFLOW')
-            ctx.fillText(row, 112, y)
-            y += 80
-            row = ''
-          }
-          row += character
-        }
-        if (y > 1760) throw new Error('MEMOIR_TEXT_OVERFLOW')
-        ctx.fillText(row, 112, y)
-        y += 112
-      }
+      drawMemoirPage(canvas, report, year, index)
       const jpg = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
         (blob) => blob?.type === 'image/jpeg' ? resolve(blob) : reject(new Error('JPEG_UNAVAILABLE')),
         'image/jpeg', 0.94,
