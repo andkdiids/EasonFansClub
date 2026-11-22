@@ -145,8 +145,8 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
       {page === finalPage && <button className="rounded bg-[#4a243e] px-4 py-3 text-[#fff1dc]" type="button" disabled={previous !== null || exportProgress !== null} onClick={save}>
         {exportProgress === null ? '保存我的年度报告' : '正在导出 ' + exportProgress + ' / 10'}
       </button>}
-    </> : report ? <button className="rounded bg-[#4a243e] px-4 py-3 text-[#fff1dc]" type="button" onClick={() => setPage(0)}>查看我的年度报告</button>
-      : canGenerate ? <button type="button" disabled={busy} onClick={generate}>{busy ? '正在生成…' : '生成我的' + year + '年度报告'}</button>
+    </> : report ? <button className="rounded bg-[#4a243e] px-4 py-3 text-[#fff1dc]" type="button" onClick={() => setPage(0)}>查看我的年度回忆</button>
+      : canGenerate ? <button type="button" disabled={busy} onClick={generate}>{busy ? '正在生成…' : '开启我在私家E院的年度回忆'}</button>
         : <p>当前不在年度报告生成时段。</p>}
     {error && <p role="alert">{error}</p>}
     <Link href={url} className="mt-4 block underline">返回活动详情</Link>

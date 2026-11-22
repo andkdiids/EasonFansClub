@@ -10,7 +10,7 @@ type Reply = ReplyProps['initialReplies'][number] & { replies?: Reply[] }
 type ResponseBody = { replies: Reply[]; pinned: Reply | null; total: number; page: number; pageSize: number; totalPages: number; hasMore: boolean;
   topicActivity: { canReview?: boolean; allowImageAttachments?: boolean; reviewCounts?: ReplyProps['initialTopicReviewCounts'] } | null }
 
-export function TopicActivityV2Comments({ postId, postAuthorId, activityId, currentUserId, allowDiscussion, platformTabs = [] }: { postId: string; postAuthorId: string; activityId: string; currentUserId?: string; allowDiscussion: boolean; platformTabs?: Array<{ platformKey: string; platformName: string }> }) {
+export function TopicActivityV2Comments({ postId, postAuthorId, activityId, currentUserId, allowDiscussion, platformTabs = [], wrapPlatformTabs = false }: { postId: string; postAuthorId: string; activityId: string; currentUserId?: string; allowDiscussion: boolean; wrapPlatformTabs?: boolean; platformTabs?: Array<{ platformKey: string; platformName: string }> }) {
   const params = useSearchParams()
   const sort = parsePostReplySort(params.get('sort')), direction = parsePostReplyDirection(params.get('direction'), params.get('sort'))
   const page = Math.max(1, Math.trunc(Number(params.get('commentPage') || params.get('page')) || 1))
@@ -43,10 +43,10 @@ export function TopicActivityV2Comments({ postId, postAuthorId, activityId, curr
   if (!value) return <div role={error ? 'alert' : 'status'}>{error || '正在加载活动主帖评论…'}{error ? <button type="button" onClick={() => void load()} className="ml-3 underline">重试</button> : null}</div>
   const roots = [...(value.pinned ? [value.pinned] : []), ...value.replies]
   const replies = [...new Map(roots.flatMap((reply) => [reply, ...(reply.replies || [])]).map((reply) => [reply.id, reply])).values()]
-  return <div className="border-t border-[var(--border)] pt-4">{error ? <p role="alert">{error}<button type="button" onClick={() => void load()}>重试</button></p> : null}<PostRepliesSection key={version} postId={postId} postAuthorId={postAuthorId} initialReplies={replies} initialReplyCount={value.total}
+  return <div className="min-w-0 max-w-full border-t border-[var(--border)] pt-4">{error ? <p role="alert">{error}<button type="button" onClick={() => void load()}>重试</button></p> : null}<PostRepliesSection key={version} postId={postId} postAuthorId={postAuthorId} initialReplies={replies} initialReplyCount={value.total}
     currentUserId={currentUserId} canInteract={allowDiscussion} canManageReplies={false} sort={sort} direction={direction}
     pagination={{ page: value.page, pageSize: value.pageSize, total: value.total, totalPages: value.totalPages }}
     topicActivityId={activityId} topicActivityV2Enabled canReviewTopicActivity={Boolean(value.topicActivity?.canReview)} initialTopicReviewCounts={value.topicActivity?.reviewCounts}
-    topicCommentTab={tab} topicPlatformFilter={platform} topicPlatformTabs={platformTabs}
+    wrapTopicPlatformTabs={wrapPlatformTabs} topicCommentTab={tab} topicPlatformFilter={platform} topicPlatformTabs={platformTabs}
     topicReviewFilter={status} topicAllowImageAttachments={value.topicActivity?.allowImageAttachments !== false} /></div>
 }

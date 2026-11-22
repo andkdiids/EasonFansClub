@@ -33,7 +33,7 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
       const page = await browser.newPage({ viewport, acceptDownloads: true, reducedMotion: viewport.width === 390 ? 'reduce' : 'no-preference' })
       await page.setContent('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><div id="root"></div>')
       await page.addScriptTag({ content: bundle.outputFiles[0].text })
-      await page.getByRole('button', { name: '查看我的年度报告' }).click()
+      await page.getByRole('button', { name: '查看我的年度回忆' }).click()
       const stage = page.getByRole('region', { name: '年度报告画册' })
       const next = page.getByRole('button', { name: '下一页' })
       await page.keyboard.press('ArrowRight')

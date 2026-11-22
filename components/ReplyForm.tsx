@@ -168,7 +168,7 @@ export function ReplyForm({
   }
 
   return (
-    <form onSubmit={submitReply} className={`post-reply-form rounded-xl border p-5 shadow-sm ${className}`}>
+    <form onSubmit={submitReply} className={`post-reply-form min-w-0 max-w-full rounded-xl border p-3 sm:p-5 shadow-sm ${className}`}>
       {replyTo ? (
         <div className="post-reply-form-target mb-3 flex items-center justify-between rounded-xl px-4 py-2 text-sm font-black text-brand-700">
           <span>正在回复 {replyTo.name}</span>
@@ -199,8 +199,8 @@ export function ReplyForm({
       </label>
       {allowImageAttachments ? <div className="mt-3"><ContentImageUploader ref={imageUploaderRef} value={imageUrls} onChange={setImageUrls} onUploadStateChange={setImageUploadState} /></div> : imageUrls.length ? <button type="button" onClick={() => setImageUrls([])}>移除已选择的图片</button> : null}
       {imageUploadState.blocked ? <p role="status" className="mt-2 text-sm font-bold text-amber-700">{imageUploadState.failedCount > 0 ? '图片上传失败，请重试或删除失败图片后再发布。' : '图片尚未上传完成。'}</p> : null}
-      <div className="relative mt-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="relative mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
@@ -213,7 +213,7 @@ export function ReplyForm({
           </button>
           <ReplyLengthCounter value={content} />
         </div>
-        <button type="submit" disabled={isSubmitting || isOverLimit || imageUploadState.blocked} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
+        <button type="submit" disabled={isSubmitting || isOverLimit || imageUploadState.blocked} className="max-w-full shrink-0 whitespace-normal rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : imageUploadState.failedCount > 0 ? '请处理失败图片' : imageUploadState.blocked ? '图片处理中…' : '发布回复'}
         </button>
         <StickerPicker
