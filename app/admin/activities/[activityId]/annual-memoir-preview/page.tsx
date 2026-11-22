@@ -5,6 +5,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { previewMemoirBadges } from '@/lib/annual-memoir-badge-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +18,7 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
     select: { title: true, description: true, coverUrl: true },
   })
   if (!activity) notFound()
+  const badgeCollage = await previewMemoirBadges(prisma)
   const cover = publicImageUrl(activity.coverUrl)
   return <main className="mx-auto max-w-xl p-4">
     <Link href="/admin/activities">返回活动管理</Link>
@@ -32,11 +34,11 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
       <p>预约成功后，将获得本次活动的预约奖励。预约不可取消，也不能重复预约。</p>
     </details>
     <MemoirReader activityId={activityId} year={2026} canGenerate={false} preview initialReport={{
-      nickname: '葡萄树下的阿晴', uid: 747272, registered: '2026-08-19', longestCheckInRun: 6, featuredBadge: '日子有功', featuredBadgeDate: '2026-09-05',
+      nickname: '葡萄树下的阿晴', uid: 747272, registered: '2026-08-19', longestCheckInRun: 6, badgeCollage,
       communityMemory: { kind: 'POST', excerpt: '散场以后，大家一边哼着歌，一边慢慢走回地铁站。', date: '2026-10-18' },
       bestGame: { score: 128, mode: '粤语残片' }, monthlyFirsts: 1, weeklyFirsts: 3,
       activeDays: 12, checkIns: 8, checkInExperience: 20, posts: 3, replies: 6, likesGiven: 20,
-      likesReceived: 9, friends: 2, badges: 1, topics: 2,
+      likesReceived: 9, friends: 2, badges: badgeCollage.length, topics: 2,
       offlineMeetups: 1, title: '故事记录者', message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',
     }} />
   </main>

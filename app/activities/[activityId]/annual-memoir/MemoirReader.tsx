@@ -3,17 +3,19 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { describeMemoirPage, drawMemoirPage, memoirChapters, type MemoirAlbum } from '@/lib/annual-memoir-art'
+import { loadMemoirBadges } from '@/lib/annual-memoir-badges'
 
 const duration = 520
 const finalPage = memoirChapters.length - 1
 
-function AlbumPage({ report, year, page, layer }: {
+function AlbumPage({ report, year, page, layer, badgeImages }: {
   report: MemoirAlbum; year: number; page: number; layer?: 'outgoing' | 'incoming'
+  badgeImages?: ReadonlyMap<string, HTMLImageElement>
 }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   useLayoutEffect(() => {
-    if (canvas.current) drawMemoirPage(canvas.current, report, year, page)
-  }, [report, year, page])
+    if (canvas.current) drawMemoirPage(canvas.current, report, year, page, badgeImages)
+  }, [report, year, page, badgeImages])
   return <div data-memoir-layer={layer ?? 'stable'} aria-hidden={layer === 'outgoing' || undefined}
     className="absolute inset-0" style={{ pointerEvents: layer === 'outgoing' ? 'none' : undefined }}>
     <h2 className="sr-only">{memoirChapters[page]}</h2>
@@ -35,6 +37,20 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate, pre
   const exporting = useRef(false)
   const [exportProgress, setExportProgress] = useState<number | null>(null)
   const [download, setDownload] = useState<Blob | null>(null)
+  const preparedBadges = useRef<{ key: string; promise: ReturnType<typeof loadMemoirBadges> } | null>(null)
+  const [badgeImages, setBadgeImages] = useState<ReadonlyMap<string, HTMLImageElement>>()
+  const prepareBadges = useCallback((badges: MemoirAlbum['badgeCollage']) => {
+    const key = JSON.stringify(badges?.map(({ imageUrl }) => imageUrl) ?? [])
+    if (preparedBadges.current?.key !== key) preparedBadges.current = { key, promise: loadMemoirBadges(badges) }
+    return preparedBadges.current.promise
+  }, [])
+  const collage = report?.badgeCollage
+  useEffect(() => {
+    if (!collage?.length) return
+    let current = true
+    void prepareBadges(collage).then((images) => { if (current) setBadgeImages(images) })
+    return () => { current = false }
+  }, [collage, prepareBadges])
   const url = '/activities/' + encodeURIComponent(activityId)
   const move = useCallback((offset: number) => {
     if (timer.current !== null || page < 0) return
@@ -87,7 +103,7 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate, pre
     try {
       const { renderMemoirZip } = await import('@/lib/annual-memoir-export')
       let exportReport = report
-      if (!preview && report.communityMemory) {
+      if (!preview && (report.communityMemory || report.badgeCollage?.length)) {
         const response = await fetch('/api' + url + '/annual-memoir', { cache: 'no-store' })
         if (!response.ok) throw new Error()
         const data = await response.json()
@@ -95,9 +111,9 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate, pre
         exportReport = data.snapshot.payload
         setReport(exportReport)
       }
-      const canCache = preview || !report.communityMemory
-      const zip = (canCache && download) || await renderMemoirZip(exportReport, year, setExportProgress)
-      if (preview || !exportReport.communityMemory) setDownload(zip)
+      const canCache = preview || (!report.communityMemory && !report.badgeCollage?.length)
+      const zip = (canCache && download) || await renderMemoirZip(exportReport, year, setExportProgress, prepareBadges(exportReport.badgeCollage))
+      if (preview || (!exportReport.communityMemory && !exportReport.badgeCollage?.length)) setDownload(zip)
       const objectUrl = URL.createObjectURL(zip)
       const anchor = document.createElement('a')
       anchor.href = objectUrl
@@ -143,8 +159,8 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate, pre
           const dx = end.clientX - start.x
           if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(end.clientY - start.y)) move(dx < 0 ? 1 : -1)
         }}>
-        {previous !== null && <AlbumPage key={previous} report={report} year={year} page={previous} layer="outgoing" />}
-        <AlbumPage key={page} report={report} year={year} page={page} layer={previous === null ? undefined : 'incoming'} />
+        {previous !== null && <AlbumPage key={previous} report={report} year={year} page={previous} badgeImages={badgeImages} layer="outgoing" />}
+        <AlbumPage key={page} report={report} year={year} page={page} badgeImages={badgeImages} layer={previous === null ? undefined : 'incoming'} />
       </section>
       <nav aria-label="报告翻页" className="my-4 flex items-center justify-between gap-3">
         <button type="button" className="min-h-11 shrink-0 whitespace-nowrap px-2 disabled:opacity-50" disabled={page === 0 || previous !== null} onClick={() => move(-1)}>上一页</button>
