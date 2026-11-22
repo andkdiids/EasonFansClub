@@ -339,3 +339,22 @@ test('points helper rejects invalid/overflow balances and does not replay prior 
   await assert.rejects(grantTopicActivityPointsInTransaction(f.tx, { ...input, businessKey: 'overflow' }), /BALANCE_LIMIT/)
   assert.equal(f.state.logs.length, 1); assert.notEqual(topicV2EntryGrantKey('a:b', 'c', 'u'), topicV2EntryGrantKey('a', 'b:c', 'u'))
 })
+
+test('annual share requires an activity-owned report and an open sharing window', async () => {
+  const f = fixture()
+  const config = { year: 2026, enabled: true, reportOpensAt: instant, endsAt: new Date(instant.getTime() + 60_000) }
+  let snapshot: { activityId: string } | null = null
+  f.tx.annualMemoirConfig.findUnique = async () => config
+  f.tx.annualMemoirSnapshot = { findUnique: async () => snapshot }
+  const submit = (now = instant) => submitTopicActivityV2Task({ activityId: f.activity.id, userId: 'user-one', rewardEntryId: 'weibo', now })
+  await f.run(async () => {
+    await assert.rejects(submit(), { code: 'ANNUAL_MEMOIR_SHARE_UNAVAILABLE' })
+    snapshot = { activityId: 'other-activity' }
+    await assert.rejects(submit(), { code: 'ANNUAL_MEMOIR_SHARE_UNAVAILABLE' })
+    snapshot = { activityId: f.activity.id }
+    await assert.rejects(submit(new Date(instant.getTime() - 1)), { code: 'ANNUAL_MEMOIR_SHARE_UNAVAILABLE' })
+    await assert.rejects(submit(config.endsAt), { code: 'ANNUAL_MEMOIR_SHARE_UNAVAILABLE' })
+    await assert.rejects(submit(), { code: 'ANNUAL_MEMOIR_SCREENSHOT_REQUIRED' })
+    assert.equal(f.state.submissions.length, 0)
+  })
+})

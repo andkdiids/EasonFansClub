@@ -8391,6 +8391,11 @@ body:has(.duel-page) .app-page-content {
   }
 }
 
+/* Shape shared controls only inside the annual feature. */
+[data-memoir-detail] :where(article, section, button, dialog, input, textarea, select, [role="dialog"], a[class*="rounded"], [class*="rounded"]:not(img)) {
+  border-radius: 2px !important;
+}
+
 /* Keep the floating chat launcher clear of the annual feature's mobile actions. */
 @media (max-width: 767px) {
   body:has([data-memoir-detail]) .friend-dock:not([data-friend-dock-open='true']) > :is(.friend-dock-actions, .friend-dock-toggle) {

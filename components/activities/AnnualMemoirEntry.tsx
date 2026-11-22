@@ -16,7 +16,7 @@ export function AnnualMemoirEntry({ entry, description }: {
     <div className="relative min-w-0 bg-[radial-gradient(ellipse_at_80%_32%,#ba8996,transparent_52%),radial-gradient(ellipse_at_20%_60%,#754b6b,transparent_72%),linear-gradient(135deg,#3a233a,#69384c)] px-4 py-5 sm:px-7 md:flex md:flex-col md:justify-center">
       {cover ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={cover} alt="" className="mx-auto block h-auto max-h-72 w-full max-w-full rounded-lg object-contain" />
+        <img src={cover} alt="" className="mx-auto block h-auto max-h-72 w-full max-w-full rounded-sm object-contain" />
       ) : <p className="py-10 text-center font-serif text-2xl text-[#fff1df]">{config.year} 年度回忆录</p>}
     </div>
     <div className="min-w-0 space-y-4 break-words px-4 py-5 sm:px-7 sm:py-8">
