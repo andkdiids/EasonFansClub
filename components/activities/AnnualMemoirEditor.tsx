@@ -10,11 +10,12 @@ import { ActivityImageUploader, uploadActivityImage, type ActivityImageSelection
 type Schedule = Record<keyof typeof memoirTimeFields, string>
 type Config = Schedule & { enabled: boolean; reservationPoints: number; reservationBadgeId: string | null; annualBadgeId: string | null; showInActivityCenter: boolean; statisticsLockedAt: string | null }
 type Outstanding = { id: string; user: { uid: number } }
+type Stats = { reservations: number; reports: number; notified: number; settled: number; medals: number; points: number }
 type Props = { activity?: ActivityView; badges: { id: string; name: string }[]; onSaved: (id: string, activity?: ActivityView) => void }
 
 export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
   const url = activity ? '/api/admin/activities/' + encodeURIComponent(activity.id) + '/annual-memoir' : '/api/admin/activities'
-  const [loaded, setLoaded] = useState<{ config: Config; platformPoints: number[]; outstanding: Outstanding[] } | null>(null)
+  const [loaded, setLoaded] = useState<{ config: Config; platformPoints: number[]; outstanding: Outstanding[]; stats: Stats } | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [image, setImage] = useState<ActivityImageSelection | null>(null)
@@ -108,7 +109,7 @@ export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
       <label className="block font-bold">年度限定勋章<select className={fieldClass} name="annualBadgeId" defaultValue={config?.annualBadgeId ?? ''}>
         <option value="">请选择</option>{badges.map((badge) => <option key={badge.id} value={badge.id}>{badge.name}</option>)}
       </select></label>
-      <div className="grid gap-2 rounded border border-[var(--border)] p-4" aria-label="五平台分享奖励">
+      <div className="grid scroll-mt-24 gap-2 rounded border border-[var(--border)] p-4" aria-label="五平台分享奖励">
         <h4 className="font-bold">五平台分享奖励（挂号费）</h4>
         {annualMemoirPlatforms.map(([key, label], i) => <label key={key}>{label}
           <input name={'points-' + key} className={fieldClass} type="number" min="1" defaultValue={loaded?.platformPoints[i] ?? 74} />
@@ -120,6 +121,7 @@ export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
         if (fields) void save(fields)
       }}>{busy ? '保存中…' : activity ? '保存年度活动' : '创建并保存年度活动草稿'}</button>
     </fieldset>}
+    {loaded && <p>预约 {loaded.stats.reservations} 人 · 已发挂号费 {loaded.stats.points} · 预约勋章 {loaded.stats.medals} 人 · 通知 {loaded.stats.notified} 人 · 已生成报告 {loaded.stats.reports} 份 · 年度勋章 {loaded.stats.settled} 人</p>}
     {loaded?.outstanding.map((row) => <p key={row.id}>UID {row.user.uid} 有预约奖励待发 <button type="button" disabled={busy} onClick={() => void retryReward(row.id)}>补发未到账奖励</button></p>)}
   </section>
 }

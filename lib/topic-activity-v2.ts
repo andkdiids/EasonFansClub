@@ -711,10 +711,10 @@ export async function dispatchDueTopicActivityV2Rewards(input: { now?: Date; bat
 }
 
 export async function getTopicActivityV2View(activityId: string, userId?: string | null, isAdmin = false) {
-  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, allowImageAttachments: true, activityPostId: true, topicProgram: true, ActivityPost: { select: { authorId: true } } } })
+  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, allowImageAttachments: true, activityPostId: true, topicProgram: true, annualMemoirConfig: { select: { enabled: true, previewAt: true } }, ActivityPost: { select: { authorId: true } } } })
   if (!activity || activity.type !== 'TOPIC_ACTIVITY' || (!isAdmin && !['PUBLISHED', 'CANCELLED'].includes(activity.status))) fail('TOPIC_V2_ACTIVITY_NOT_FOUND', '活动不存在', 404)
   const program = readTopicActivityV2Program(activity.topicProgram)
-  const memoir = await prisma.annualMemoirConfig.findUnique({ where: { activityId }, select: { enabled: true, previewAt: true } })
+  const memoir = activity.annualMemoirConfig
   if (memoir && !isAdmin && (!memoir.enabled || new Date() < memoir.previewAt)) fail('TOPIC_V2_ACTIVITY_NOT_FOUND', '活动不存在', 404)
   const visible = isAdmin ? program || createDefaultTopicActivityV2Program() : program?.enabled ? program : null
   const entries = visible?.entries.filter((entry) =>
