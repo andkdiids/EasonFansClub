@@ -1,4 +1,4 @@
-import { parseMemoirAdminInput } from '@/lib/annual-memoir-admin'
+import { validateMemoirAdminInput } from '@/lib/annual-memoir-admin'
 import { parseMemoirPlatformPoints, syncMemoirPlatforms } from '@/lib/annual-memoir-platform-admin'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 import { revalidatePath } from 'next/cache'
@@ -64,12 +64,16 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
   const annual = input.annualMemoir != null
-  const memoir = annual ? parseMemoirAdminInput(input.annualMemoir) : null
+  const schedule = annual ? validateMemoirAdminInput(input.annualMemoir) : null
+  const memoir = schedule?.ok ? schedule.data : null
   const points = annual ? parseMemoirPlatformPoints(input.platformPoints) : null
   if (annual) {
     const blocked = rejectInvalidRequestOrigin(request)
     if (blocked) return blocked
-    if (!memoir || !points) return NextResponse.json({ message: '请检查年度活动时间和奖励配置。' }, { status: 400 })
+    if (schedule && !schedule.ok) return NextResponse.json({ message: schedule.message, field: schedule.field }, { status: 400 })
+    if (!points) return NextResponse.json({ message: '请检查五个平台的奖励金额。', field: 'points-weibo' }, { status: 400 })
+    const existing = await prisma.annualMemoirConfig.findUnique({ where: { year: 2026 }, select: { activityId: true } })
+    if (existing) return NextResponse.json({ message: '2026 年年度活动已存在，请打开已有活动继续编辑。', activityId: existing.activityId }, { status: 409 })
   }
   const normalized = normalizeActivityInput(memoir ? {
     ...input, type: 'TOPIC_ACTIVITY', status: 'DRAFT',
@@ -149,6 +153,10 @@ export async function POST(request: Request) {
     revalidatePath('/')
     return NextResponse.json({ activity: serializeActivityRow(activity, new Date(), true) }, { status: 201 })
   } catch (error) {
+    if (memoir) {
+      const existing = await prisma.annualMemoirConfig.findUnique({ where: { year: 2026 }, select: { activityId: true } }).catch(() => null)
+      if (existing) return NextResponse.json({ message: '2026 年年度活动已存在，请打开已有活动继续编辑。', activityId: existing.activityId }, { status: 409 })
+    }
     if (error instanceof ActivityConfigurationError || error instanceof ActivityMaterialConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
     console.error('[admin.activities.create]', error instanceof Error ? error.message : error)
     return NextResponse.json({ message: '创建活动失败，请稍后重试' }, { status: 500 })

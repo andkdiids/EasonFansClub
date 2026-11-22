@@ -6,13 +6,16 @@ import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
-export default async function AdminActivitiesPage() {
+export default async function AdminActivitiesPage({ searchParams }: { searchParams: Promise<{ drafts?: string }> }) {
   await requireAdminPage('/admin/activities', 'activity_manage')
-  const activities = await prisma.activity.findMany({
+  const select = { ...activitySelect, annualMemoirConfig: { select: { activityId: true } } } as const
+  const regular = await prisma.activity.findMany({
     orderBy: [{ status: 'asc' }, { isPinned: 'desc' }, { sortOrder: 'asc' }, { startsAt: 'asc' }, { createdAt: 'desc' }],
     take: 200,
-    select: { ...activitySelect, annualMemoirConfig: { select: { activityId: true } } },
+    select,
   })
+  const annual = await prisma.activity.findMany({ where: { annualMemoirConfig: { isNot: null }, id: { notIn: regular.map(({ id }) => id) } }, select })
+  const activities = [...annual, ...regular]
   return (
     <main className="mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
       <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-8">
@@ -20,7 +23,7 @@ export default async function AdminActivitiesPage() {
         <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 dark:text-slate-300">创建、编辑、预览、发布和取消活动。活动结束状态根据时间动态计算，不需要定时任务；已取消活动会保留历史页面。</p>
         <Link href="/admin/activities/lottery-records" className="mt-4 inline-flex min-h-10 items-center rounded-full border border-sky-200 px-4 py-2 text-sm font-black text-brand-700">查看话题活动开奖记录</Link>
       </section>
-      <ActivityAdminManager initialAnnualIds={activities.filter((activity) => activity.annualMemoirConfig).map((activity) => activity.id)} initialActivities={activities.map((activity) => serializeActivityRow(activity, new Date(), true))} />
+      <ActivityAdminManager initialDrafts={(await searchParams).drafts === '1'} initialAnnualIds={activities.filter((activity) => activity.annualMemoirConfig).map((activity) => activity.id)} initialActivities={activities.map((activity) => serializeActivityRow(activity, new Date(), true))} />
     </main>
   )
 }

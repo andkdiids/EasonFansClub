@@ -9,7 +9,7 @@ export function AnnualMemoirEntry({ entry, detail = false }: {
   const { config, reservation, state, hasSnapshot, ended } = entry
   if (!state.visible && !hasSnapshot) return null
   const href = `/activities/${encodeURIComponent(config.activityId)}`
-  const label = hasSnapshot ? '查看我的年度报告' : state.canGenerate ? '生成我的年度报告' :
+  const label = hasSnapshot ? '查看我的年度报告' : state.canGenerate ? '生成我的' + config.year + '年度报告' :
     ended ? '活动已结束' : reservation ? '已预约成功' : state.canReserve ? '预约我的年度回忆录' : '敬请期待'
   const cover = publicImageUrl(config.activity.coverUrl)
   return <section className="my-4 border border-[#c4a374] bg-[#4a243e] p-4 text-[#fff1dc]">

@@ -94,7 +94,7 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
         {exportProgress === null ? '保存我的年度报告' : `正在导出 ${exportProgress} / 10`}
       </button>}
     </> : report ? <button type="button" onClick={() => setPage(0)}>查看我的年度报告</button>
-      : canGenerate ? <button type="button" disabled={busy} onClick={generate}>{busy ? '正在生成…' : '生成我的年度报告'}</button>
+      : canGenerate ? <button type="button" disabled={busy} onClick={generate}>{busy ? '正在生成…' : '生成我的' + year + '年度报告'}</button>
         : <p>当前不在年度报告生成时段。</p>}
     {error && <p role="alert">{error}</p>}
     <Link href={url} className="mt-4 block underline">返回活动详情</Link>
