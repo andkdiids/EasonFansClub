@@ -138,9 +138,9 @@ export function MemoirReader({ activityId, year, initialReport, canGenerate }: {
         <AlbumPage key={page} report={report} year={year} page={page} layer={previous === null ? undefined : 'incoming'} />
       </section>
       <nav aria-label="报告翻页" className="my-4 flex items-center justify-between gap-3">
-        <button type="button" className="min-h-11 px-2 disabled:opacity-50" disabled={page === 0 || previous !== null} onClick={() => move(-1)}>上一页</button>
-        <progress aria-label="阅读进度" value={page + 1} max={10} /><span>{page + 1} / 10</span>
-        <button type="button" className="min-h-11 px-2 disabled:opacity-50" disabled={page === finalPage || previous !== null} onClick={() => move(1)}>下一页</button>
+        <button type="button" className="min-h-11 shrink-0 whitespace-nowrap px-2 disabled:opacity-50" disabled={page === 0 || previous !== null} onClick={() => move(-1)}>上一页</button>
+        <progress className="h-1.5 min-w-0 flex-1 accent-[#805169]" aria-label="阅读进度" value={page + 1} max={10} /><span className="shrink-0 whitespace-nowrap text-sm tabular-nums">{page + 1} / 10</span>
+        <button type="button" className="min-h-11 shrink-0 whitespace-nowrap px-2 disabled:opacity-50" disabled={page === finalPage || previous !== null} onClick={() => move(1)}>下一页</button>
       </nav>
       {page === finalPage && <button className="rounded bg-[#4a243e] px-4 py-3 text-[#fff1dc]" type="button" disabled={previous !== null || exportProgress !== null} onClick={save}>
         {exportProgress === null ? '保存我的年度报告' : '正在导出 ' + exportProgress + ' / 10'}
