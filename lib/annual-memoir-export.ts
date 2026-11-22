@@ -1,4 +1,5 @@
 import { drawMemoirPage, memoirChapters, type MemoirAlbum } from '@/lib/annual-memoir-art'
+import { loadMemoirBadges } from '@/lib/annual-memoir-badges'
 
 const encoder = new TextEncoder()
 
@@ -43,14 +44,14 @@ export function makeMemoirZip(files: { name: string; bytes: Uint8Array<ArrayBuff
   return new Blob([...entries, ...directory, end.buffer], { type: 'application/zip' })
 }
 
-export async function renderMemoirZip(report: MemoirAlbum, year: number, onProgress: (count: number) => void) {
-  await document.fonts.ready
+export async function renderMemoirZip(report: MemoirAlbum, year: number, onProgress: (count: number) => void, prepared?: Promise<ReadonlyMap<string, HTMLImageElement>>) {
+  const [badgeImages] = await Promise.all([prepared ?? loadMemoirBadges(report.badgeCollage), document.fonts.ready])
   const canvas = document.createElement('canvas')
   try {
     const files = []
     for (const [index, title] of memoirChapters.entries()) {
       const number = String(index + 1).padStart(2, '0')
-      drawMemoirPage(canvas, report, year, index)
+      drawMemoirPage(canvas, report, year, index, badgeImages)
       const jpg = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
         (blob) => blob?.type === 'image/jpeg' ? resolve(blob) : reject(new Error('JPEG_UNAVAILABLE')),
         'image/jpeg', 0.94,

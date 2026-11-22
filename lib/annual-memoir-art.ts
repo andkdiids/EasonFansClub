@@ -1,3 +1,5 @@
+import type { MemoirBadge } from '@/lib/annual-memoir-badges'
+
 export const memoirChapters = ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日'] as const
 
 export type MemoirAlbum = {
@@ -7,7 +9,7 @@ export type MemoirAlbum = {
   monthlyFirsts?: number | null; weeklyFirsts?: number | null
   activeDays?: number; checkIns?: number; checkInExperience?: number; posts?: number; replies?: number
   likesGiven?: number; likesReceived?: number; friends?: number; games?: number; bestScore?: number | null
-  badges?: number; featuredBadge?: string | null; featuredBadgeDate?: string | null; longestCheckInRun?: number
+  badges?: number; badgeCollage?: MemoirBadge[]; longestCheckInRun?: number
   topics?: number; offlineMeetups?: number; title: string; message: string
 }
 
@@ -46,14 +48,14 @@ export function describeMemoirPage(r: MemoirAlbum, i: number): string {
     [number(r.friends) + ' 段新友谊'],
     [r.communityMemory ? [memoryLabel(r.communityMemory.kind), r.communityMemory.excerpt, date(r.communityMemory.date)].join('。') : memoryEmpty],
     ['最高单局分数 ' + number(bestGame(r)?.score), bestGame(r)?.mode, '月度第一 ' + number(r.monthlyFirsts), '周度第一 ' + number(r.weeklyFirsts)],
-    [number(r.badges) + ' 枚获得的勋章', r.featuredBadge, r.featuredBadgeDate && date(r.featuredBadgeDate)],
+    [number(r.badges) + ' 枚获得的勋章', ...(r.badgeCollage ?? []).map(({ name }) => name)],
     ['参与过的话题活动 ' + number(r.topics) + ' 场', '和大家线下见面 ' + number(r.offlineMeetups) + ' 次'],
     [r.title, number(r.activeDays) + ' 个活跃日'],
     [r.nickname, r.title, r.message],
   ][i].concat(reflections[i]).filter(Boolean).join('。')
 }
 
-export function drawMemoirPage(canvas: HTMLCanvasElement, r: MemoirAlbum, year: number, page: number) {
+export function drawMemoirPage(canvas: HTMLCanvasElement, r: MemoirAlbum, year: number, page: number, badgeImages?: ReadonlyMap<string, HTMLImageElement>) {
   canvas.width = W
   canvas.height = H
   const c = canvas.getContext('2d')
@@ -114,6 +116,17 @@ export function drawMemoirPage(canvas: HTMLCanvasElement, r: MemoirAlbum, year: 
   const title = (x = x0, y = 370, size = 105) => text(memoirChapters[page],x,y,size,920-x,true)
   const stat = (value: number | null | undefined, label: string, x: number, y: number, size = 150, width = 760) => {
     text(number(value),x,y,size,width,true); text(label,x,y+76,43,width)
+  }
+  const ticketStat = (value: number | undefined, unit: string, label: string, y: number) => {
+    const digits = number(value)
+    c.font = '600 157px ' + serif
+    const measured = c.measureText(digits).width
+    const size = measured > 630 ? Math.floor(157 * 630 / measured) : 157
+    c.font = '600 ' + size + 'px ' + serif
+    const width = c.measureText(digits).width
+    text(digits,156,y,size,630,true)
+    if (value !== undefined) text(unit,156+width+22,y,57,70,true)
+    text(label,156,y+78,43,742)
   }
   const vine = (x: number,y: number,scale: number) => {
     c.save(); c.translate(x,y); c.scale(scale,scale)
@@ -196,25 +209,45 @@ export function drawMemoirPage(canvas: HTMLCanvasElement, r: MemoirAlbum, year: 
       stat(r.weeklyFirsts,'周度第一',593,1330,110,320)
       break
     }
-    case 6:
+    case 6: {
       title(148,351)
-      rect(154,490,772,928,panel,365)
-      for(const radius of [270,234,184]) ellipse(540,936,radius,radius,gold+'88',true)
-      ellipse(540,936,156,156,'#aa76574a')
-      ellipse(540,936,96,96,'#ebc49276')
-      line(270,1270,813,1270)
-      if (r.featuredBadge) text(r.featuredBadge,238,1213,46,620,true)
-      if (r.featuredBadgeDate) text(date(r.featuredBadgeDate),238,1259,32,620)
-      stat(r.badges,'这一年获得的勋章',207,1505,143,635)
+      rect(130,496,820,830,panel,16)
+      c.strokeStyle = gold + '74'; c.strokeRect(148,514,784,794)
+      const badges = r.badgeCollage ?? []
+      if (!badges.length) {
+        ellipse(540,852,214,214,gold+'52',true)
+        ellipse(540,852,179,179,gold+'52',true)
+        vine(542,863,.48)
+        text(r.badges ? '把这一年的光留在这里' : '下一束光，留待相逢',300,1150,45,490,true)
+      }
+      for (const badge of badges) {
+        const image = badgeImages?.get(badge.imageUrl)
+        c.save()
+        c.translate(badge.x, badge.y)
+        c.rotate(badge.angle * Math.PI / 180)
+        if (image) {
+          const scale = badge.size / Math.max(image.naturalWidth, image.naturalHeight)
+          const width = image.naturalWidth * scale
+          const height = image.naturalHeight * scale
+          c.shadowColor = '#54304040'; c.shadowBlur = 18; c.shadowOffsetY = 9
+          c.drawImage(image, -width / 2, -height / 2, width, height)
+        } else {
+          rect(-badge.size / 2,-42,badge.size,84,'#f9ead2',8)
+          text(badge.name, -badge.size / 2 + 18, 12, 31, badge.size - 36,true)
+        }
+        c.restore()
+      }
+      stat(r.badges,'这一年获得的勋章',207,1518,143,635)
       break
+    }
     case 7:
       title(x0,345)
       rect(94,510,891,981,panel,28)
       rect(112,529,854,940,'#fff6e4b8',20)
       for(let x=150;x<930;x+=38) line(x,1010,x+18,1010,gold)
       ellipse(102,1010,21,21,shade); ellipse(979,1010,21,21,shade)
-      stat(r.topics,'参与过的话题活动 · 场',156,790,157,742)
-      stat(r.offlineMeetups,'和大家线下见面 · 次',156,1270,140,742)
+      ticketStat(r.topics,'场','参与过的话题活动',790)
+      ticketStat(r.offlineMeetups,'次','和大家线下见面',1270)
       break
     case 8:
       title(142,390)

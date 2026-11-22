@@ -3,14 +3,18 @@ import { getMemoirAvailability } from '@/lib/annual-memoir-policy'
 import { buildPublicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { collectBestGame, collectCommunityMemory, isMemoirMemoryVisible } from '@/lib/annual-memoir-moments'
+import { collectMemoirBadges, visibleMemoirBadges } from '@/lib/annual-memoir-badge-data'
 
 async function presentSnapshot(snapshot: Awaited<ReturnType<typeof prisma.annualMemoirSnapshot.findFirst>>) {
   if (!snapshot) return null
   const payload = snapshot.payload as unknown as MemoirReport
-  if (!payload.communityMemory) return snapshot
-  const { kind, excerpt, date } = payload.communityMemory
-  const visible = await isMemoirMemoryVisible(prisma, snapshot.userId, payload.communityMemory)
-  return { ...snapshot, payload: { ...payload, communityMemory: visible ? { kind, excerpt, date } : null } }
+  const memory = payload.communityMemory
+  const [visible, badgeCollage] = await Promise.all([
+    memory && isMemoirMemoryVisible(prisma, snapshot.userId, memory),
+    visibleMemoirBadges(prisma, snapshot.userId, payload.badgeCollage ?? []),
+  ])
+  return { ...snapshot, payload: { ...payload, badgeCollage, featuredBadge: null, featuredBadgeDate: null,
+    communityMemory: memory && visible ? { kind: memory.kind, excerpt: memory.excerpt, date: memory.date } : null } }
 }
 
 export async function readMemoir(activityId: string, userId: string) {
@@ -22,7 +26,7 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
   const publicPost = buildPublicPostWhere(end)
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { uid: true, nickname: true, createdAt: true } })
   const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', dateStyle: 'short' })
-  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, featuredBadge, topicApprovals, topicRegistrations, attendance, communityMemory, bestGame] = await Promise.all([
+  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, badgeCollage, topicApprovals, topicRegistrations, attendance, communityMemory, bestGame] = await Promise.all([
     tx.checkIn.findMany({ where: { userId, checkDate: range }, select: { checkDate: true, exp: true } }),
     tx.post.findMany({ where: { ...publicPost, authorId: userId, publishedAt: range }, select: { publishedAt: true } }),
     tx.reply.findMany({ where: { authorId: userId, createdAt: range, isDeleted: false, moderationStatus: 'NORMAL', Post: publicPost }, select: { createdAt: true } }),
@@ -32,8 +36,7 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     tx.friendFollow.count({ where: { followedId: userId, createdAt: range } }),
     tx.guessSongSession.aggregate({ where: { userId, completedAt: range, status: 'COMPLETED', isValid: true }, _count: true, _max: { score: true } }),
     tx.userBadge.count({ where: { userId, obtainedAt: range, revokedAt: null } }),
-    tx.userBadge.findFirst({ where: { userId, obtainedAt: range, revokedAt: null, isHidden: false },
-      orderBy: [{ obtainedAt: 'desc' }, { id: 'asc' }], select: { obtainedAt: true, Badge: { select: { name: true } } } }),
+    collectMemoirBadges(tx, userId, range),
     tx.topicActivityParticipation.findMany({
       where: { userId, firstApprovedAt: range, approvedSubmissionCount: { gt: 0 }, Activity: { type: 'TOPIC_ACTIVITY' } },
       select: { activityId: true },
@@ -71,7 +74,7 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     checkIns: checkInDays.length, longestCheckInRun,
     checkInExperience: checkIns.reduce((sum, row) => sum + row.exp, 0),
     posts: posts.length, replies: replies.length, likesGiven, likesReceived, friends, followers,
-    games: games._count, bestScore: games._max.score, badges, featuredBadge: featuredBadge?.Badge.name ?? null, featuredBadgeDate: featuredBadge ? formatter.format(featuredBadge.obtainedAt) : null,
+    games: games._count, bestScore: games._max.score, badges, badgeCollage,
     communityMemory, bestGame,
     // Live leaderboard entries are mutable and do not record official settlements.
     monthlyFirsts: null, weeklyFirsts: null,
