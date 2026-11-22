@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(params.get('pageSize') || '24', 10) || 24))
 
   const rows = await prisma.activity.findMany({
-    where: { status: { in: publicDatabaseStatuses }, ...visibleMemoirActivities(new Date()) },
+    where: { status: { in: publicDatabaseStatuses }, ...visibleMemoirActivities(new Date(), true) },
     orderBy: [{ isPinned: 'desc' }, { sortOrder: 'asc' }, { startsAt: 'asc' }, { createdAt: 'desc' }],
     take: 300,
     select: activitySelect,

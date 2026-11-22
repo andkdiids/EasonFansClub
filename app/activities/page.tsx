@@ -28,7 +28,7 @@ function concertBackgroundImage(value: unknown) {
 
 export default async function ActivitiesPage() {
   const [publishedActivities, config, user] = await Promise.all([
-    prisma.activity.findMany({ where: { status: 'PUBLISHED', ...visibleMemoirActivities(new Date()) }, orderBy: { createdAt: 'desc' }, take: 100, select: activitySelect }),
+    prisma.activity.findMany({ where: { status: 'PUBLISHED', ...visibleMemoirActivities(new Date(), true) }, orderBy: { createdAt: 'desc' }, take: 100, select: activitySelect }),
     getSiteAppearance(),
     getCurrentUser(),
   ])

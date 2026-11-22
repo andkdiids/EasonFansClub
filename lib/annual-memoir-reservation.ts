@@ -25,7 +25,7 @@ export async function reserveMemoir(activityId: string, userId: string) {
     const now = new Date()
     const configuredAndPublished = config.enabled && config.activity.type === 'TOPIC_ACTIVITY' &&
       config.activity.status === 'PUBLISHED' && !!config.activity.coverUrl &&
-      !!config.annualBadgeId && !!config.reservationBadgeId && config.reservationPoints >= 0
+      !!config.annualBadgeId && config.reservationPoints >= 0
     if (!getMemoirAvailability({ schedule: config, now, hasSnapshot: false, configuredAndPublished }).canReserve) return null
     const reservation = await tx.annualMemoirReservation.create({
       data: { activityId, userId, createdAt: now, points: config.reservationPoints, badgeId: config.reservationBadgeId },

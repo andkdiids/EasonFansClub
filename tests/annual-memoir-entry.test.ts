@@ -8,7 +8,7 @@ test('the homepage and activity detail use the same activity-backed entry', () =
   assert.match(read('app/activities/[activityId]/page.tsx'), /readMemoirEntry\(activityId, viewer\?\.id\)/)
   assert.match(read('components/activities/AnnualMemoirEntry.tsx'), /encodeURIComponent\(config.activityId\)/)
   for (const file of ['app/activities/page.tsx', 'app/api/activities/route.ts', 'app/api/forum/discover/route.ts']) {
-    assert.match(read(file), /visibleMemoirActivities\(new Date\(\)\)/)
+    assert.match(read(file), /visibleMemoirActivities\(new Date\(\)(?:, true)?\)/)
   }
 })
 

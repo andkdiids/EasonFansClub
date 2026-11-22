@@ -39,7 +39,7 @@ async function notifyReservation(id: string, now: Date) {
     if (!row || row.notifiedAt || !config) return
     const configuredAndPublished = config.enabled && row.activity.status === 'PUBLISHED' &&
       row.activity.type === 'TOPIC_ACTIVITY' && !!row.activity.coverUrl &&
-      !!config.reservationBadgeId && !!config.annualBadgeId
+      !!config.annualBadgeId
     if (!getMemoirAvailability({ schedule: config, now, hasSnapshot: false, configuredAndPublished }).canNotify) return
     const key = `annual-memoir-open:${row.activityId}`
     await upsertNotificationWithDb(tx, {

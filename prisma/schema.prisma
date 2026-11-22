@@ -49,6 +49,7 @@ model AnnualMemoirConfig {
   activityId String @id
   year Int @unique
   enabled Boolean @default(false)
+  showInActivityCenter Boolean @default(true)
   previewAt DateTime
   reservationOpensAt DateTime
   reservationClosesAt DateTime

@@ -1,3 +1,4 @@
+import { annualMemoirPlatforms, isAnnualMemoirPlatform } from '@/lib/annual-memoir-platforms'
 import { createHash } from 'node:crypto'
 import { Prisma, type Activity, type TopicActivityRewardGrant } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -163,6 +164,9 @@ async function grantPoints(tx: Prisma.TransactionClient, activity: Pick<Activity
   if (!grant.points || grant.points <= 0) fail('TOPIC_V2_REWARD_INVALID', '奖励金额无效')
   const platform = grant.origin === 'PLATFORM' ? platformKey(grant.rewardSnapshot) : null
   const memoir = platform && await tx.annualMemoirConfig.findUnique({ where: { activityId: activity.id }, select: { activityId: true } })
+  if (memoir && platform && !isAnnualMemoirPlatform(platform)) {
+    return tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'CANCELLED', errorMessage: 'ANNUAL_MEMOIR_PLATFORM_INVALID' } })
+  }
   const businessKey = memoir && platform
     ? 'annual-memoir-share:' + createHash('sha256').update(JSON.stringify([activity.id, grant.userId, platform.toLowerCase()])).digest('hex')
     : grant.grantKey
@@ -238,6 +242,9 @@ export async function saveTopicActivityV2Program(activityId: string, actorId: st
   if (!normalized.valid) fail('TOPIC_V2_CONFIG_INVALID', normalized.message, 400)
   return withTopicV2Transaction(async (tx) => {
     const activity = await lockTopicV2Activity(tx, activityId)
+    if (await tx.annualMemoirConfig.findUnique({ where: { activityId }, select: { activityId: true } })) {
+      fail('ANNUAL_MEMOIR_USE_CONFIG', '请在年度活动配置中编辑分享奖励')
+    }
     const program = normalized.value
     await assertTopicLotterySourceRules(tx, activity, program)
     if (program.enabled && program.platformRewards.enabled) {
@@ -307,6 +314,7 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
     const row = await tx.topicActivityRewardEntry.findFirst({ where: { id: input.rewardEntryId, activityId: activity.id, enabled: true } })
     if (!row) fail('TOPIC_V2_ENTRY_NOT_FOUND', '奖励入口未开放', 404)
     const entry = entryFromSnapshot(row.config)
+    if (memoir && !isAnnualMemoirPlatform(row.platformKey)) fail('ANNUAL_MEMOIR_PLATFORM_INVALID', '该平台不属于年度活动', 400)
     if (memoir && ids.length === 0) fail('ANNUAL_MEMOIR_SCREENSHOT_REQUIRED', '请上传年度报告分享截图', 400)
     requireWindow(entry.startsAt, entry.endsAt, now)
     if (ids.length < entry.minImages || ids.length > entry.maxImages) fail('TOPIC_V2_SCREENSHOT_COUNT_INVALID', '截图数量不符合任务要求', 400)
@@ -404,6 +412,8 @@ export async function reviewTopicActivityV2Submission(input: { activityId?: stri
     let entryGrant: TopicActivityRewardGrant | null = null
     if (entry) entryGrant = await tx.topicActivityRewardGrant.findUnique({ where: { grantKey: topicV2EntryGrantKey(activity.id, entry.id, submission.userId) } })
     if (entry && input.status === 'APPROVED') {
+      const memoir = await tx.annualMemoirConfig.findUnique({ where: { activityId: activity.id }, select: { enabled: true } })
+      if (memoir && (!memoir.enabled || !isAnnualMemoirPlatform(entry.platformKey))) fail('ANNUAL_MEMOIR_REVIEW_UNAVAILABLE', '年度活动已关闭或此平台不属于年度活动')
       if (entryGrant?.status !== 'GRANTED') {
         const paid = await tx.topicActivityRewardGrant.findMany({ where: { activityId: activity.id, userId: submission.userId, rewardEntryId: { not: null }, status: { not: 'CANCELLED' } }, select: { rewardEntryId: true, rewardSnapshot: true } })
         const entries = new Set(paid.map((grant) => grant.rewardEntryId))
@@ -701,11 +711,20 @@ export async function dispatchDueTopicActivityV2Rewards(input: { now?: Date; bat
 }
 
 export async function getTopicActivityV2View(activityId: string, userId?: string | null, isAdmin = false) {
-  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, allowImageAttachments: true, activityPostId: true, topicProgram: true, ActivityPost: { select: { authorId: true } } } })
+  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, allowImageAttachments: true, activityPostId: true, topicProgram: true, annualMemoirConfig: { select: { enabled: true, previewAt: true } }, ActivityPost: { select: { authorId: true } } } })
   if (!activity || activity.type !== 'TOPIC_ACTIVITY' || (!isAdmin && !['PUBLISHED', 'CANCELLED'].includes(activity.status))) fail('TOPIC_V2_ACTIVITY_NOT_FOUND', '活动不存在', 404)
   const program = readTopicActivityV2Program(activity.topicProgram)
+  const memoir = activity.annualMemoirConfig
+  if (memoir && !isAdmin && (!memoir.enabled || new Date() < memoir.previewAt)) fail('TOPIC_V2_ACTIVITY_NOT_FOUND', '活动不存在', 404)
   const visible = isAdmin ? program || createDefaultTopicActivityV2Program() : program?.enabled ? program : null
-  const entries = visible?.entries.filter((entry) => isAdmin || (visible.platformRewards.enabled && entry.enabled)).sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)) || []
+  const entries = visible?.entries.filter((entry) =>
+    (!memoir || isAnnualMemoirPlatform(entry.platformKey)) && (isAdmin || (visible.platformRewards.enabled && entry.enabled)),
+  ).sort((a, b) => {
+    const order = (entry: TopicRewardEntryConfig) => memoir
+      ? annualMemoirPlatforms.findIndex(([key]) => key === entry.platformKey)
+      : entry.sortOrder
+    return order(a) - order(b) || a.id.localeCompare(b.id)
+  }) || []
   let myProgress: Record<string, unknown> | null = null
   if (userId && visible) {
     const [submissions, grants, votes, attempts, submittedCount, approvedCount] = await Promise.all([
@@ -731,7 +750,7 @@ export async function getTopicActivityV2View(activityId: string, userId?: string
   }
   return { activity: { id: activity.id, title: activity.title, status: activity.status, startsAt: activity.startsAt, endsAt: activity.endsAt,
     allowImageAttachments: activity.allowImageAttachments, activityPostId: activity.activityPostId, postAuthorId: activity.ActivityPost?.authorId || null },
-    program: visible ? isAdmin ? visible : publicTopicActivityV2Program(visible) : null, entries, myProgress, canReview: isAdmin }
+    program: visible ? isAdmin ? visible : publicTopicActivityV2Program(memoir ? { ...visible, entries } : visible) : null, entries, myProgress, canReview: isAdmin }
 }
 
 export async function getTopicActivityV2Statistics(activityId: string) {

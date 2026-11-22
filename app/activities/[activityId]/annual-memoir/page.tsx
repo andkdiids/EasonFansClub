@@ -19,7 +19,7 @@ export default async function Page({ params }: { params: Promise<{ activityId: s
     schedule: config, now: new Date(), hasSnapshot: !!snapshot,
     configuredAndPublished: config.enabled && config.activity.status === 'PUBLISHED' &&
       config.activity.type === 'TOPIC_ACTIVITY' && !!config.activity.coverUrl &&
-      !!config.annualBadgeId && !!config.reservationBadgeId,
+      !!config.annualBadgeId,
   })
   if (!snapshot && !availability?.visible) notFound()
   return <MemoirReader activityId={activityId} year={snapshot?.year ?? config!.year}

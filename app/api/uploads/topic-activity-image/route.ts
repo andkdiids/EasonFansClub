@@ -1,3 +1,4 @@
+import { isAnnualMemoirPlatform } from '@/lib/annual-memoir-platforms'
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { rejectInvalidRequestOrigin, requireRequestUser, enforceApiRateLimit } from '@/lib/security'
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
   if (!metadataValidation.ok) return jsonError(metadataValidation.code, metadataValidation.code === 'FILE_TOO_LARGE' ? TOPIC_ACTIVITY_IMAGE_TOO_LARGE_MESSAGE : metadataValidation.message, metadataValidation.code === 'FILE_TOO_LARGE' ? 413 : 400)
   if (file.size > TOPIC_ACTIVITY_IMAGE_MAX_FILE_SIZE) return jsonError('FILE_TOO_LARGE', TOPIC_ACTIVITY_IMAGE_TOO_LARGE_MESSAGE, 413)
 
-  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, type: true, status: true, startsAt: true, endsAt: true, participationMode: true, allowImageAttachments: true, formSchema: true, topicProgram: true } })
+  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, type: true, status: true, startsAt: true, endsAt: true, participationMode: true, allowImageAttachments: true, formSchema: true, topicProgram: true, annualMemoirConfig: { select: { enabled: true, year: true, reportOpensAt: true, endsAt: true } } } })
   if (!activity || activity.type !== 'TOPIC_ACTIVITY') return jsonError('ACTIVITY_NOT_FOUND', '话题活动不存在', 404)
   if (purpose === 'FORM_ANSWER') {
     const schema = normalizeTopicActivityFormSchema(activity.formSchema)
@@ -68,8 +69,20 @@ export async function POST(request: Request) {
       if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(rewardEntryId)) return jsonError('REWARD_ENTRY_NOT_FOUND', '奖励任务不存在', 404)
       const program = readTopicActivityV2Program(activity.topicProgram)
       if (!activity.allowImageAttachments) return jsonError('IMAGES_DISABLED', '活动未启用图片附件', 403)
-      const entry = await prisma.topicActivityRewardEntry.findFirst({ where: { id: rewardEntryId, activityId, enabled: true }, select: { id: true } })
+      const entry = await prisma.topicActivityRewardEntry.findFirst({ where: { id: rewardEntryId, activityId, enabled: true }, select: { id: true, platformKey: true } })
       if (!program?.enabled || !program.platformRewards.enabled || !entry) return jsonError('REWARD_ENTRY_NOT_FOUND', '奖励任务未开放', 404)
+      const memoir = activity.annualMemoirConfig
+      if (memoir) {
+        if (!isAnnualMemoirPlatform(entry.platformKey)) return jsonError('ANNUAL_MEMOIR_PLATFORM_INVALID', '该平台不属于年度活动', 400)
+        const now = new Date()
+        if (!memoir.enabled || now < memoir.reportOpensAt || now >= memoir.endsAt) {
+          return jsonError('ANNUAL_MEMOIR_SHARE_UNAVAILABLE', '当前不在年度分享时段', 403)
+        }
+        const snapshot = await prisma.annualMemoirSnapshot.findUnique({
+          where: { userId_year: { userId: user.id, year: memoir.year } }, select: { activityId: true },
+        })
+        if (snapshot?.activityId !== activityId) return jsonError('ANNUAL_MEMOIR_SHARE_UNAVAILABLE', '请先生成年度报告', 403)
+      }
     } else if ((!activity.allowImageAttachments && !hasImageField) || !['FORM', 'BOTH'].includes(activity.participationMode)) return jsonError('IMAGES_DISABLED', '该活动暂不接受表单图片', 403)
     const now = new Date()
     if (activity.status !== 'PUBLISHED' || (activity.startsAt && activity.startsAt > now) || (activity.endsAt && activity.endsAt < now)) return jsonError('FORM_CLOSED', '当前不在表单参与时间内', 409)
