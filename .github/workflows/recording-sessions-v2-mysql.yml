@@ -21,6 +21,7 @@ on:
       - 'lib/activity-lottery.ts'
       - 'app/api/admin/activities/**'
       - 'tests/activity-redemption.mysql.integration.ts'
+      - 'app/api/shun-master/**'
       - 'tests/shun-master-mysql.test.ts'
       - 'lib/shun-master.ts'
       - 'lib/shun-master-rules.ts'
