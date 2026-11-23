@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { authCookieName, createSessionToken } from '../lib/auth'
 import { getMobileUserById, issueMobileSession } from '../lib/mobile-auth'
+import { setShunEnabled, updateShunConfig } from '../lib/shun-master'
+import { defaultShunConfig } from '../lib/shun-master-rules'
 import { prisma } from '../lib/prisma'
 
 test('Shun Master resolves Web and Android users through the same HTTP routes', { timeout: 120000 }, async () => {
@@ -48,6 +50,66 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
     const rejected = await request('attempt', { ...session, Origin: 'https://untrusted.example.invalid' }, { requestId: randomUUID() })
     assert.equal(rejected.status, 403)
     assert.equal(await prisma.shunMasterRound.count({ where: { actorId: actor.id } }), 0)
+    const closed = await request('attempt', mobile, { requestId: randomUUID() })
+    assert.ok(closed.status >= 400)
+
+    const decoys = await Promise.all([create(0), create(0)])
+    const outsiders = await prisma.user.findMany({
+      where: { id: { notIn: [actor.id, other.id, ...decoys.map(user => user.id)] } },
+      select: { id: true },
+    })
+    await prisma.shunMasterProtection.createMany({
+      data: outsiders.map(user => ({ userId: user.id, protected: true })),
+      skipDuplicates: true,
+    })
+    await prisma.shunMasterProtection.updateMany({
+      where: { userId: { in: outsiders.map(user => user.id) } }, data: { protected: true },
+    })
+    await updateShunConfig(actor.id, { ...defaultShunConfig, enabled: false, budget: 500 })
+    await setShunEnabled(actor.id, true)
+    const victimDto = await getMobileUserById(other.id)
+    assert.ok(victimDto)
+    const victimMobile = { Authorization: 'Bearer ' + (await issueMobileSession(victimDto)).accessToken }
+    const victimSession = { Cookie: authCookieName + '=' + await createSessionToken(other), Origin: base }
+
+    const requestId = randomUUID()
+    const writes = await Promise.all([mobile, { ...session, Origin: base }].map(headers => request('attempt', headers, { requestId })))
+    const rounds = await Promise.all(writes.map(async response => {
+      assert.equal(response.status, 200)
+      return response.json()
+    }))
+    const [round] = rounds
+    assert.equal(round.id, rounds[1].id)
+    assert.ok(round.amount >= 1 && round.amount <= 7)
+    assert.equal(await prisma.shunMasterRound.count({ where: { actorId: actor.id } }), 1)
+    assert.equal(await prisma.pointLog.count({ where: { action: 'SHUN_STEAL', userId: { in: [actor.id, other.id] } } }), 2)
+    for (const headers of [session, mobile]) {
+      assert.equal((await (await request('status', headers)).json()).balance, 71 + round.amount)
+      const history = await request('records?side=out&range=today', headers)
+      assert.equal(history.status, 200)
+      assert.equal((await history.json()).records[0].id, round.id)
+    }
+    const incoming = await request('records?side=in&range=today', victimMobile)
+    assert.equal(incoming.status, 200)
+    assert.equal((await incoming.json()).records[0].person, null)
+    assert.equal((await request('capture/' + round.id + '/start', mobile, {})).status, 404)
+
+    const start = await request('capture/' + round.id + '/start', victimSession, {})
+    assert.equal(start.status, 200)
+    const candidates = await start.json()
+    assert.equal(candidates.mode, 2)
+    assert.equal(candidates.candidates.length, 2)
+    assert.ok(candidates.candidates.every((candidate: Record<string, unknown>) => !('correct' in candidate)))
+    const guesses = await Promise.all([victimSession, victimMobile].map(headers =>
+      request('capture/' + round.id + '/guess', headers, { uid: actor.uid, mode: 2 })))
+    for (const response of guesses) {
+      assert.equal(response.status, 200)
+      assert.equal((await response.json()).record.recovered, round.amount)
+    }
+    assert.equal(await prisma.pointLog.count({ where: { action: 'SHUN_RECOVERY', userId: { in: [actor.id, other.id] } } }), 2)
+    const users = await prisma.user.findMany({ where: { id: { in: [actor.id, other.id] } }, select: { id: true, points: true } })
+    assert.equal(users.find(user => user.id === actor.id)?.points, 71)
+    assert.equal(users.find(user => user.id === other.id)?.points, 13)
   } finally {
     await prisma.$disconnect()
   }
