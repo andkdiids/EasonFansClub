@@ -21,6 +21,9 @@ on:
       - 'lib/activity-lottery.ts'
       - 'app/api/admin/activities/**'
       - 'tests/activity-redemption.mysql.integration.ts'
+      - 'tests/shun-master-mysql.test.ts'
+      - 'lib/shun-master.ts'
+      - 'lib/shun-master-rules.ts'
       - 'lib/music-listening.ts'
       - 'app/api/music/listening/**'
       - 'tests/easmusic-listening.test.ts'
@@ -126,3 +129,21 @@ jobs:
           trap 'mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only -e "DROP DATABASE IF EXISTS activity_redemption_qa"' EXIT
           pnpm exec prisma db push --skip-generate
           pnpm exec tsx tests/activity-redemption.mysql.integration.ts
+
+      - name: Verify Shun Master additive migration and concurrent settlements
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DATABASE_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/ecfc_shun_qa?connection_limit=8
+          SHUN_MASTER_MYSQL_QA: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only \
+            -e 'CREATE DATABASE ecfc_shun_qa CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+          git fetch --depth=1 origin "$BASE_SHA"
+          base_schema="$(mktemp)"
+          trap 'rm -f "$base_schema"' EXIT
+          git show "$BASE_SHA:prisma/schema.prisma" > "$base_schema"
+          pnpm exec prisma db push --schema "$base_schema" --skip-generate
+          pnpm exec prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123133000_add_shun_master/migration.sql
+          pnpm exec tsx --test tests/shun-master-mysql.test.ts

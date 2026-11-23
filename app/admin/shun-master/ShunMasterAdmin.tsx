@@ -11,6 +11,7 @@ type Summary = {
     recovered: number; compensation: number; createdAt: string; capturedAt: string | null }[]
   audit: { action: string; occurredAt: string; operatorUserId: string | null; summary: string; metadata: unknown }[]
   abuse: { id: string; createdAt: string; userId: string; metadata: { endpoint?: string } | null }[]
+  outstanding: { count: number; oldest: string | null }
 }
 const integerFields = [
   ['attempts', '每日顺取次数'], ['victimCap', '每日被顺上限'], ['goldenMinutes', '黄金抓捕分钟'], ['budget', '平台补偿总预算'],
@@ -76,6 +77,8 @@ export function ShunMasterAdmin() {
       {data.budgetWarning && <p role="alert">补偿预算余量不足，新的顺取会暂停。</p>}
       <p>活跃顺取者 {data.activePlayers} 人 · {data.totals._count} 笔 · 顺取 {data.totals._sum.amount ?? 0} · 追回 {data.totals._sum.recovered ?? 0} · 当日记录补偿 {data.totals._sum.compensation ?? 0}</p>
       <p>已占用准备金 {data.reserved} · 累计平台补偿 {data.compensated}</p>
+      <p>待抓捕记录 {data.outstanding.count} 笔{data.outstanding.oldest &&
+        ` · 最早产生于 ${new Date(data.outstanding.oldest).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}（北京时间）`}</p>
       <details><summary>实际金额分布</summary><ul>{data.amounts.map((row) =>
         <li key={row.rolled + ':' + row.amount}>抽中 {row.rolled} · 实付 {row.amount} · {row._count._all} 笔</li>)}</ul></details>
       <div className="overflow-x-auto"><table className="w-full border text-left">

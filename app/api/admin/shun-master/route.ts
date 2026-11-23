@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const day = query.get('day') || shunDay(new Date())
   const page = Number(query.get('page') || '1')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isSafeInteger(page) || page < 1 || page > 200) return json({ message: '查询参数无效。' }, 400)
-  const [settings, records, amounts, totals, actors, audit, abuse] = await Promise.all([
+  const [settings, records, amounts, totals, actors, audit, abuse, [outstanding]] = await Promise.all([
     prisma.shunMasterSettings.findUnique({ where: { id: 1 } }),
     prisma.shunMasterRound.findMany({ where: { day }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 50, take: 51,
       select: { id: true, actorId: true, victimId: true, rolled: true, amount: true, createdAt: true,
@@ -26,12 +26,17 @@ export async function GET(request: Request) {
       orderBy: { occurredAt: 'desc' }, take: 30, select: { action: true, occurredAt: true, operatorUserId: true, summary: true, metadata: true } }),
     prisma.accountSecurityLog.findMany({ where: { action: 'API_ABUSE_RATE_LIMIT', metadata: { path: '$.endpoint', string_starts_with: 'shun-master:' } },
       orderBy: { createdAt: 'desc' }, take: 30, select: { id: true, userId: true, createdAt: true, metadata: true } }),
+    prisma.$queryRaw<{ count: bigint; oldest: Date | null }[]>`
+      SELECT COUNT(*) AS count, MIN(createdAt) AS oldest FROM ShunMasterRound
+      WHERE result IS NULL AND JSON_LENGTH(candidates) = 3
+    `,
   ])
   const config = validateShunConfig(settings?.config) || defaultShunConfig
   const reserved = settings?.reserved || 0
   const compensated = settings?.compensated || 0
   return json({ config, day, reserved, compensated, budgetWarning: config.budget - reserved - compensated < 7,
-    records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse })
+    records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
+    outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest } })
 }
 
 export async function PATCH(request: Request) {

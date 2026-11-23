@@ -38,6 +38,9 @@ test('real HTTP and browser exercise Shun Master opt-in, anonymity, capture and 
     }
     assert.equal((await request('/api/shun-master/status')).status, 401)
     assert.equal((await request('/api/admin/shun-master', actorToken)).status, 403)
+    assert.equal((await request('/api/admin/shun-master', adminToken, defaultShunConfig, 'PATCH')).status, 200)
+    assert.equal((await request('/api/shun-master/attempt', actorToken, { requestId: randomUUID() })).body.code, 'DISABLED')
+    assert.equal((await request('/api/shun-master/membership', actorToken, { joined: true, victimCap: 4 })).body.code, 'JOIN')
     assert.equal((await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, probabilities: [1, 1, 1, 1, 1, 1, 1] }, 'PATCH')).status, 400)
     assert.equal((await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, enabled: true }, 'PATCH')).status, 200)
     for (const token of [victimToken, ...decoyTokens]) {
@@ -86,6 +89,23 @@ test('real HTTP and browser exercise Shun Master opt-in, anonymity, capture and 
     const completed = await request('/api/shun-master/records?side=in', victimToken)
     assert.equal(completed.body.records[0].person.uid, actor.uid)
     assert.equal(completed.body.records[0].recovered, record.amount)
+    const ordinaryAttempt = await request('/api/shun-master/attempt', decoyTokens[0], { requestId: randomUUID() })
+    assert.equal(ordinaryAttempt.status, 200)
+    assert.equal(ordinaryAttempt.body.person.uid, victim.uid)
+    await prisma.shunMasterRound.update({ where: { id: ordinaryAttempt.body.id }, data: { goldenUntil: new Date(0) } })
+    await phone.goto(base + '/shun-master?record=' + ordinaryAttempt.body.id)
+    await phone.getByRole('button', { name: '抓捕追回' }).click()
+    await phone.getByRole('heading', { name: '三选一抓捕' }).waitFor()
+    assert.equal(await phone.getByRole('radio').count(), 3)
+    const options = await phone.getByRole('group', { name: '选择一位 EF' }).locator('label').all()
+    for (const option of options) {
+      if (!(await option.textContent())?.includes(decoys[0].nickname)) {
+        await option.getByRole('radio').check()
+        break
+      }
+    }
+    await phone.getByRole('button', { name: '确认抓捕' }).click()
+    await phone.getByText('让 TA 溜了！', { exact: true }).waitFor()
     const highFrequency = await Promise.all(Array.from({ length: 20 }, () =>
       request('/api/shun-master/attempt', actorToken, { requestId: 'invalid' })))
     assert.ok(highFrequency.some((result) => result.status === 429))
@@ -102,7 +122,7 @@ test('real HTTP and browser exercise Shun Master opt-in, anonymity, capture and 
     if (output) await adminPage.screenshot({ path: join(output, 'admin.png') })
     await phone.locator('.app-topbar').getByRole('button', { name: '切换到深夜主题' }).click()
     assert.equal(await phone.locator('html').getAttribute('data-theme'), 'midnight')
-    for (const width of [320, 430]) {
+    for (const width of [320, 360, 375, 390, 414, 430]) {
       await phone.setViewportSize({ width, height: 844 })
       assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
     }
