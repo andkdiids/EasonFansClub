@@ -188,7 +188,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     const transactionResult = await prisma.$transaction(async (tx) => {
       const { linkedMaterialId, ...activityData } = normalized.value
       await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
-      const lockedCurrent = await tx.activity.findUnique({ where: { id: activityId }, select: { status: true, type: true } })
+      const lockedCurrent = await tx.activity.findUnique({ where: { id: activityId }, select: {
+        status: true, type: true, annualMemoirConfig: { select: { year: true, publishedYear: true } },
+      } })
       if (!lockedCurrent) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
       await assertTopicLotteryActivityWindow(tx, activityId, { ...normalized.value, ...topicConfig.value })
       if (lockedCurrent.status === 'CANCELLED' && normalized.value.status !== 'CANCELLED') {
@@ -213,7 +215,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       // an unrelated legacy lottery schedule that would otherwise prevent a
       // normal activity edit.
       if (normalized.value.status !== 'CANCELLED') await assertLotterySchedulesFitActivityEnd(tx, activityId, normalized.value.endsAt)
-      const memoir = await tx.annualMemoirConfig.findUnique({ where: { activityId }, select: { year: true, publishedYear: true } })
+      const memoir = lockedCurrent.annualMemoirConfig
       if (memoir) {
         if (normalized.value.type !== 'TOPIC_ACTIVITY') throw new ActivityConfigurationError('年度活动必须保留年度活动类型。')
         const publishedYear = normalized.value.status === 'PUBLISHED' ? memoir.year : null
