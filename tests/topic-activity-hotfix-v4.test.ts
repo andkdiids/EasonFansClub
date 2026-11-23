@@ -235,6 +235,12 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   assert.doesNotMatch(memoirMigration, /\b(?:DROP|RENAME|TRUNCATE|DELETE\s+FROM|UPDATE\s+`)\b/i)
   assert.match(memoirMigration, /UNIQUE INDEX `AnnualMemoirReservation_activityId_userId_key`/)
   assert.match(memoirMigration, /UNIQUE INDEX `AnnualMemoirSnapshot_userId_year_key`/)
+  const pointActions = currentMainBlocks.get('PointActionType')!
+  assert.deepEqual(comparableBlocks.get('PointActionType'), [...pointActions, 'SHUN_STEAL', 'SHUN_RECOVERY', 'SHUN_COMPENSATION'])
+  comparableBlocks.set('PointActionType', pointActions)
+  for (const name of ['ShunMasterSettings', 'ShunMasterMember', 'ShunMasterRound']) {
+    assert.ok(comparableBlocks.delete(name), `required Shun Master model retained: ${name}`)
+  }
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
   for (const name of concertSchemaBlocks) assert.ok(newBlocks.has(name), `concert schema block retained: ${name}`)
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)

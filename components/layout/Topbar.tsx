@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '@/components/BrandMark'
+import { ShunMasterLogo } from '@/components/ShunMasterLogo'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { UiIcon } from '@/components/UiIcon'
 import { UserAvatar } from '@/components/UserAvatar'
@@ -54,6 +55,10 @@ export function Topbar({ user, logoUrl, canAccessAdmin }: Readonly<{ user: Sessi
       <UiIcon name="search" />
       <input name="q" aria-label="搜索帖子、歌曲、专辑和用户" placeholder="搜索帖子、歌曲、专辑、用户…" />
     </form>
+    <Link href="/shun-master" aria-current={pathname === '/shun-master' ? 'page' : undefined}
+      className="inline-flex shrink-0 items-center gap-1 px-1 py-2 text-sm aria-[current=page]:border-b-2 aria-[current=page]:border-[#D1AE77]">
+      <ShunMasterLogo /><span>顺大师</span>
+    </Link>
     <div ref={menuRootRef} className="app-topbar-actions">
       <div className="app-topbar-theme-toggle">
   <ThemeToggle />

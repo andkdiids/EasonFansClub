@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { UiIcon } from '@/components/UiIcon'
+import { ShunMasterLogo } from '@/components/ShunMasterLogo'
 import { EcenterEditButton, EcenterShortcutEditorPanel } from './EcenterShortcutEditor'
 import type { EcenterFeatureItem } from '@/lib/ecenter-features'
 import { isAppNavigationActive, primaryNavigation } from './navigation'
@@ -179,7 +180,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
           onDone={() => setCenterEditing(false)}
         /> : <nav aria-label="E院中心功能">
           {menuItems.map((item) => <button type="button" key={item.featureKey} onClick={() => navigateFromCenter(item.href)}>
-              <span className="mobile-center-item-icon"><UiIcon name={item.icon} /></span>
+              <span className="mobile-center-item-icon">{item.href === '/shun-master' ? <ShunMasterLogo /> : <UiIcon name={item.icon} />}</span>
               <span>{item.label}</span>
               {item.showsUnread && unreadCount !== null && unreadCount > 0 ? <b>{unreadCount}</b> : null}
             </button>)}

@@ -6116,6 +6116,9 @@ enum PointActionType {
   GROWTH_REWARD_REVERSAL
   GLOBAL_POINTS_GRANT
   TOPIC_ACTIVITY_REWARD
+  SHUN_STEAL
+  SHUN_RECOVERY
+  SHUN_COMPENSATION
 }
 
 enum PharmacyCampaignStatus {
@@ -7003,6 +7006,46 @@ model TopicActivityLotteryNotice {
   Winner    LotteryEntry @relation(fields: [winnerId], references: [id], onDelete: Cascade)
 
   @@index([state, createdAt], map: "TopicLotteryNotice_pending_idx")
+}
+
+model ShunMasterSettings {
+  id Int @id
+  config Json
+  reserved Int @default(0)
+  compensated Int @default(0)
+}
+
+model ShunMasterMember {
+  userId String @id
+  joined Boolean @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+model ShunMasterRound {
+  id String @id @default(cuid())
+  actorId String
+  victimId String
+  requestId String @db.VarChar(36)
+  day String @db.Char(10)
+  rolled Int
+  amount Int
+  createdAt DateTime @default(now())
+  goldenUntil DateTime
+  candidates Json
+  goldenDecoyId String?
+  result String? @db.VarChar(10)
+  mode Int?
+  selectedId String?
+  recovered Int @default(0)
+  compensation Int @default(0)
+  capturedAt DateTime?
+
+  @@unique([actorId, requestId])
+  @@unique([actorId, day, victimId])
+  @@index([victimId, day])
+  @@index([victimId, createdAt, id])
+  @@index([actorId, createdAt, id])
+  @@index([day])
 }
 
 model TopicActivityLotteryAudit {

@@ -6,8 +6,12 @@ import test from 'node:test'
 
 test('approved historical migration recovery matches the successful production ledger exactly', () => {
   const path = 'prisma/migrations/20260820140000_add_want_listen_session_exclusion/migration.sql'
-  const bytes = readFileSync(path)
+  // Hash the Git blob, which is independent of Windows checkout conversion.
+  const bytes = execFileSync('git', ['show', `HEAD:${path}`])
   assert.equal(createHash('sha256').update(bytes).digest('hex'), '9499df145c0984d16416b4210eb2061c5bd46273b5bc129fe9da94bff761d5b3')
+  const checkout = readFileSync(path)
+  const crlfCheckout = Buffer.from(bytes.toString('utf8').replace(/\n/g, '\r\n'))
+  assert.ok(checkout.equals(bytes) || checkout.equals(crlfCheckout), 'working copy differs beyond Git line-ending conversion')
   const prior = execFileSync('git', ['show', `61ba7a76d177cf46c309a166dd921b3e4a065f53:${path}`], { encoding: 'utf8' })
   assert.equal(bytes.toString('utf8'), prior.replace(/^--[^\n]*\n/, ''), 'only the explanatory comment may be removed; SQL remains byte-identical')
 })

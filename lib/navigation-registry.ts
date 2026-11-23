@@ -203,6 +203,13 @@ export const NAVIGATION_REGISTRY = [
     sidebarSection: 'quick', editable: true, hideable: true,
     activePrefixes: ['/salon'],
   },
+  {
+    featureKey: 'SHUN_MASTER', label: '顺大师', href: '/shun-master', icon: 'star', title: '顺大师',
+    defaultSortOrder: 44, defaultEnabled: true, isManageable: false,
+    showInCenter: true, showInQuickNavigation: true, showInDesktopSidebar: false,
+    sidebarSection: 'quick', editable: true, hideable: true,
+    activePrefixes: ['/shun-master'],
+  },
 ] as const satisfies readonly NavigationRegistryItem[]
 
 export type NavigationFeatureKey = (typeof NAVIGATION_REGISTRY)[number]['featureKey']
