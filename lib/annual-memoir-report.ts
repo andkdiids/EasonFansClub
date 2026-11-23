@@ -88,6 +88,7 @@ export type MemoirReport = Awaited<ReturnType<typeof collect>>
 
 export async function generateMemoir(activityId: string, userId: string) {
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM Activity WHERE id = ${activityId} FOR UPDATE`
     await tx.$queryRaw`SELECT activityId FROM AnnualMemoirConfig WHERE activityId = ${activityId} FOR UPDATE`
     const config = await tx.annualMemoirConfig.findUnique({
       where: { activityId }, include: { activity: true },
@@ -96,7 +97,7 @@ export async function generateMemoir(activityId: string, userId: string) {
     const existing = await tx.annualMemoirSnapshot.findUnique({ where: { userId_year: { userId, year: config.year } } })
     if (existing) return existing.activityId === activityId ? existing : null
     const now = new Date()
-    const configuredAndPublished = config.enabled && config.activity.type === 'TOPIC_ACTIVITY' &&
+    const configuredAndPublished = config.enabled && config.publishedYear === config.year && config.activity.type === 'TOPIC_ACTIVITY' &&
       config.activity.status === 'PUBLISHED' && !!config.activity.coverUrl &&
       !!config.annualBadgeId && config.reservationPoints >= 0
     if (!getMemoirAvailability({ configuredAndPublished, schedule: config, now, hasSnapshot: false }).canGenerate) return null

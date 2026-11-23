@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import type { ActivityView } from '@/lib/activity'
-import { memoirTimeFields, toMemoirShanghaiInput, validateMemoirAdminInput } from '@/lib/annual-memoir-admin'
+import { memoirTimeFields, parseMemoirYear, toMemoirShanghaiInput, validateMemoirAdminInput } from '@/lib/annual-memoir-admin'
 import { annualMemoirPlatforms } from '@/lib/annual-memoir-platforms'
 import { ActivityImageUploader, uploadActivityImage, type ActivityImageSelection } from './ActivityImageUploader'
 
@@ -20,7 +20,7 @@ export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
   const [busy, setBusy] = useState(false)
   const saving = useRef(false)
   const [errorField, setErrorField] = useState('')
-  const [existingId, setExistingId] = useState('')
+  const [draftYear, setDraftYear] = useState('2026')
   const [image, setImage] = useState<ActivityImageSelection | null>(null)
   const [savedCover, setSavedCover] = useState(activity?.coverUrl ?? null)
   const [pointsEnabled, setPointsEnabled] = useState(true)
@@ -56,11 +56,13 @@ export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
     if (!basic.title.trim()) { fail('请填写活动标题。', 'memoirTitle'); return }
     if (!basic.description.trim()) { fail('请填写活动介绍。', 'memoirDescription'); return }
     const schedule = Object.fromEntries(Object.keys(memoirTimeFields).map((key) => [key, input(key).value]))
-    const annualMemoir = { ...schedule, enabled: activity ? check('memoirEnabled') : false,
+    const year = parseMemoirYear({ year: loaded?.config.year ?? Number(draftYear) })
+    if (year === null) { fail('请填写有效的活动年份。', 'memoirYear'); return }
+    const annualMemoir = { ...schedule, year, enabled: activity ? check('memoirEnabled') : false,
       showInActivityCenter: check('memoirCenter'), reservationPoints: pointsEnabled ? Number(input('memoirPoints').value) : 0,
       reservationBadgeId: badgeEnabled ? input('reservationBadgeId').value : '', annualBadgeId: input('annualBadgeId').value }
     if (badgeEnabled && !annualMemoir.reservationBadgeId) { fail('请选择预约勋章。', 'reservationBadgeId'); return }
-    const validation = validateMemoirAdminInput(annualMemoir, loaded?.config.year)
+    const validation = validateMemoirAdminInput(annualMemoir, year)
     if (!validation.ok) { fail(validation.message, validation.field); return }
     const platformPoints = annualMemoirPlatforms.map(([key]) => Number(input('points-' + key).value))
     const invalidPlatform = platformPoints.findIndex((points) => !Number.isInteger(points) || points < 0 || points > 2_000_000_000)
@@ -77,7 +79,6 @@ export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
       const response = await fetch(url, { method: activity ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await response.json().catch(() => null)
       if (!response.ok || (!activity && typeof data?.activity?.id !== 'string')) {
-        if (data?.activityId) setExistingId(data.activityId)
         fail(typeof data?.message === 'string' ? data.message : '保存失败（HTTP ' + response.status + '）。请检查会话后重试。', typeof data?.field === 'string' ? data.field : undefined)
         return
       }
@@ -106,9 +107,11 @@ export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
     <h3 className="text-xl font-bold">《葡萄成熟时》年度活动配置</h3>
     {activity ? <Link className="underline" href={'/admin/activities/' + encodeURIComponent(activity.id) + '/annual-memoir-preview'}>打开只读预览</Link> : <p>保存后为关闭、未公开的草稿。</p>}
     {message && <p tabIndex={-1} role={message === '年度活动已保存。' ? 'status' : 'alert'}>{message}</p>}
-    {existingId && <Link className="underline" href={'/admin/activities/' + encodeURIComponent(existingId) + '/annual-memoir-edit'}>打开已有年度活动</Link>}
     {(!activity || config) && <fieldset disabled={busy} className="space-y-5" onKeyDown={(event) => { if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault() }}>
       <div className="grid gap-3 sm:grid-cols-2">
+        <label>活动年份<input className={fieldClass} name="memoirYear" type="number" min="2000" max="9999"
+          value={config?.year ?? draftYear} readOnly={!!activity} onChange={(event) => setDraftYear(event.target.value)}
+          aria-invalid={errorField === 'memoirYear' || undefined} /></label>
         <label>活动标题<input className={fieldClass} name="memoirTitle" maxLength={160} defaultValue={activity?.title ?? '《葡萄成熟时》'} /></label>
         <label>活动副标题<input className={fieldClass} name="memoirSubtitle" maxLength={300} defaultValue={activity?.subtitle ?? '私家E院 2026 年度回忆录'} /></label>
       </div>
@@ -127,8 +130,8 @@ export function AnnualMemoirEditor({ activity, badges, onSaved }: Props) {
             defaultValue={config ? toMemoirShanghaiInput(config[key as keyof Schedule]) : ''} />
         </label>)}
       </div>
-      <p>年度统计范围：系统自动确定。统计开始为 {config?.year ?? 2026} 年 1 月 1 日，统计截止为报告开放前一天。</p>
-      {config && (config.statisticsLockedAt || loaded?.stats.reservations || loaded?.stats.reports || config.enabled) ? <p>已有活动的统计范围受保护。原范围：{toMemoirShanghaiInput(config.statisticsStartAt).replace('T', ' ')} 至 {toMemoirShanghaiInput(config.statisticsEndAt).replace('T', ' ')}（不含上界）。</p> : null}
+      <p>年度统计范围：系统自动确定。统计开始为 {config?.year ?? draftYear} 年 1 月 1 日，统计截止为报告开放前一天。</p>
+      {config && (config.statisticsLockedAt || loaded?.stats.reservations || loaded?.stats.reports || (config.enabled && activity?.status === 'PUBLISHED')) ? <p>已有活动的统计范围受保护。原范围：{toMemoirShanghaiInput(config.statisticsStartAt).replace('T', ' ')} 至 {toMemoirShanghaiInput(config.statisticsEndAt).replace('T', ' ')}（不含上界）。</p> : null}
       {config && config.previewAt !== config.reservationOpensAt && <label className="block">
         <input type="checkbox" name="confirmMergedStart" /> 确认新的合并时间。原预告 {toMemoirShanghaiInput(config.previewAt).replace('T', ' ')}，原预约 {toMemoirShanghaiInput(config.reservationOpensAt).replace('T', ' ')}。
       </label>}

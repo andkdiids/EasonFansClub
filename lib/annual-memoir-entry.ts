@@ -6,15 +6,20 @@ export function visibleMemoirActivities(now: Date, activityCenter = false): Pris
   return { OR: [
     { annualMemoirConfig: { is: null } },
     { status: 'PUBLISHED', type: 'TOPIC_ACTIVITY', coverUrl: { not: null, notIn: [''] }, annualMemoirConfig: { is: {
-      enabled: true, previewAt: { lte: now }, reservationPoints: { gte: 0 },
+      enabled: true, publishedYear: { not: null }, previewAt: { lte: now }, reservationPoints: { gte: 0 },
       annualBadgeId: { not: null }, ...(activityCenter ? { showInActivityCenter: true } : {}),
     } } },
   ] }
 }
 
 export async function readMemoirEntry(activityId: string | undefined, userId?: string) {
+  const now = new Date()
   const config = await prisma.annualMemoirConfig.findFirst({
-    where: activityId ? { activityId } : { year: 2026 },
+    where: activityId ? { activityId } : {
+      publishedYear: { not: null }, enabled: true, previewAt: { lte: now }, annualBadgeId: { not: null },
+      reservationPoints: { gte: 0 }, activity: { status: 'PUBLISHED', type: 'TOPIC_ACTIVITY', coverUrl: { not: null, notIn: [''] } },
+    },
+    orderBy: [{ year: 'desc' }, { activityId: 'asc' }],
     include: { activity: { select: { id: true, type: true, status: true, title: true, coverUrl: true, isFeatured: true } } },
   })
   if (!config) return null
@@ -23,9 +28,8 @@ export async function readMemoirEntry(activityId: string | undefined, userId?: s
     prisma.annualMemoirSnapshot.findUnique({ where: { userId_year: { userId, year: config.year } }, select: { activityId: true } }),
   ]) : [null, null]
   const hasSnapshot = snapshot?.activityId === config.activityId
-  const now = new Date()
   const state = getMemoirAvailability({ schedule: config, now, hasSnapshot,
-    configuredAndPublished: config.enabled && config.activity.status === 'PUBLISHED' &&
+    configuredAndPublished: config.enabled && config.publishedYear === config.year && config.activity.status === 'PUBLISHED' &&
       config.activity.type === 'TOPIC_ACTIVITY' && !!config.activity.coverUrl &&
       !!config.annualBadgeId && config.reservationPoints >= 0,
   })

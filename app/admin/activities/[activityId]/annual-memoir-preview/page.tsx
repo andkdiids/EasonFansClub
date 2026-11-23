@@ -13,11 +13,12 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
   const user = await getCurrentUser()
   if (!user || !await hasAdminPermission(user, 'activity_manage')) notFound()
   const { activityId } = await params
-  const activity = await prisma.activity.findFirst({
-    where: { id: activityId, type: 'TOPIC_ACTIVITY' },
-    select: { title: true, description: true, coverUrl: true },
+  const config = await prisma.annualMemoirConfig.findUnique({
+    where: { activityId },
+    select: { year: true, activity: { select: { type: true, title: true, description: true, coverUrl: true } } },
   })
-  if (!activity) notFound()
+  if (!config || config.activity.type !== 'TOPIC_ACTIVITY') notFound()
+  const { activity, year } = config
   const badgeCollage = await previewMemoirBadges(prisma)
   const cover = publicImageUrl(activity.coverUrl)
   return <main className="mx-auto max-w-xl p-4">
@@ -33,9 +34,9 @@ export default async function AnnualMemoirPreview({ params }: { params: Promise<
       <summary>预览预约确认</summary>
       <p>预约成功后，将获得本次活动的预约奖励。预约不可取消，也不能重复预约。</p>
     </details>
-    <MemoirReader activityId={activityId} year={2026} canGenerate={false} preview initialReport={{
-      nickname: '葡萄树下的阿晴', uid: 747272, registered: '2026-08-19', longestCheckInRun: 6, badgeCollage,
-      communityMemory: { kind: 'POST', excerpt: '散场以后，大家一边哼着歌，一边慢慢走回地铁站。', date: '2026-10-18' },
+    <MemoirReader activityId={activityId} year={year} canGenerate={false} preview initialReport={{
+      nickname: '葡萄树下的阿晴', uid: 747272, registered: `${year}-08-19`, longestCheckInRun: 6, badgeCollage,
+      communityMemory: { kind: 'POST', excerpt: '散场以后，大家一边哼着歌，一边慢慢走回地铁站。', date: `${year}-10-18` },
       bestGame: { score: 128, mode: '粤语残片' }, monthlyFirsts: 1, weeklyFirsts: 3,
       activeDays: 12, checkIns: 8, checkInExperience: 20, posts: 3, replies: 6, likesGiven: 20,
       likesReceived: 9, friends: 2, badges: badgeCollage.length, topics: 2,

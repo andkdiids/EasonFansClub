@@ -15,6 +15,11 @@ export function memoirStatisticsWindow(year: number, reportOpensAt: Date) {
   }
 }
 
+export function parseMemoirYear(value: unknown) {
+  const year = value && typeof value === 'object' && 'year' in value ? value.year : 2026
+  return typeof year === 'number' && Number.isInteger(year) && year >= 2000 && year <= 9999 ? year : null
+}
+
 export function validateMemoirAdminInput(value: unknown, year = 2026) {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   const error = (field: string, message: string) => ({ ok: false as const, field, message })

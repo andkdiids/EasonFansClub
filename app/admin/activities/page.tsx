@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function AdminActivitiesPage({ searchParams }: { searchParams: Promise<{ drafts?: string }> }) {
   await requireAdminPage('/admin/activities', 'activity_manage')
-  const select = { ...activitySelect, annualMemoirConfig: { select: { activityId: true } } } as const
+  const select = { ...activitySelect, annualMemoirConfig: { select: { year: true, enabled: true } } } as const
   const regular = await prisma.activity.findMany({
     orderBy: [{ status: 'asc' }, { isPinned: 'desc' }, { sortOrder: 'asc' }, { startsAt: 'asc' }, { createdAt: 'desc' }],
     take: 200,
@@ -23,7 +23,9 @@ export default async function AdminActivitiesPage({ searchParams }: { searchPara
         <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 dark:text-slate-300">创建、编辑、预览、发布和取消活动。活动结束状态根据时间动态计算，不需要定时任务；已取消活动会保留历史页面。</p>
         <Link href="/admin/activities/lottery-records" className="mt-4 inline-flex min-h-10 items-center rounded-full border border-sky-200 px-4 py-2 text-sm font-black text-brand-700">查看话题活动开奖记录</Link>
       </section>
-      <ActivityAdminManager initialDrafts={(await searchParams).drafts === '1'} initialAnnualIds={activities.filter((activity) => activity.annualMemoirConfig).map((activity) => activity.id)} initialActivities={activities.map((activity) => serializeActivityRow(activity, new Date(), true))} />
+      <ActivityAdminManager initialDrafts={(await searchParams).drafts === '1'}
+        annualMemoirs={Object.fromEntries(activities.flatMap((activity) => activity.annualMemoirConfig ? [[activity.id, activity.annualMemoirConfig]] : []))}
+        initialActivities={activities.map((activity) => serializeActivityRow(activity, new Date(), true))} />
     </main>
   )
 }

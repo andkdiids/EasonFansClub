@@ -36,6 +36,7 @@ export function activityRegistrationSuccessNotificationKey(activityId: string, u
 }
 
 type RegistrationErrorCode = Exclude<ActivityRegistrationState, 'AVAILABLE'> | typeof ACTIVITY_REGISTRATION_CANCEL_CLOSED | 'ACTIVITY_NOT_FOUND' | 'INVALID_ANSWERS' | 'CONFIRMATION_REQUIRED' | 'ALREADY_VERIFIED' | 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'CANNOT_CANCEL' | 'REGISTRATION_ALREADY_CHECKED_IN' | 'ALREADY_CANCELLED' | 'ACTIVITY_CANCELLED' | 'INSUFFICIENT_BALANCE' | 'ACTIVITY_MATERIAL_UNAVAILABLE' | 'ACTIVITY_MATERIAL_INVALID' | 'TOPIC_REWARD_LOCKED'
+  | 'ANNUAL_MEMOIR_ALREADY_PUBLISHED'
 
 export class ActivityRegistrationError extends Error {
   constructor(readonly code: RegistrationErrorCode, message: string, readonly status: number) {
@@ -609,6 +610,7 @@ export async function cancelActivityInTransaction(
 ) {
   const now = input.now || new Date()
   const activity = await lockActivityForCancellation(tx, input.activityId)
+  await tx.annualMemoirConfig.updateMany({ where: { activityId: activity.id, publishedYear: { not: null } }, data: { publishedYear: null } })
   if (activity.status !== 'CANCELLED') {
     await tx.activity.update({ where: { id: activity.id }, data: { status: 'CANCELLED', updatedById: input.adminId }, select: { id: true } })
   }

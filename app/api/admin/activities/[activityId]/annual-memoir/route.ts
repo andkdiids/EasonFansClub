@@ -68,7 +68,7 @@ export async function PUT(request: Request, { params }: Context) {
       tx.annualMemoirReservation.count({ where: { activityId } }),
       tx.annualMemoirSnapshot.count({ where: { activityId } }),
     ])
-    const protectedActivity = current.enabled || !!current.statisticsLockedAt || reservations > 0 || snapshots > 0
+    const protectedActivity = (current.enabled && current.publishedYear !== null) || !!current.statisticsLockedAt || reservations > 0 || snapshots > 0
     if (protectedActivity && current.previewAt.getTime() !== current.reservationOpensAt.getTime() && body.confirmMergedStart !== true) return 'CONFIRM_START'
     if (protectedActivity) {
       if (toMemoirShanghaiInput(current.reportOpensAt).slice(0, 10) !== toMemoirShanghaiInput(data.reportOpensAt).slice(0, 10) &&
@@ -97,7 +97,7 @@ export async function PUT(request: Request, { params }: Context) {
     await tx.adminActionLog.create({ data: { adminId: actorId, targetUserId: actorId,
       action: 'ANNUAL_MEMOIR_CONFIG_UPDATED', detail: { activityId, enabled: data.enabled } } })
     return 'SAVED'
-  })
+  }, { isolationLevel: 'ReadCommitted' })
   if (result === 'CONFIRM_START') return reply({ field: 'confirmMergedStart', message: '现有活动曾分别设置预告和预约时间。请核对并确认新的合并时间。' }, 409)
   if (result === 'LOCKED') return reply({ field: 'reportOpensAt', message: '已有活动的统计范围受保护，请保留原报告开放日期。' }, 409)
   if (result !== 'SAVED') return reply({ field: 'annualBadgeId', message: '请检查封面及勋章配置。启用活动需要封面和年度限定勋章。' }, 409)
@@ -115,7 +115,9 @@ export async function POST(request: Request, { params }: Context) {
   const body = await request.json().catch(() => null)
   if (typeof body?.reservationId !== 'string') return reply({ message: '请选择预约记录。' }, 400)
   const row = await prisma.annualMemoirReservation.findFirst({
-    where: { id: body.reservationId, activityId, OR: [{ points: { gt: 0 }, pointsGrantedAt: null }, { badgeId: { not: null }, badgeGrantedAt: null }] },
+    where: { id: body.reservationId, activityId,
+      activity: { type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', annualMemoirConfig: { enabled: true } },
+      OR: [{ points: { gt: 0 }, pointsGrantedAt: null }, { badgeId: { not: null }, badgeGrantedAt: null }] },
   })
   if (!row) return reply({ message: '没有待补发的奖励。' }, 404)
   await prisma.adminActionLog.create({ data: { adminId: guard.user.id, targetUserId: row.userId,

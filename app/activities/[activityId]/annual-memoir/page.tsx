@@ -18,7 +18,7 @@ export default async function Page({ params }: { params: Promise<{ activityId: s
   if (!config && !snapshot) notFound()
   const availability = config && getMemoirAvailability({
     schedule: config, now: new Date(), hasSnapshot: !!snapshot,
-    configuredAndPublished: config.enabled && config.activity.status === 'PUBLISHED' &&
+    configuredAndPublished: config.enabled && config.publishedYear === config.year && config.activity.status === 'PUBLISHED' &&
       config.activity.type === 'TOPIC_ACTIVITY' && !!config.activity.coverUrl &&
       !!config.annualBadgeId,
   })
