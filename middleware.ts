@@ -156,6 +156,8 @@ function isImmutablePublicPath(pathname: string) {
 
 function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
+  if (request.method === 'GET' && /^\/api\/shun-master\/(?:status|config|records)$/.test(pathname)) return true
+  if (request.method === 'POST' && /^\/api\/shun-master\/(?:attempt|capture\/[a-z0-9]{1,40}\/(?:start|guess))$/.test(pathname)) return true
   // Admin handlers perform the same server-side role and permission checks
   // through requireAdmin/requireSuperAdmin. This only lets authenticated
   // native requests reach those handlers without a browser Cookie.
