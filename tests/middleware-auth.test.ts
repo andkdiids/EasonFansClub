@@ -2,6 +2,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { before, test } from 'node:test'
 import { POST as runScheduledPostPublicationJob } from '../app/api/internal/daily-jobs/scheduled-post-publication/route'
+
+test('Shun Master rules page is public while funds and admin APIs require authentication', async () => {
+  const rules = await middleware(new NextRequest('https://ecfc.fans/shun-master'))
+  assert.equal(rules.headers.get('x-middleware-next'), '1')
+  const anonymousAttempt = await middleware(makeMutationRequest('/api/shun-master/attempt', 'POST'))
+  assert.equal(anonymousAttempt.status, 401)
+  const anonymousAdmin = await middleware(new NextRequest('https://ecfc.fans/api/admin/shun-master'))
+  assert.equal(anonymousAdmin.status, 401)
+})
 import { SignJWT } from 'jose'
 import { NextRequest } from 'next/server'
 import { authCookieName } from '../lib/auth-cookie'

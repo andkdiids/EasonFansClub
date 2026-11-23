@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
-import { ShunError, setShunProtection, shunAttempt, shunRecords, shunStatus } from '@/lib/shun-master'
+import { ShunError, shunAttempt, shunRecords, shunStatus } from '@/lib/shun-master'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: Context) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
   const { action } = await params
-  if (action !== 'attempt' && action !== 'protection' && action !== 'membership') return json({ message: '未找到操作。' }, 404)
+  if (action !== 'attempt') return json({ message: '未找到操作。' }, 404)
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'shun-master:' + action, user: { limit: 18, windowSeconds: 60 }, ip: { limit: 120, windowSeconds: 60 },
   })
@@ -64,8 +64,6 @@ export async function POST(request: Request, { params }: Context) {
       && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(body.requestId)) {
       return json(await shunAttempt(guard.user.id, body.requestId))
     }
-    if (action === 'protection' && typeof body?.protected === 'boolean') return json(await setShunProtection(guard.user.id, body.protected))
-    if (action === 'membership' && body?.joined === false) return json(await setShunProtection(guard.user.id, true))
     return json({ message: '请求参数无效。' }, 400)
   } catch (error) { return handleShunError(error) }
 }

@@ -10,6 +10,43 @@ import { captureMode, defaultShunConfig, shunDay, shunRulesChanged, shuffle, val
 type Tx = Prisma.TransactionClient
 type Round = Prisma.ShunMasterRoundGetPayload<Record<string, never>>
 const eligible = { isDeleted: false, status: 'ACTIVE' } as const
+const transactionAccount = { ...eligible, role: 'USER', Profile: { isNot: null } } as const
+const candidateAccount = Prisma.sql`
+  u.status = 'ACTIVE' AND u.isDeleted = false AND u.role = 'USER'
+  AND EXISTS (SELECT 1 FROM Profile p WHERE p.userId = u.id)
+`
+// Existing refusals are durable. Any future time-limited protection belongs
+// in the eligibility predicate, without weakening the historical refusal.
+const hasRefusedDebit = Prisma.sql`EXISTS (
+  SELECT 1 FROM ShunMasterProtection p WHERE p.userId = u.id AND p.protected = true
+)`
+const hasSpendableBalance = Prisma.sql`u.points > 0`
+const candidateFilter = Prisma.sql`${candidateAccount} AND NOT ${hasRefusedDebit}`
+
+export async function getShunCandidateSummary(tx: Tx, day: string, victimCap: number) {
+  const rows = await tx.$queryRaw<{ reason: string; count: bigint }[]>`
+    SELECT pool.reason, COUNT(*) AS count FROM (
+      SELECT CASE
+        WHEN NOT (${candidateAccount}) THEN 'account'
+        WHEN ${hasRefusedDebit} THEN 'refused'
+        WHEN NOT (${hasSpendableBalance}) THEN 'balance'
+        WHEN reached.victimId IS NOT NULL THEN 'dailyCap'
+        ELSE 'eligible'
+      END AS reason
+      FROM User u
+      LEFT JOIN (
+        SELECT victimId FROM ShunMasterRound WHERE day = ${day}
+        GROUP BY victimId HAVING COUNT(*) >= ${victimCap}
+      ) reached ON reached.victimId = u.id
+    ) pool GROUP BY pool.reason
+  `
+  const counts = new Map(rows.map(row => [row.reason, Number(row.count)]))
+  return {
+    day, eligible: counts.get('eligible') ?? 0,
+    excluded: { account: counts.get('account') ?? 0, refused: counts.get('refused') ?? 0,
+      balance: counts.get('balance') ?? 0, dailyCap: counts.get('dailyCap') ?? 0 },
+  }
+}
 const personFields = { uid: true, nickname: true, avatarUrl: true, nicknameModerationStatus: true, nicknameViolationDisplay: true } as const
 
 export class ShunError extends Error {
@@ -86,31 +123,17 @@ async function validLaunchNotice(tx: Tx, id: string | null | undefined) {
 export async function shunStatus(userId: string) {
   const serverNow = new Date()
   const day = shunDay(serverNow)
-  const [state, account, protection, attempts, received] = await Promise.all([
+  const [state, account, attempts, received] = await Promise.all([
     prisma.shunMasterSettings.findUnique({ where: { id: 1 } }),
     prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { points: true } }),
-    prisma.shunMasterProtection.findUnique({ where: { userId } }),
     prisma.shunMasterRound.count({ where: { actorId: userId, day } }),
     prisma.shunMasterRound.count({ where: { victimId: userId, day } }),
   ])
   const config = validateShunConfig(state?.config) || defaultShunConfig
-  return { enabled: config.enabled && await validLaunchNotice(prisma, state?.launchNoticeId), protected: protection?.protected ?? false,
+  return { enabled: config.enabled && await validLaunchNotice(prisma, state?.launchNoticeId),
     balance: account.points,
     remaining: Math.max(0, config.attempts - attempts), received, attempts: config.attempts,
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes, serverNow }
-}
-
-export function setShunProtection(userId: string, protect: boolean) {
-  return shunTransaction(async (tx) => {
-    await settings(tx)
-    const prior = await tx.shunMasterProtection.findUnique({ where: { userId } })
-    if ((prior?.protected ?? false) !== protect) {
-      await tx.shunMasterProtection.upsert({ where: { userId }, create: { userId, protected: protect }, update: { protected: protect } })
-      await tx.userOperationLog.create({ data: { userId, category: 'SHUN_MASTER', action: protect ? 'PROTECT' : 'UNPROTECT',
-        summary: protect ? '开启被顺取保护' : '关闭被顺取保护', source: 'WEB', operatorType: 'USER' } })
-    }
-    return { protected: protect }
-  })
 }
 
 export async function shunAttempt(actorId: string, requestId: string) {
@@ -121,12 +144,9 @@ export async function shunAttempt(actorId: string, requestId: string) {
     if (!config.enabled || !await validLaunchNotice(tx, state.launchNoticeId)) throw new ShunError('DISABLED', '顺大师暂未开放。')
     const now = new Date()
     const day = shunDay(now)
-    const actor = await tx.user.findFirst({ where: { id: actorId, ...eligible },
+    const actor = await tx.user.findFirst({ where: { id: actorId, ...transactionAccount },
       select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } })
     if (!actor) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
-    if ((await tx.shunMasterProtection.findUnique({ where: { userId: actorId } }))?.protected) {
-      throw new ShunError('PROTECTED', '请先关闭匹配保护，再发起顺取。')
-    }
     const played = await tx.shunMasterRound.findMany({ where: { actorId, day }, select: { victimId: true } })
     if (played.length >= config.attempts) throw new ShunError('LIMIT', '今日收工，明天继续！')
     if (state.reserved + state.compensated + 7 > config.budget) {
@@ -143,11 +163,6 @@ export async function shunAttempt(actorId: string, requestId: string) {
       ...(actor.phone && actor.phoneVerifiedAt ? [{ phone: actor.phone, phoneVerifiedAt: { not: null } }] : []),
     ]
     const rangeStart = new Date(`${shunDay(new Date(now.getTime() - 6 * 86_400_000))}T00:00:00+08:00`)
-    const candidateFilter = Prisma.sql`
-      u.status = 'ACTIVE' AND u.isDeleted = false AND u.role = 'USER'
-      AND EXISTS (SELECT 1 FROM Profile p WHERE p.userId = u.id)
-      AND NOT EXISTS (SELECT 1 FROM ShunMasterProtection p WHERE p.userId = u.id AND p.protected = true)
-    `
     const relatedAccounts = linked.length
       ? (await tx.user.findMany({ where: { OR: linked }, select: { id: true } })).map(({ id }) => id)
       : []
@@ -158,7 +173,7 @@ export async function shunAttempt(actorId: string, requestId: string) {
     const slots = new Set<number>()
     if (maxUid && maxUid > 512) while (slots.size < 512) slots.add(randomInt(1, maxUid + 1))
     const indexedSample = slots.size ? Prisma.sql`AND u.uid IN (${Prisma.join([...slots])})` : Prisma.empty
-    const targetFilter = Prisma.sql`${candidateFilter} AND u.points > 0 AND u.id NOT IN (${Prisma.join(targetExclusions)})`
+    const targetFilter = Prisma.sql`${candidateFilter} AND ${hasSpendableBalance} AND u.id NOT IN (${Prisma.join(targetExclusions)})`
     type Target = { id: string; lastActiveAt: Date | null; lastLoginAt: Date | null }
     const indexedTargets = slots.size ? await tx.$queryRaw<Target[]>`
       SELECT u.id, u.lastActiveAt, u.lastLoginAt FROM User u WHERE ${targetFilter} ${indexedSample}`
@@ -197,7 +212,7 @@ export async function shunAttempt(actorId: string, requestId: string) {
     const actorBalance = accounts.get(actorId)
     const victimBalance = accounts.get(victim.id)
     if (actorBalance === undefined || actorBalance < 0 || victimBalance === undefined || victimBalance <= 0 || shunDay(new Date()) !== day
-      || await tx.user.count({ where: { ...eligible, id: { in: [actorId, victim.id] } } }) !== 2) {
+      || await tx.user.count({ where: { ...transactionAccount, id: { in: [actorId, victim.id] } } }) !== 2) {
       throw new ShunError('BALANCE', '账户状态或结算日期已变化，顺取次数未扣除。')
     }
     const rolled = weightedIndex(config.probabilities) + 1
@@ -307,7 +322,7 @@ export async function updateShunConfig(userId: string, config: ShunConfig, launc
     const launchNoticeId = launch?.noticeId === undefined ? state.launchNoticeId : launch.noticeId || null
     if (config.enabled && ((!old.enabled || launchNoticeId !== state.launchNoticeId) && !launch?.confirmed
       || !await validLaunchNotice(tx, launchNoticeId))) {
-      throw new ShunError('NOTICE_REQUIRED', '请先发布顺大师全站公告，说明挂号费扣除和保护选项，并确认开放。')
+      throw new ShunError('NOTICE_REQUIRED', '请先发布顺大师全站公告，说明挂号费扣除和历史拒绝记录保护，并确认开放。')
     }
     const rulesVersion = state.rulesVersion + Number(shunRulesChanged(old, config))
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config, rulesVersion, launchNoticeId } })

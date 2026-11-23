@@ -11,7 +11,7 @@ import styles from './shun.module.css'
 type Person = { uid: number; nickname: string; avatarUrl: string | null }
 type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' | 'FAILED' | null
   createdAt: string; goldenUntil: string; person: Person | null; canCapture: boolean }
-type Status = { enabled: boolean; protected: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
+type Status = { enabled: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null; windowAt: string }
 type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
 type Side = 'in' | 'out'
@@ -40,7 +40,7 @@ function PersonLabel({ person, link = false }: { person: Person | null; link?: b
     : <span className={styles.person}>{content}</span>
 }
 
-export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord?: string; initialSide: Side }) {
+export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: { focusedRecord?: string; initialSide: Side; initialGuest: boolean }) {
   const [status, setStatus] = useState<Status>()
   const [side, setSide] = useState<Side>(initialSide)
   const [range, setRange] = useState('all')
@@ -53,7 +53,7 @@ export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord
   const [now, setNow] = useState<number>()
   const [clockOffset, setClockOffset] = useState(0)
   const [error, setError] = useState('')
-  const [guest, setGuest] = useState(false)
+  const [guest, setGuest] = useState(initialGuest)
   const [busy, setBusy] = useState('')
   const [loading, setLoading] = useState(false)
   const [recordError, setRecordError] = useState('')
@@ -94,7 +94,7 @@ export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord
       if (version === sequence.current) setLoading(false)
     }
   }, [side, focusedRecord, initialSide, range, dateKey])
-  useEffect(() => { void loadStatus() }, [loadStatus])
+  useEffect(() => { if (!initialGuest) void loadStatus() }, [initialGuest, loadStatus])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
   useEffect(() => {
@@ -180,19 +180,14 @@ export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord
             <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
             <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
           </dl>
-          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining || status.protected} onClick={() => void attempt()}>
+          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => void attempt()}>
             {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
           </button>}
-          <button disabled={!!busy} aria-pressed={status.protected} onClick={() => void perform('protection', async () => {
-            await api('protection', { protected: !status.protected })
-            await loadStatus()
-          })}>{status.protected ? '关闭匹配保护' : '开启匹配保护'}</button>
-          {status.protected && <p role="status">匹配保护已开启。你将不参与新的顺取，仍可抓捕和查看历史记录。</p>}
         </>}
         <details><summary>玩法说明</summary>
-          <p>游戏开放后，符合条件的 E院账号可能被匹配，成功时对方扣除相同的挂号费。每天最多顺取 {status?.attempts ?? 7} 次、被顺 {status?.victimCap ?? 4} 次，每笔 1–7 挂号费，北京时间零点重置。</p>
+          <p>顺大师是私家E院的互动游戏。正式开放前，管理员会发布全站公告。游戏开放后，正常登录用户可以直接顺取，符合条件的账号可能被匹配。</p>
+          <p>顺取成功后，双方挂号费余额会发生等额变化。每天最多顺取 {status?.attempts ?? 7} 次、被顺 {status?.victimCap ?? 4} 次，每笔 1–7 挂号费，北京时间零点重置。</p>
           <p>被顺后有一次抓捕机会。前 {status?.goldenMinutes ?? 10} 分钟二选一，之后三选一。猜中全额追回，对方余额不足的部分由平台补足，猜错不返还。</p>
-          <p>你可以随时开启匹配保护，停止参加新的顺取与被顺。历史记录与抓捕权利保留。</p>
         </details>
       </section>
       {status && <section className={styles.panel} aria-label="历史记录">
@@ -242,7 +237,7 @@ export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord
         <strong>+{result.amount} 挂号费</strong>
         <div className={styles.tabs}>
           <button type="button" autoFocus onClick={() => setResult(undefined)}>关闭</button>
-          <button type="button" className={styles.primary} disabled={!!busy || !status?.remaining || !status?.enabled || status.protected}
+          <button type="button" className={styles.primary} disabled={!!busy || !status?.remaining || !status?.enabled}
             onClick={() => void attempt()}>{status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
         </div>
       </div>}
