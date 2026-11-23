@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { ShunError, shunAttempt, shunRecords, shunStatus } from '@/lib/shun-master'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
@@ -13,7 +13,7 @@ function json(data: unknown, status = 200) {
 }
 
 export async function GET(request: Request, { params }: Context) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { action } = await params
   try {
@@ -50,7 +50,7 @@ export async function GET(request: Request, { params }: Context) {
 export async function POST(request: Request, { params }: Context) {
   const origin = rejectInvalidRequestOrigin(request)
   if (origin) return origin
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { action } = await params
   if (action !== 'attempt') return json({ message: '未找到操作。' }, 404)
