@@ -44,7 +44,7 @@ export function makeMemoirZip(files: { name: string; bytes: Uint8Array<ArrayBuff
   return new Blob([...entries, ...directory, end.buffer], { type: 'application/zip' })
 }
 
-export async function renderMemoirZip(report: MemoirAlbum, year: number, onProgress: (count: number) => void, prepared?: Promise<ReadonlyMap<string, HTMLImageElement>>) {
+export async function renderMemoirImages(report: MemoirAlbum, year: number, onProgress: (count: number) => void, prepared?: Promise<ReadonlyMap<string, HTMLImageElement>>) {
   const [badgeImages] = await Promise.all([prepared ?? loadMemoirBadges(report.badgeCollage), document.fonts.ready])
   const canvas = document.createElement('canvas')
   try {
@@ -56,11 +56,16 @@ export async function renderMemoirZip(report: MemoirAlbum, year: number, onProgr
         (blob) => blob?.type === 'image/jpeg' ? resolve(blob) : reject(new Error('JPEG_UNAVAILABLE')),
         'image/jpeg', 0.94,
       ))
-      files.push({ name: `${number}-${title}.jpg`, bytes: new Uint8Array(await jpg.arrayBuffer()) })
+      files.push(new File([jpg], `${number}-${title}.jpg`, { type: 'image/jpeg' }))
       onProgress(index + 1)
     }
-    return makeMemoirZip(files)
+    return files
   } finally {
     canvas.width = canvas.height = 0
   }
+}
+
+export async function renderMemoirZip(report: MemoirAlbum, year: number, onProgress: (count: number) => void, prepared?: Promise<ReadonlyMap<string, HTMLImageElement>>) {
+  const files = await renderMemoirImages(report, year, onProgress, prepared)
+  return makeMemoirZip(await Promise.all(files.map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }))))
 }

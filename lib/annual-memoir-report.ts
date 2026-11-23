@@ -2,18 +2,26 @@ import type { Prisma } from '@prisma/client'
 import { getMemoirAvailability } from '@/lib/annual-memoir-policy'
 import { buildPublicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
-import { collectBestGame, collectCommunityMemory, isMemoirMemoryVisible } from '@/lib/annual-memoir-moments'
+import { collectBestGame, collectFirstMemoirPost, collectMemoirPeer, isFirstMemoirPostVisible, isMemoirMemoryVisible, isMemoirPeerVisible } from '@/lib/annual-memoir-moments'
 import { collectMemoirBadges, visibleMemoirBadges } from '@/lib/annual-memoir-badge-data'
+import { memoirIdentity } from '@/lib/annual-memoir-identity'
 
 async function presentSnapshot(snapshot: Awaited<ReturnType<typeof prisma.annualMemoirSnapshot.findFirst>>) {
   if (!snapshot) return null
-  const payload = snapshot.payload as unknown as MemoirReport
+  const payload = snapshot.payload as unknown as MemoirReport & {
+    communityMemory?: Parameters<typeof isMemoirMemoryVisible>[2] | null
+  }
   const memory = payload.communityMemory
-  const [visible, badgeCollage] = await Promise.all([
+  const { firstPost, topPeer } = payload
+  const [visible, badgeCollage, firstVisible, peerVisible] = await Promise.all([
     memory && isMemoirMemoryVisible(prisma, snapshot.userId, memory),
     visibleMemoirBadges(prisma, snapshot.userId, payload.badgeCollage ?? []),
+    firstPost && isFirstMemoirPostVisible(prisma, snapshot.userId, firstPost),
+    topPeer && isMemoirPeerVisible(prisma, snapshot.userId, topPeer),
   ])
   return { ...snapshot, payload: { ...payload, badgeCollage, featuredBadge: null, featuredBadgeDate: null,
+    firstPost: firstPost && firstVisible ? { excerpt: firstPost.excerpt, date: firstPost.date } : firstPost === undefined ? undefined : null,
+    topPeer: topPeer && peerVisible ? { nickname: topPeer.nickname, wall: topPeer.wall, comments: topPeer.comments } : null,
     communityMemory: memory && visible ? { kind: memory.kind, excerpt: memory.excerpt, date: memory.date } : null } }
 }
 
@@ -26,7 +34,7 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
   const publicPost = buildPublicPostWhere(end)
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { uid: true, nickname: true, createdAt: true } })
   const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', dateStyle: 'short' })
-  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, badgeCollage, topicApprovals, topicRegistrations, attendance, communityMemory, bestGame] = await Promise.all([
+  const [checkIns, posts, replies, likesGiven, likesReceived, friends, followers, games, badges, badgeCollage, topicApprovals, topicRegistrations, attendance, firstPost, topPeer, bestGame, wantListen, duels] = await Promise.all([
     tx.checkIn.findMany({ where: { userId, checkDate: range }, select: { checkDate: true, exp: true } }),
     tx.post.findMany({ where: { ...publicPost, authorId: userId, publishedAt: range }, select: { publishedAt: true } }),
     tx.reply.findMany({ where: { authorId: userId, createdAt: range, isDeleted: false, moderationStatus: 'NORMAL', Post: publicPost }, select: { createdAt: true } }),
@@ -52,8 +60,12 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
           { checkedInAt: range, checkInSource: { in: ['MANUAL', 'QR'] } }] },
       select: { activityId: true },
     }),
-    collectCommunityMemory(tx, userId, range, formatter),
+    collectFirstMemoirPost(tx, userId, range, formatter),
+    collectMemoirPeer(tx, userId, range),
     collectBestGame(tx, userId, range),
+    tx.wantListenSession.count({ where: { userId, completedAt: range, status: 'COMPLETED', antiCheatStatus: 'CLEAN', excludedFromLeaderboard: false } }),
+    tx.guessSongDuelPlayer.count({ where: { userId, suspicious: false, Match: { status: 'FINISHED', finishedAt: range, isSuspicious: false,
+      finishReason: { in: ['SCORE_THRESHOLD', 'ALL_QUESTIONS', 'TIEBREAKER'] } } } }),
   ])
   const dates = [...checkIns.map((row) => row.checkDate), ...posts.flatMap((row) => row.publishedAt ? [row.publishedAt] : []), ...replies.map((row) => row.createdAt)]
   const days = [...new Set(dates.map((date) => formatter.format(date)))].sort()
@@ -67,7 +79,11 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     longestCheckInRun = Math.max(longestCheckInRun, run)
     previous = current
   }
-  const title = posts.length >= 5 ? '故事记录者' : friends >= 3 ? '最佳损友' : games._count >= 5 ? '游戏冒险家' : badges >= 3 ? '勋章收藏家' : days.length ? '默默陪伴者' : '故事刚刚开始'
+  const topics = new Set([...topicApprovals, ...topicRegistrations].map((row) => row.activityId)).size
+  const offlineMeetups = new Set(attendance.map((row) => row.activityId)).size
+  const title = memoirIdentity({ posts: posts.length, replies: replies.length, friends,
+    interactions: (topPeer?.wall ?? 0) + (topPeer?.comments ?? 0), games: games._count + wantListen + duels,
+    badges, activities: topics + offlineMeetups, activeDays: days.length })
   return {
     nickname: user.nickname, uid: user.uid, registered: formatter.format(user.createdAt),
     firstRecordedDay: days[0] ?? null, activeDays: days.length,
@@ -75,11 +91,10 @@ async function collect(tx: Prisma.TransactionClient, userId: string, start: Date
     checkInExperience: checkIns.reduce((sum, row) => sum + row.exp, 0),
     posts: posts.length, replies: replies.length, likesGiven, likesReceived, friends, followers,
     games: games._count, bestScore: games._max.score, badges, badgeCollage,
-    communityMemory, bestGame,
+    firstPost, topPeer, bestGame,
     // Live leaderboard entries are mutable and do not record official settlements.
     monthlyFirsts: null, weeklyFirsts: null,
-    topics: new Set([...topicApprovals, ...topicRegistrations].map((row) => row.activityId)).size,
-    offlineMeetups: new Set(attendance.map((row) => row.activityId)).size, title,
+    topics, offlineMeetups, title,
     message: '等到葡萄成熟时，才发现这一年，原来已经这么甜。',
   }
 }

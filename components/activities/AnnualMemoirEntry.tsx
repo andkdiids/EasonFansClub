@@ -26,7 +26,7 @@ export function AnnualMemoirEntry({ entry, description }: {
       <AnnualMemoirActions
         href={href} title={config.activity.title} serverNow={serverNow} reportOpens={config.reportOpensAt.getTime()}
         reservationCloses={config.reservationClosesAt.getTime()} endsAt={config.endsAt.getTime()}
-        canReserve={state.canReserve} canGenerate={state.canGenerate} hasSnapshot={hasSnapshot} ended={ended}
+        canReserve={state.canReserve} canGenerate={state.canGenerate} activityDetail={detail} hasSnapshot={hasSnapshot} ended={ended}
         reservation={reservation && { points: reservation.points, badgeId: reservation.badgeId,
           pointsGrantedAt: reservation.pointsGrantedAt?.toISOString() ?? null, badgeGrantedAt: reservation.badgeGrantedAt?.toISOString() ?? null }}
         points={config.reservationPoints} badge={reservationBadgeName} />
