@@ -29,14 +29,17 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     const config = { ...defaultShunConfig, enabled: false, budget: 500 }
     await updateShunConfig(operator.id, config)
     assert.equal((await shunStatus(operator.id)).enabled, false)
-    await assert.rejects(setShunEnabled(operator.id, true), { code: 'CONFIRM_REQUIRED' })
-    await assert.rejects(setShunEnabled(operator.id, true, true), { code: 'NOTICE_REQUIRED' })
-    const notice = await prisma.systemNotification.create({ data: { createdById: operator.id, title: '顺大师开放公告',
-      content: '顺大师挂号费扣除规则与匹配保护方式', type: 'ANNOUNCEMENT', isPublished: true, published: true,
-      publishedAt: new Date(), publishAt: new Date() } })
-    const publish = async (settings: typeof config) => { await updateShunConfig(operator.id, settings); await setShunEnabled(operator.id, true, true) }
+    const beforeNoticeId = (await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId
+    assert.equal(await prisma.systemNotification.count({ where: { title: { contains: '顺大师' } } }), 0)
+    const beforeToggleLogs = await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } })
+    const toggles = await Promise.all(Array.from({ length: 8 }, () => setShunEnabled(operator.id, true)))
+    assert.ok(toggles.every((result) => result.effectiveEnabled))
+    assert.equal(await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } }), beforeToggleLogs + 1)
+    await setShunEnabled(operator.id, true)
+    assert.equal(await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } }), beforeToggleLogs + 1)
+    assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId, beforeNoticeId)
+    const publish = async (settings: typeof config) => { await updateShunConfig(operator.id, settings); await setShunEnabled(operator.id, true) }
     await publish(config)
-    assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId, notice.id)
     const [protectedUser, banned, deleted, protectedAdmin] = await Promise.all(Array.from({ length: 4 }, () => createUser(100)))
     await seedRefusal(protectedUser.id)
     await seedRefusal(protectedAdmin.id)
@@ -134,8 +137,12 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'BUDGET' })
     assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved, expired.amount)
     await updateShunConfig(operator.id, { ...config, budget: state.reserved + state.compensated })
-    await setShunEnabled(operator.id, false)
-    await assert.rejects(setShunEnabled(operator.id, true, true), { code: 'BUDGET' })
+    const beforeClose = await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } })
+    const closes = await Promise.all(Array.from({ length: 8 }, () => setShunEnabled(operator.id, false)))
+    assert.ok(closes.every((result) => !result.effectiveEnabled))
+    assert.equal((await shunStatus(operator.id)).enabled, false)
+    assert.equal(await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } }), beforeClose + 1)
+    await assert.rejects(setShunEnabled(operator.id, true), { code: 'BUDGET' })
     await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'DISABLED' })
     assert.equal((await shunCapture(victim.id, expired.id, { mode: 3, uid: expiredOwner.uid })).record?.result, 'SUCCESS')
     assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved, 0)
