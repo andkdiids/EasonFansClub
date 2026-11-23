@@ -2,14 +2,14 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export const memoirPrimary = 'inline-flex min-h-12 w-full items-center justify-center rounded-sm bg-[#69354d] px-4 py-3 text-center font-bold leading-snug text-[#fff6e8] hover:bg-[#54283d] disabled:opacity-70'
 
 type Reservation = { points: number; badgeId: string | null; pointsGrantedAt: string | null; badgeGrantedAt: string | null }
 type Props = {
   href: string; title: string; serverNow: number; reportOpens: number; reservationCloses: number; endsAt: number
-  canReserve: boolean; canGenerate: boolean; hasSnapshot: boolean; ended: boolean
+  canReserve: boolean; canGenerate: boolean; activityDetail: boolean; hasSnapshot: boolean; ended: boolean
   reservation: Reservation | null; points: number; badge: string | null
 }
 
@@ -19,13 +19,15 @@ function clockText(seconds: number) {
 }
 
 export function AnnualMemoirActions(props: Props) {
-  const { href, title, serverNow, reportOpens, reservationCloses, endsAt, canReserve, canGenerate, hasSnapshot, ended, points, badge } = props
+  const { href, title, serverNow, reportOpens, reservationCloses, endsAt, canReserve, canGenerate, activityDetail, hasSnapshot, ended, points, badge } = props
   const router = useRouter()
   const [serverClock, setServerClock] = useState(serverNow)
   const [localReservation, setLocalReservation] = useState<Reservation | null>(null)
   const reservation = props.reservation ?? localReservation
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
+  const opening = useRef(false)
+  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
   const nextPhase = [reservationCloses, reportOpens, endsAt].filter((time) => time > serverNow).sort((a, b) => a - b)[0]
   useEffect(() => {
@@ -65,11 +67,33 @@ export function AnnualMemoirActions(props: Props) {
     }
   }
 
+  async function openMemoir() {
+    if (opening.current || !activityDetail) return
+    opening.current = true
+    setGenerating(true)
+    setError('')
+    try {
+      const response = await fetch('/api' + href + '/annual-memoir', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: true }),
+      })
+      if (response.status === 401) { router.push('/login?next=' + encodeURIComponent(href)); return }
+      if (!response.ok) throw new Error()
+      // The report document must read the newly committed snapshot, not a prefetched route.
+      window.location.assign(href + '/annual-memoir')
+    } catch {
+      setError('暂时无法开启年度回忆，请重试。')
+    } finally {
+      opening.current = false
+      setGenerating(false)
+    }
+  }
+
   return <div className="min-w-0 space-y-4">
     {!ended && !canGenerate && !hasSnapshot && serverNow < reportOpens && <div className="space-y-2"><p className="text-sm font-semibold">距离你的年度回忆开启，还有</p><p aria-label="距年度报告开放" className="font-mono text-[clamp(1.6rem,8vw,2.75rem)] font-semibold leading-none tabular-nums tracking-tight text-[#69354d]">
       {clockText(Math.max(0, Math.ceil((reportOpens - Math.max(serverNow, serverClock)) / 1000)))}
     </p></div>}
-    {hasSnapshot || canGenerate ? <Link className={memoirPrimary} href={href + '/annual-memoir'}>{hasSnapshot ? '查看我的年度回忆' : '开启我在私家E院的年度回忆'}</Link> :
+    {hasSnapshot ? <Link prefetch={false} className={memoirPrimary} href={href + '/annual-memoir'}>查看我的年度回忆</Link> :
+      canGenerate ? (activityDetail ? <button type="button" className={memoirPrimary} disabled={generating} aria-busy={generating} onClick={() => void openMemoir()}>{generating ? <span className="motion-safe:animate-pulse">你的年度回忆，正在慢慢展开……</span> : '开启我在私家E院的年度回忆'}</button> : null) :
       reservation ? <p className={'flex min-h-12 items-center justify-center rounded-sm bg-[#e9d8d9] px-3 py-2 text-center font-semibold text-[#54283d]'}>{ended ? '已预约 · 活动已结束' : '已预约 · 等待回忆开启'}</p> :
       canReserve && serverClock < reservationCloses && !confirm ? <button type="button" className={memoirPrimary} onClick={() => setConfirm(true)}>预约我在私家E院的年度回忆</button> :
       !confirm ? <p className="text-sm text-[#58434b]">{ended ? '活动已结束' : '预约已截止'}</p> : null}

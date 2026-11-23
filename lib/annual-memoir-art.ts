@@ -5,6 +5,8 @@ export const memoirChapters = ['初次见面', '日子有功', '有话好说', '
 export type MemoirAlbum = {
   nickname: string; uid: number; registered: string
   communityMemory?: { kind: 'POST' | 'REPLY'; excerpt: string; date: string } | null
+  firstPost?: { excerpt: string; date: string } | null
+  topPeer?: { nickname: string; wall: number; comments: number } | null
   bestGame?: { score: number; mode: string } | null
   monthlyFirsts?: number | null; weeklyFirsts?: number | null
   activeDays?: number; checkIns?: number; checkInExperience?: number; posts?: number; replies?: number
@@ -46,7 +48,11 @@ export function describeMemoirPage(r: MemoirAlbum, i: number): string {
     ['活跃 ' + number(r.activeDays) + ' 天', '挂号 ' + number(r.checkIns) + ' 天', number(r.checkInExperience) + ' 挂号经验', r.longestCheckInRun !== undefined ? '最长连续挂号 ' + number(r.longestCheckInRun) + ' 天' : ''],
     [number(r.posts) + ' 篇公开帖子', number(r.replies) + ' 条公开评论', '送出 ' + number(r.likesGiven) + ' 赞', '收到 ' + number(r.likesReceived) + ' 赞'],
     [number(r.friends) + ' 段新友谊'],
-    [r.communityMemory ? [memoryLabel(r.communityMemory.kind), r.communityMemory.excerpt, date(r.communityMemory.date)].join('。') : memoryEmpty],
+    r.firstPost !== undefined ? [
+      r.firstPost ? ['来到 E院写下的第一篇帖子', r.firstPost.excerpt, date(r.firstPost.date)].join('。') : memoryEmpty,
+      '这一年，与你互动最多的 EF',
+      r.topPeer ? r.topPeer.nickname + ' · 留言 ' + r.topPeer.wall + ' 次 · 评论 ' + r.topPeer.comments + ' 次' : '下一段故事，等着与你相遇的人。',
+    ] : [r.communityMemory ? [memoryLabel(r.communityMemory.kind), r.communityMemory.excerpt, date(r.communityMemory.date)].join('。') : memoryEmpty],
     ['最高单局分数 ' + number(bestGame(r)?.score), bestGame(r)?.mode, '月度第一 ' + number(r.monthlyFirsts), '周度第一 ' + number(r.weeklyFirsts)],
     [number(r.badges) + ' 枚获得的勋章', ...(r.badgeCollage ?? []).map(({ name }) => name)],
     ['参与过的话题活动 ' + number(r.topics) + ' 场', '和大家线下见面 ' + number(r.offlineMeetups) + ' 次'],
@@ -185,6 +191,23 @@ export function drawMemoirPage(canvas: HTMLCanvasElement, r: MemoirAlbum, year: 
     case 4: {
       const memory = r.communityMemory
       title(140,359)
+      if (r.firstPost !== undefined) {
+        rect(126,514,828,474,'#fff4dc',8)
+        text('来到 E院写下的第一篇帖子',180,612,45,718,true)
+        line(180,652,900,652,gold)
+        lines(r.firstPost?.excerpt ?? memoryEmpty,180,740,44,718,3,true)
+        if (r.firstPost) text(date(r.firstPost.date),180,938,33,718)
+        rect(126,1042,828,407,'#f8e6d2',8)
+        text('这一年，与你互动最多的 EF',180,1140,45,718,true)
+        line(180,1180,900,1180,gold)
+        if (r.topPeer) {
+          text(r.topPeer.nickname,180,1302,78,718,true)
+          text('留言 ' + r.topPeer.wall + ' 次  ·  评论 ' + r.topPeer.comments + ' 次',183,1390,40,718)
+        } else {
+          lines('下一段故事，等着与你相遇的人。',180,1310,45,718,2,true)
+        }
+        break
+      }
       c.save(); c.translate(132,533); c.rotate(-.047)
       rect(0,0,834,922,'#fff4dc',6)
       rect(29,31,776,848,'#f5e4d1',4)

@@ -18,7 +18,9 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
         import { createRoot } from 'react-dom/client'
         import { MemoirReader } from './app/activities/[activityId]/annual-memoir/MemoirReader'
         createRoot(document.getElementById('root')).render(<MemoirReader activityId="fixture-activity" year={2026}
-          preview canGenerate={false} initialReport={{ nickname: '想把故事留在葡萄树下的长昵称合成测试用户', uid: 747272, registered: '2026-01-01',
+          preview initialReport={{ nickname: '想把故事留在葡萄树下的长昵称合成测试用户', uid: 747272, registered: '2026-01-01',
+            firstPost: { excerpt: '这是合成验收账号写下的第一篇帖子。', date: '2026-08-18' },
+            topPeer: { nickname: '合成验收 EF', wall: 2, comments: 3 },
             communityMemory: { kind: 'POST', excerpt: '散场后我们一路哼着歌。', date: '2026-10-18' },
             bestGame: { score: 128, mode: '粤语残片' }, monthlyFirsts: 1, weeklyFirsts: 3,
             activeDays: 987654321, checkIns: 8, checkInExperience: 20, posts: 3,
@@ -36,13 +38,18 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
     if (output) await mkdir(output, { recursive: true })
     for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
       const page = await browser.newPage({ viewport, acceptDownloads: true, reducedMotion: viewport.width === 390 ? 'reduce' : 'no-preference' })
-      await page.setContent('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><div id="root"></div>')
+      await page.route('http://memoir-fixture.test/', (route) => route.fulfill({
+        contentType: 'text/html', body: '<meta charset="utf-8"><meta name="viewport" content="width=device-width"><div id="root"></div>',
+      }))
+      await page.goto('http://memoir-fixture.test/')
       await page.addScriptTag({ content: bundle.outputFiles[0].text })
-      await page.getByRole('button', { name: '查看我的年度回忆' }).click()
+      await page.getByRole('dialog', { name: '葡萄成熟时年度回忆录' }).waitFor()
       const stage = page.getByRole('region', { name: '年度报告画册' })
       const next = page.getByRole('button', { name: '下一页' })
-      await page.keyboard.press('ArrowRight')
       if (viewport.width === 1280) {
+        await page.evaluate(() => {
+          for (let i = 0; i < 2; i++) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+        })
         const layers = await stage.locator('[data-memoir-layer]').evaluateAll((nodes) => {
           return nodes.map((node) => {
             const animation = node.getAnimations()[0]
@@ -53,14 +60,17 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
         })
         assert.deepEqual(layers.map((item) => item?.direction), ['outgoing', 'incoming'])
         assert.ok(layers.every((item) => item && item.opacity > 0 && item.opacity < 1))
+        assert.equal(await page.locator('.memoir-reader-bar [role="status"]').textContent(), '2 / 10')
+        if (output) await page.screenshot({ path: join(output, 'crossfade-desktop.png') })
+      } else {
         await page.keyboard.press('ArrowRight')
-        assert.equal(await page.locator('progress').getAttribute('value'), '2')
-      } else assert.equal(await stage.locator('[data-memoir-layer="outgoing"]').count(), 0)
+        assert.equal(await stage.locator('[data-memoir-layer="outgoing"]').count(), 0)
+      }
       await stage.locator('[data-memoir-layer="stable"]').waitFor()
       if (viewport.width === 390) {
         await stage.evaluate((el) => {
-          const start = new Touch({ identifier: 1, target: el, clientX: 90, clientY: 100 })
-          const end = new Touch({ identifier: 1, target: el, clientX: 180, clientY: 103 })
+          const start = new Touch({ identifier: 1, target: el, clientX: 180, clientY: 100 })
+          const end = new Touch({ identifier: 1, target: el, clientX: 90, clientY: 103 })
           el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [start] }))
           el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, changedTouches: [end] }))
         })
@@ -69,7 +79,7 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
       const chapters = ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日']
       for (const [index, chapter] of chapters.entries()) {
         await page.getByRole('heading', { name: chapter, exact: true }).waitFor()
-        if (output && [4, 5, 7].includes(index)) {
+        if (output && [0, 4, 8].includes(index)) {
           await stage.locator('[data-memoir-layer="stable"]').waitFor()
           await stage.locator('canvas').screenshot({ path: join(output, `chapter-${index + 1}-${viewport.width}.png`) })
         }
@@ -78,8 +88,10 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
       await stage.locator('[data-memoir-layer="stable"]').waitFor()
       const [download] = await Promise.all([
         page.waitForEvent('download'),
-        page.getByRole('button', { name: '保存我的年度报告' }).click(),
-      ])
+        page.getByRole('button', { name: '下载全部图片（ZIP）' }).click(),
+      ]).catch(async (cause) => {
+        throw new Error('ZIP control status: ' + await page.getByRole('dialog').innerText(), { cause })
+      })
       assert.equal(download.suggestedFilename(), '葡萄成熟时-2026.zip')
       const archive = await readFile((await download.path())!)
       if (output && viewport.width === 390) await writeFile(join(output, download.suggestedFilename()), archive)
@@ -97,7 +109,66 @@ test('desktop and mobile-width readers navigate ten chapters and download the ar
         const decoded = await sharp(archive.subarray(data, data + archive.readUInt32LE(directory + 24))).raw().toBuffer({ resolveWithObject: true })
         assert.equal(decoded.info.width, 1080)
         assert.equal(decoded.info.height, 1920)
+        if (output && viewport.width === 390 && [4, 8].includes(index)) {
+          await writeFile(join(output, `${index + 1}-${chapter}.jpg`), archive.subarray(data, data + archive.readUInt32LE(directory + 24)))
+        }
         directory += 46 + filenameLength
+      }
+      await page.close()
+    }
+    for (const width of [320, 360, 375, 390, 414, 430]) {
+      const page = await browser.newPage({ viewport: { width, height: 720 }, isMobile: true, hasTouch: true,
+        reducedMotion: 'reduce', userAgent: 'Mobile MicroMessenger/8.0' })
+      await page.setContent('<meta charset="utf-8"><meta name="viewport" content="width=device-width"><nav aria-label="站点导航"><a href="/">首页</a></nav><div id="root"></div>')
+      await page.addScriptTag({ content: bundle.outputFiles[0].text })
+      const dialog = page.getByRole('dialog')
+      await dialog.waitFor()
+      assert.equal(await page.evaluate(() => {
+        const outside = document.querySelector<HTMLElement>('nav a')!
+        outside.focus()
+        return document.activeElement === outside
+      }), false)
+      assert.equal(await page.getByRole('button', { name: '下一页' }).isVisible(), false)
+      const stage = page.getByRole('region', { name: '年度报告画册' })
+      const dimensions = await stage.locator('canvas').evaluate((canvas) => {
+        const frame = canvas.closest('dialog')!.getBoundingClientRect()
+        const image = canvas.getBoundingClientRect()
+        return { viewport: innerHeight, frame: frame.height, image: image.width / image.height,
+          contained: image.left >= frame.left && image.right <= frame.right && image.top >= frame.top && image.bottom <= frame.bottom }
+      })
+      assert.equal(dimensions.frame, dimensions.viewport)
+      assert.ok(dimensions.contained && Math.abs(dimensions.image - 9 / 16) < 0.006)
+      if (width === 390) {
+        const swipe = async (dx: number, dy: number) => stage.evaluate((target, { dx, dy }) => {
+          const start = new Touch({ identifier: 17, target, clientX: 145, clientY: 180 })
+          const end = new Touch({ identifier: 17, target, clientX: 145 + dx, clientY: 180 + dy })
+          target.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [start] }))
+          target.dispatchEvent(new TouchEvent('touchend', { bubbles: true, changedTouches: [end] }))
+        }, { dx, dy })
+        if (output) await page.screenshot({ path: join(output, 'immersive-first-mobile.png') })
+        await swipe(13, 140)
+        assert.equal(await stage.getByRole('heading', { name: '初次见面' }).count(), 1)
+        await swipe(90, 2)
+        await stage.getByRole('heading', { name: '日子有功' }).waitFor()
+        assert.equal(await page.getByText('向右轻滑，翻开下一页 →').count(), 0)
+        await swipe(-90, 1)
+        await stage.getByRole('heading', { name: '初次见面' }).waitFor()
+        for (let index = 0; index < 9; index++) await swipe(90, 2)
+        await stage.getByRole('heading', { name: '明年今日' }).waitFor()
+        await page.getByRole('button', { name: '逐张保存图片' }).click()
+        const gallery = page.getByRole('region', { name: '年度回忆图片' })
+        for (const [index, title] of ['初次见面', '日子有功', '有话好说', '最佳损友', '念念不忘', '游戏人间', '闪闪发光', '我们万岁', '年度身份', '明年今日'].entries()) {
+          const image = gallery.getByRole('img', { name: title })
+          const natural = await image.evaluate(async (img: HTMLImageElement) => {
+            await img.decode()
+            return [img.naturalWidth, img.naturalHeight, img.src.startsWith('blob:')]
+          })
+          assert.deepEqual(natural, [1080, 1920, true])
+          if (output && index === 0) await page.screenshot({ path: join(output, 'wechat-user-agent-gallery.png') })
+          if (index < 9) await gallery.getByRole('button', { name: '下一张' }).click()
+        }
+        await gallery.getByRole('button', { name: '返回画册' }).click()
+        await stage.getByRole('heading', { name: '明年今日' }).waitFor()
       }
       await page.close()
     }

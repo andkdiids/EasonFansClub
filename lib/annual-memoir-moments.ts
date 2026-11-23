@@ -13,26 +13,76 @@ function memoryPostWhere() {
   return { ...buildPublicPostWhere(), moderationStatus: 'APPROVED', Board: { isActive: true } } satisfies Prisma.PostWhereInput
 }
 
-export async function collectCommunityMemory(tx: Prisma.TransactionClient, userId: string, range: Range, formatter: Intl.DateTimeFormat): Promise<Memory | null> {
-  const publicPost = memoryPostWhere()
+type FirstPost = { id: string; excerpt: string; date: string }
+type MemoirPeer = { id: string; nickname: string; wall: number; comments: number }
+
+const postExcerpt = (post: { content: string; title: string }) => excerpt(post.content.replace(/<[^>]*>/g, ' ') || post.title) || excerpt(post.title)
+
+export async function isFirstMemoirPostVisible(tx: Prisma.TransactionClient, userId: string, memory: FirstPost) {
   const post = await tx.post.findFirst({
-    where: { ...publicPost, authorId: userId, publishedAt: range, NOT: { title: '' } },
-    // Later likes must not change the selection for a closed reporting period.
-    orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }],
-    select: { id: true, title: true, publishedAt: true },
+    where: { ...memoryPostWhere(), id: memory.id, authorId: userId },
+    select: { title: true, content: true },
   })
-  if (post?.publishedAt && excerpt(post.title)) {
-    return { id: post.id, kind: 'POST', excerpt: excerpt(post.title), date: formatter.format(post.publishedAt) }
+  return !!post && postExcerpt(post) === memory.excerpt
+}
+
+export async function collectFirstMemoirPost(tx: Prisma.TransactionClient, userId: string, range: Range, formatter: Intl.DateTimeFormat): Promise<FirstPost | null> {
+  // Keep the historical first published row even when it is soft-deleted or moderated later.
+  // Selecting from only currently visible posts would mislabel the second post.
+  const post = await tx.post.findFirst({
+    where: { authorId: userId, publishedAt: range, publicationStatus: 'PUBLISHED', concertShowId: null, TopicActivity: null },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { id: true, title: true, content: true, publishedAt: true },
+  })
+  if (!post?.publishedAt) return null
+  const memory = { id: post.id, excerpt: postExcerpt(post), date: formatter.format(post.publishedAt) }
+  return memory.excerpt && await isFirstMemoirPostVisible(tx, userId, memory) ? memory : null
+}
+
+function memoirPeerWhere(userId: string): Prisma.UserWhereInput {
+  return {
+    id: { not: userId }, status: 'ACTIVE', isDeleted: false,
+    Profile: { is: { displayNameModerationStatus: 'NORMAL' } },
+    Block_Block_blockedIdToUser: { none: { blockerId: userId } },
+    Block_Block_blockerIdToUser: { none: { blockedId: userId } },
   }
-  const reply = await tx.reply.findFirst({
-    where: { authorId: userId, createdAt: range, isDeleted: false, moderationStatus: 'NORMAL', Post: publicPost,
-      TopicActivitySubmission: null, parentId: null, NOT: { content: '' } },
-    orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-    select: { id: true, content: true, createdAt: true },
-  })
-  return reply && excerpt(reply.content)
-    ? { id: reply.id, kind: 'REPLY', excerpt: excerpt(reply.content), date: formatter.format(reply.createdAt) }
-    : null
+}
+
+export async function isMemoirPeerVisible(tx: Prisma.TransactionClient, userId: string, peer: MemoirPeer) {
+  return !!await tx.user.findFirst({ where: { AND: [memoirPeerWhere(userId), { id: peer.id },
+    ...(peer.comments ? [publicCommentHistory] : [])] }, select: { id: true } })
+}
+
+const publicCommentHistory = { OR: [{ UserPrivacySetting: null }, { UserPrivacySetting: { showComments: true } }] } satisfies Prisma.UserWhereInput
+
+export async function collectMemoirPeer(tx: Prisma.TransactionClient, userId: string, range: Range): Promise<MemoirPeer | null> {
+  const users = memoirPeerWhere(userId)
+  const [wall, comments] = await Promise.all([
+    tx.profileWallMessage.groupBy({ by: ['senderId'], where: {
+      receiverId: userId, parentId: null, createdAt: range, deletedAt: null, moderationStatus: 'NORMAL',
+      User_ProfileWallMessage_senderIdToUser: users,
+    }, _count: { _all: true }, _min: { createdAt: true } }),
+    tx.reply.groupBy({ by: ['authorId'], where: {
+      parentId: null, createdAt: range, isDeleted: false, moderationStatus: 'NORMAL', TopicActivitySubmission: null,
+      User: { AND: [users, publicCommentHistory] }, Post: { ...memoryPostWhere(), authorId: userId, TopicActivity: null },
+    }, _count: { _all: true }, _min: { createdAt: true } }),
+  ])
+  const counts = new Map<string, { wall: number; comments: number; first: number }>()
+  for (const [metric, rows] of [['wall', wall.map((row) => ({ ...row, id: row.senderId }))],
+    ['comments', comments.map((row) => ({ ...row, id: row.authorId }))]] as const) {
+    for (const row of rows) {
+      const current = counts.get(row.id) ?? { wall: 0, comments: 0, first: Infinity }
+      current[metric] = row._count._all
+      current.first = Math.min(current.first, row._min.createdAt?.getTime() ?? Infinity)
+      counts.set(row.id, current)
+    }
+  }
+  if (!counts.size) return null
+  const peers = await tx.user.findMany({ where: { id: { in: [...counts.keys()] } }, select: { id: true, uid: true, nickname: true } })
+  const sorted = peers.map((peer) => ({ ...peer, ...counts.get(peer.id)! }))
+    .sort((a, b) => (b.wall + b.comments) - (a.wall + a.comments) || a.first - b.first || a.uid - b.uid)
+  const peer = sorted[0]
+  return peer ? { id: peer.id, nickname: peer.nickname, wall: peer.wall, comments: peer.comments } : null
 }
 
 export async function isMemoirMemoryVisible(tx: Prisma.TransactionClient, userId: string, memory: Memory) {

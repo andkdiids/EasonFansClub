@@ -1,29 +1,15 @@
-import { notFound, redirect } from 'next/navigation'
+import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
-import { getMemoirAvailability } from '@/lib/annual-memoir-policy'
 import { readMemoir } from '@/lib/annual-memoir-report'
 import type { MemoirAlbum } from '@/lib/annual-memoir-art'
-import { prisma } from '@/lib/prisma'
 import { MemoirReader } from './MemoirReader'
 
 export default async function Page({ params }: { params: Promise<{ activityId: string }> }) {
   const { activityId } = await params
-  const path = `/activities/${encodeURIComponent(activityId)}/annual-memoir`
+  const activityUrl = '/activities/' + encodeURIComponent(activityId)
   const user = await getCurrentUser()
-  if (!user) redirect(`/login?next=${encodeURIComponent(path)}`)
-  const [snapshot, config] = await Promise.all([
-    readMemoir(activityId, user.id),
-    prisma.annualMemoirConfig.findUnique({ where: { activityId }, include: { activity: true } }),
-  ])
-  if (!config && !snapshot) notFound()
-  const availability = config && getMemoirAvailability({
-    schedule: config, now: new Date(), hasSnapshot: !!snapshot,
-    configuredAndPublished: config.enabled && config.publishedYear === config.year && config.activity.status === 'PUBLISHED' &&
-      config.activity.type === 'TOPIC_ACTIVITY' && !!config.activity.coverUrl &&
-      !!config.annualBadgeId,
-  })
-  if (!snapshot && !availability?.visible) notFound()
-  return <MemoirReader activityId={activityId} year={snapshot?.year ?? config!.year}
-    initialReport={snapshot ? snapshot.payload as unknown as MemoirAlbum : null}
-    canGenerate={!!availability?.canGenerate} />
+  if (!user) redirect('/login?next=' + encodeURIComponent(activityUrl))
+  const snapshot = await readMemoir(activityId, user.id)
+  if (!snapshot) redirect(activityUrl)
+  return <MemoirReader activityId={activityId} year={snapshot.year} initialReport={snapshot.payload as unknown as MemoirAlbum} />
 }
