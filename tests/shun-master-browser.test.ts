@@ -65,6 +65,8 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
     await guest.getByText('玩法说明', { exact: true }).click()
     await guest.getByText(/正式开放前，管理员会发布全站公告/).waitFor()
     assert.equal(await guest.getByRole('button', { name: '顺一手' }).count(), 0)
+    await guest.getByRole('link', { name: '登录参与顺大师' }).waitFor()
+    assert.equal(new URL(guest.url()).pathname, '/shun-master')
     await guest.close()
     await page.goto(base + '/games')
     assert.equal(await page.locator('.app-topbar').getByRole('link', { name: '顺大师' }).count(), 0)

@@ -40,7 +40,7 @@ function PersonLabel({ person, link = false }: { person: Person | null; link?: b
     : <span className={styles.person}>{content}</span>
 }
 
-export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord?: string; initialSide: Side }) {
+export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: { focusedRecord?: string; initialSide: Side; initialGuest: boolean }) {
   const [status, setStatus] = useState<Status>()
   const [side, setSide] = useState<Side>(initialSide)
   const [range, setRange] = useState('all')
@@ -53,7 +53,7 @@ export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord
   const [now, setNow] = useState<number>()
   const [clockOffset, setClockOffset] = useState(0)
   const [error, setError] = useState('')
-  const [guest, setGuest] = useState(false)
+  const [guest, setGuest] = useState(initialGuest)
   const [busy, setBusy] = useState('')
   const [loading, setLoading] = useState(false)
   const [recordError, setRecordError] = useState('')
@@ -94,7 +94,7 @@ export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord
       if (version === sequence.current) setLoading(false)
     }
   }, [side, focusedRecord, initialSide, range, dateKey])
-  useEffect(() => { void loadStatus() }, [loadStatus])
+  useEffect(() => { if (!initialGuest) void loadStatus() }, [initialGuest, loadStatus])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
   useEffect(() => {
