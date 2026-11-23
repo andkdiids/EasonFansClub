@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { createNotificationWithDb } from '@/lib/notification-write'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
@@ -25,7 +25,7 @@ async function settings(tx: Tx) {
 export async function shunTransaction<T>(callback: (tx: Tx) => Promise<T>) {
   for (let retry = 0; ; retry++) {
     try {
-      return await prisma.$transaction(callback, { isolationLevel: 'ReadCommitted', timeout: 15000 })
+      return await prisma.$transaction(callback, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 15000 })
     } catch (error) {
       if (retry >= 2 || !(error instanceof Prisma.PrismaClientKnownRequestError)
         || (error.code !== 'P2034' && !(error.code === 'P2010' && error.meta?.code === '1213'))) throw error
@@ -143,7 +143,6 @@ export async function shunAttempt(actorId: string, requestId: string) {
       ...(actor.phone && actor.phoneVerifiedAt ? [{ phone: actor.phone, phoneVerifiedAt: { not: null } }] : []),
     ]
     const rangeStart = new Date(`${shunDay(new Date(now.getTime() - 6 * 86_400_000))}T00:00:00+08:00`)
-    const seed = randomBytes(16).toString('hex')
     const candidateFilter = Prisma.sql`
       u.status = 'ACTIVE' AND u.isDeleted = false AND u.role = 'USER'
       AND EXISTS (SELECT 1 FROM Profile p WHERE p.userId = u.id)
@@ -153,12 +152,20 @@ export async function shunAttempt(actorId: string, requestId: string) {
       ? (await tx.user.findMany({ where: { OR: linked }, select: { id: true } })).map(({ id }) => id)
       : []
     const targetExclusions = [...new Set([...excluded, ...relatedAccounts])]
-    // Sample after all eligibility filters so the sample cannot create a false NO_TARGET.
-    const pool = await tx.$queryRaw<{ id: string; lastActiveAt: Date | null; lastLoginAt: Date | null }[]>`
-      SELECT u.id, u.lastActiveAt, u.lastLoginAt FROM User u
-      WHERE ${candidateFilter} AND u.points > 0 AND u.id NOT IN (${Prisma.join(targetExclusions)})
-      ORDER BY SHA2(CONCAT(${seed}, u.id), 256) LIMIT 128
-    `
+    // Probe uniformly random UID slots through the unique index. Fall back to
+    // the full filtered pool for sparse matches, so sampling never rejects a valid target.
+    const { _max: { uid: maxUid } } = await tx.user.aggregate({ _max: { uid: true } })
+    const slots = new Set<number>()
+    if (maxUid && maxUid > 512) while (slots.size < 512) slots.add(randomInt(1, maxUid + 1))
+    const indexedSample = slots.size ? Prisma.sql`AND u.uid IN (${Prisma.join([...slots])})` : Prisma.empty
+    const targetFilter = Prisma.sql`${candidateFilter} AND u.points > 0 AND u.id NOT IN (${Prisma.join(targetExclusions)})`
+    type Target = { id: string; lastActiveAt: Date | null; lastLoginAt: Date | null }
+    const indexedTargets = slots.size ? await tx.$queryRaw<Target[]>`
+      SELECT u.id, u.lastActiveAt, u.lastLoginAt FROM User u WHERE ${targetFilter} ${indexedSample}`
+      : []
+    const pool = indexedTargets.length ? shuffle(indexedTargets).slice(0, 128) : await tx.$queryRaw<Target[]>`
+      SELECT u.id, u.lastActiveAt, u.lastLoginAt FROM User u WHERE ${targetFilter}
+      ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 128`
     if (!pool.length) {
       const [funded, protectedFunded] = await Promise.all([
         tx.user.count({ where: { ...eligible, role: 'USER', points: { gt: 0 } } }),
@@ -195,8 +202,11 @@ export async function shunAttempt(actorId: string, requestId: string) {
     }
     const rolled = weightedIndex(config.probabilities) + 1
     const amount = Math.min(rolled, victimBalance)
-    const decoys = await tx.$queryRaw<{ id: string }[]>`
-      SELECT u.id FROM User u WHERE ${candidateFilter} AND u.id NOT IN (${actorId}, ${victim.id})
+    const decoyFilter = Prisma.sql`${candidateFilter} AND u.id NOT IN (${actorId}, ${victim.id})`
+    const indexedDecoys = slots.size ? await tx.$queryRaw<{ id: string }[]>`
+      SELECT u.id FROM User u WHERE ${decoyFilter} ${indexedSample}` : []
+    const decoys = indexedDecoys.length >= 2 ? shuffle(indexedDecoys).slice(0, 2) : await tx.$queryRaw<{ id: string }[]>`
+      SELECT u.id FROM User u WHERE ${decoyFilter}
       ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 2
     `
     const selectedDecoys = decoys.map(({ id }) => id)
