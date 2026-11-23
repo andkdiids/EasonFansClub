@@ -27,6 +27,7 @@ const publicExactPaths = new Set([
   '/clinic',
   '/salon',
   '/activities',
+  '/shun-master',
   '/api/clinic',
   '/api/app/version',
   '/api/app/download/android',

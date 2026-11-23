@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { defaultShunConfig, shunDay, validateShunConfig } from '@/lib/shun-master-rules'
-import { ShunError, updateShunConfig } from '@/lib/shun-master'
+import { getShunCandidateSummary, ShunError, updateShunConfig } from '@/lib/shun-master'
 
 export const dynamic = 'force-dynamic'
 const json = (data: unknown, status = 200) => NextResponse.json(data, { status, headers: { 'Cache-Control': 'private, no-store' } })
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const day = query.get('day') || shunDay(new Date())
   const page = Number(query.get('page') || '1')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isSafeInteger(page) || page < 1 || page > 200) return json({ message: '查询参数无效。' }, 400)
-  const [settings, records, amounts, totals, actors, audit, abuse, [outstanding]] = await Promise.all([
+  const [settings, records, amounts, totals, actors, audit, abuse, [outstanding], refusalAudit] = await Promise.all([
     prisma.shunMasterSettings.findUnique({ where: { id: 1 } }),
     prisma.shunMasterRound.findMany({ where: { day }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 50, take: 51,
       select: { id: true, actorId: true, victimId: true, rolled: true, amount: true, createdAt: true,
@@ -30,13 +30,22 @@ export async function GET(request: Request) {
       SELECT COUNT(*) AS count, MIN(createdAt) AS oldest FROM ShunMasterRound
       WHERE result IS NULL AND JSON_LENGTH(candidates) = 3
     `,
+    prisma.userOperationLog.findMany({ where: { category: 'SHUN_MASTER', action: { in: ['LEAVE', 'PROTECT', 'UNPROTECT', 'REJOIN'] } },
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 50,
+      select: { id: true, userId: true, action: true, occurredAt: true } }),
   ])
   const config = validateShunConfig(settings?.config) || defaultShunConfig
   const reserved = settings?.reserved || 0
   const compensated = settings?.compensated || 0
+  const [candidatePool, refusalCount, activeRefusals] = await Promise.all([
+    getShunCandidateSummary(prisma, shunDay(new Date()), config.victimCap),
+    prisma.shunMasterProtection.count({ where: { protected: true } }),
+    prisma.shunMasterProtection.findMany({ where: { protected: true }, orderBy: [{ updatedAt: 'desc' }, { userId: 'asc' }],
+      take: 50, select: { userId: true, updatedAt: true } }),
+  ])
   return json({ config, launchNoticeId: settings?.launchNoticeId ?? null, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated, budgetWarning: config.budget - reserved - compensated < 7,
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
-    outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest } })
+    outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit })
 }
 
 export async function PATCH(request: Request) {

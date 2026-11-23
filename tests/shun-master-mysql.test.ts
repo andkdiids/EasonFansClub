@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { prisma } from '../lib/prisma'
-import { setShunProtection, shunAttempt, shunCapture, shunRecords, shunStatus, shunTransaction, updateShunConfig } from '../lib/shun-master'
+import { getShunCandidateSummary, shunAttempt, shunCapture, shunRecords, shunStatus, shunTransaction, updateShunConfig } from '../lib/shun-master'
 import { defaultShunConfig, shunDay } from '../lib/shun-master-rules'
 import { getShunLedgerDisplay } from '../lib/registration-fee'
 
@@ -15,6 +15,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
   assert.equal(url.port, process.env.GITHUB_ACTIONS === 'true' ? '3306' : '33326')
   assert.equal(url.pathname, '/ecfc_shun_qa')
   assert.equal(await prisma.shunMasterRound.count(), 0, 'requires an empty isolated fixture')
+  const seedRefusal = (userId: string) => prisma.shunMasterProtection.create({ data: { userId, protected: true } })
   const createUser = async (points = 0, contact?: string, age = 9) => {
     const name = 'shun-qa-' + randomUUID()
     return prisma.user.create({ data: { username: name, usernameNormalized: name, nickname: name,
@@ -32,13 +33,18 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     const publish = (settings: typeof config) => updateShunConfig(operator.id, settings, { noticeId: notice.id, confirmed: true })
     await publish(config)
     const [protectedUser, banned, deleted, system] = await Promise.all(Array.from({ length: 4 }, () => createUser(100)))
-    await setShunProtection(protectedUser.id, true)
+    await seedRefusal(protectedUser.id)
     await prisma.user.update({ where: { id: victim.id }, data: { email: null, emailVerifiedAt: null } })
     await prisma.user.update({ where: { id: banned.id }, data: { status: 'BANNED' } })
     await prisma.user.update({ where: { id: deleted.id }, data: { isDeleted: true } })
     await prisma.user.update({ where: { id: system.id }, data: { role: 'SUPER_ADMIN' } })
     await assert.rejects(shunAttempt(banned.id, randomUUID()), { code: 'ACCOUNT' })
-    await assert.rejects(shunAttempt(protectedUser.id, randomUUID()), { code: 'PROTECTED' })
+    await assert.rejects(shunAttempt(system.id, randomUUID()), { code: 'ACCOUNT' })
+    const pool = await getShunCandidateSummary(prisma, shunDay(new Date()), 4)
+    assert.equal(pool.eligible, 1)
+    assert.equal(pool.excluded.refused, 1)
+    assert.equal(pool.excluded.account, 3)
+    assert.ok(pool.excluded.balance >= 9)
     assert.equal(await prisma.shunMasterMember.count({ where: { userId: victim.id } }), 0)
     assert.equal(await prisma.shunMasterConsent.count({ where: { userId: victim.id } }), 0)
     const ids = actors.map(() => randomUUID())
@@ -49,6 +55,8 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 4)
     const rounds = await prisma.shunMasterRound.findMany({ orderBy: { createdAt: 'asc' } })
     assert.ok(rounds.every((round) => round.victimId === victim.id && round.actorId !== victim.id))
+    assert.equal((await getShunCandidateSummary(prisma, shunDay(rounds[0].createdAt), 4)).excluded.dailyCap, 1)
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: protectedUser.id }, select: { points: true } })).points, 100)
     const [first, failed, expired, compensated] = rounds
     const owner = actors.find(({ id }) => id === first.actorId)!
     await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'NO_TARGET' })
@@ -125,7 +133,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
 
     const [limitActor, ...targets] = await Promise.all([createUser(), ...Array.from({ length: 10 }, () => createUser(1))])
     await publish(config)
-    for (const user of [victim, ...actors]) await setShunProtection(user.id, true)
+    for (const user of [victim, ...actors]) await seedRefusal(user.id)
     const dayResults = await Promise.allSettled(Array.from({ length: 10 }, () => shunAttempt(limitActor.id, randomUUID())))
     const won = dayResults.flatMap((outcome) => outcome.status === 'fulfilled' ? [outcome.value] : [])
     assert.equal(won.length, 7)
@@ -144,7 +152,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     assert.equal((await shunStatus(invalidLegacyBalance.id)).remaining, 7)
 
     // Expose only one funded target and its linked account for a hot-account wave.
-    for (const user of [limitActor, ...targets, overflow, invalidLegacyBalance]) await setShunProtection(user.id, true)
+    for (const user of [limitActor, ...targets, overflow, invalidLegacyBalance]) await seedRefusal(user.id)
     const contact = randomUUID() + '@example.invalid'
     const scaleUsers = Array.from({ length: 1500 }, (_, index) => {
       const id = 'shun-scale-' + index
