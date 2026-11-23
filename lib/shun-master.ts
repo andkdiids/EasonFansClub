@@ -3,13 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { createNotificationWithDb } from '@/lib/notification-write'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration-fee'
-import { captureMode, defaultShunConfig, shunDay, shuffle, validateShunConfig, weightedIndex, type ShunConfig } from './shun-master-rules'
+import { captureMode, defaultShunConfig, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, type ShunConfig } from './shun-master-rules'
 
 type Tx = Prisma.TransactionClient
 type Round = Prisma.ShunMasterRoundGetPayload<Record<string, never>>
-const eligible = { isDeleted: false, status: 'ACTIVE', role: 'USER', nicknameModerationStatus: 'NORMAL', Profile: { isNot: null } } as const
+const eligible = { isDeleted: false, status: 'ACTIVE' } as const
 const personFields = { uid: true, nickname: true, avatarUrl: true, nicknameModerationStatus: true, nicknameViolationDisplay: true } as const
-const newAccountDelay = 7 * 86_400_000
 
 export class ShunError extends Error {
   constructor(public code: string, message: string, public status = 409) { super(message) }
@@ -77,6 +76,10 @@ async function present(tx: Tx, round: Round, side: 'out' | 'in') {
   }
 }
 
+function currentConsent(tx: Tx, userId: string, rulesVersion: number) {
+  return tx.shunMasterConsent.findUnique({ where: { userId_rulesVersion: { userId, rulesVersion } } })
+}
+
 export async function shunStatus(userId: string) {
   const serverNow = new Date()
   const day = shunDay(serverNow)
@@ -88,23 +91,31 @@ export async function shunStatus(userId: string) {
     prisma.shunMasterRound.count({ where: { victimId: userId, day } }),
   ])
   const config = validateShunConfig(state?.config) || defaultShunConfig
-  return { enabled: config.enabled, joined: member?.joined ?? false, balance: account.points,
+  const rulesVersion = state?.rulesVersion ?? 1
+  const consent = await currentConsent(prisma, userId, rulesVersion)
+  return { enabled: config.enabled, joined: !!member?.joined && !!consent, rulesVersion, hasAcceptedRules: !!consent, balance: account.points,
     remaining: Math.max(0, config.attempts - attempts), received, attempts: config.attempts,
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes, serverNow }
 }
 
-export function shunJoin(userId: string, joined: boolean, acknowledged?: { victimCap: number }) {
+export function shunJoin(userId: string, joined: boolean, acceptedRulesVersion?: number) {
   return shunTransaction(async (tx) => {
-    const { config } = await settings(tx)
-    if (joined && (!config.enabled || acknowledged?.victimCap !== config.victimCap
-      || !await tx.user.findFirst({ where: { id: userId, ...eligible, createdAt: { lte: new Date(Date.now() - newAccountDelay) },
-        OR: [{ phoneVerifiedAt: { not: null } }, { emailVerifiedAt: { not: null } }] }, select: { id: true } }))) {
-      throw new ShunError('JOIN', '需验证邮箱或手机号、注册满七天，并确认当前规则后才能加入。')
+    const { config, state } = await settings(tx)
+    if (joined && !config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放，敬请期待。')
+    if (joined && !await tx.user.findFirst({ where: { id: userId, ...eligible }, select: { id: true } })) {
+      throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
     }
+    const consent = joined && await currentConsent(tx, userId, state.rulesVersion)
+    if (joined && !consent) {
+      if (acceptedRulesVersion !== state.rulesVersion) throw new ShunError('CONSENT_REQUIRED', '请确认当前版本的顺大师规则。')
+      await tx.shunMasterConsent.create({ data: { userId, rulesVersion: state.rulesVersion } })
+    }
+    const member = await tx.shunMasterMember.findUnique({ where: { userId } })
+    if (member?.joined === joined && (!joined || consent)) return { joined }
     await tx.shunMasterMember.upsert({ where: { userId }, create: { userId, joined }, update: { joined } })
-    await tx.userOperationLog.create({ data: { userId, category: 'SHUN_MASTER', action: joined ? 'JOIN' : 'LEAVE',
-      summary: joined ? '同意顺大师参与规则' : '退出顺大师匹配', source: 'WEB', operatorType: 'USER',
-      metadata: { victimCap: config.victimCap, maxAmount: 7 } } })
+    await tx.userOperationLog.create({ data: { userId, category: 'SHUN_MASTER', action: !joined ? 'LEAVE' : consent ? 'REJOIN' : 'JOIN',
+      summary: !joined ? '退出顺大师匹配' : consent ? '恢复顺大师参与' : '同意顺大师参与规则', source: 'WEB', operatorType: 'USER',
+      metadata: { rulesVersion: state.rulesVersion, victimCap: config.victimCap, maxAmount: 7 } } })
     return { joined }
   })
 }
@@ -119,7 +130,8 @@ export function shunAttempt(actorId: string, requestId: string) {
     const day = shunDay(now)
     const actor = await tx.user.findFirst({ where: { id: actorId, ...eligible },
       select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } })
-    if (!actor || !await tx.shunMasterMember.findFirst({ where: { userId: actorId, joined: true } })) {
+    if (!actor || !await tx.shunMasterMember.findFirst({ where: { userId: actorId, joined: true } })
+      || !await currentConsent(tx, actorId, state.rulesVersion)) {
       throw new ShunError('MEMBERSHIP', '请先加入顺大师。')
     }
     const played = await tx.shunMasterRound.findMany({ where: { actorId, day }, select: { victimId: true } })
@@ -127,7 +139,10 @@ export function shunAttempt(actorId: string, requestId: string) {
     if (state.reserved + state.compensated + 7 > config.budget) {
       throw new ShunError('BUDGET', '顺大师暂时休息，已有记录仍可抓捕。')
     }
-    const members = await tx.shunMasterMember.findMany({ where: { joined: true }, select: { userId: true } })
+    const approvals = await tx.shunMasterConsent.findMany({ where: { rulesVersion: state.rulesVersion }, select: { userId: true } })
+    const approvedIds = new Set(approvals.map(({ userId }) => userId))
+    const members = (await tx.shunMasterMember.findMany({ where: { joined: true }, select: { userId: true } }))
+      .filter(({ userId }) => approvedIds.has(userId))
     const blocks = await tx.block.findMany({ where: { OR: [{ blockerId: actorId }, { blockedId: actorId }] },
       select: { blockerId: true, blockedId: true } })
     const capped = await tx.shunMasterRound.groupBy({ by: ['victimId'], where: { day }, _count: { _all: true } })
@@ -200,6 +215,9 @@ export async function shunRecords(userId: string, side: 'out' | 'in', cursor?: s
 export function shunCapture(userId: string, id: string, guess?: { mode: number; uid: number }) {
   return shunTransaction(async (tx) => {
     await settings(tx)
+    if (!await tx.user.findFirst({ where: { id: userId, ...eligible }, select: { id: true } })) {
+      throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
+    }
     const round = await tx.shunMasterRound.findFirst({ where: { id, victimId: userId } })
     if (!round) throw new ShunError('NOT_FOUND', '未找到这条记录。', 404)
     if (round.result) return { record: await present(tx, round, 'in') }
@@ -250,10 +268,10 @@ export async function updateShunConfig(userId: string, config: ShunConfig) {
   return shunTransaction(async (tx) => {
     const { state, config: old } = await settings(tx)
     if (config.budget < state.reserved + state.compensated) throw new ShunError('BUDGET', '预算不能低于已补偿金额与未结索赔准备金。')
-    if (old.victimCap !== config.victimCap) await tx.shunMasterMember.updateMany({ data: { joined: false } })
-    await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config } })
+    const rulesVersion = state.rulesVersion + Number(shunRulesChanged(old, config))
+    await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config, rulesVersion } })
     await tx.userOperationLog.create({ data: { userId, operatorUserId: userId, category: 'SHUN_MASTER',
-      action: 'CONFIG_UPDATE', summary: '修改顺大师规则', metadata: { old, config }, source: 'WEB', operatorType: 'ADMIN' } })
-    return { config }
+      action: 'CONFIG_UPDATE', summary: '发布顺大师配置', metadata: { old, config, rulesVersion }, source: 'WEB', operatorType: 'ADMIN' } })
+    return { config, rulesVersion }
   })
 }

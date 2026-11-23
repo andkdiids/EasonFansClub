@@ -54,7 +54,8 @@ export async function POST(request: Request, { params }: Context) {
       return json(await shunAttempt(guard.user.id, body.requestId))
     }
     if (action === 'membership' && typeof body?.joined === 'boolean') {
-      return json(await shunJoin(guard.user.id, body.joined, body))
+      const version = Number.isSafeInteger(body.acceptedRulesVersion) ? body.acceptedRulesVersion : undefined
+      return json(await shunJoin(guard.user.id, body.joined, version))
     }
     return json({ message: '请求参数无效。' }, 400)
   } catch (error) { return handleShunError(error) }

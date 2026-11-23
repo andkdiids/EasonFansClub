@@ -14,6 +14,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
   assert.equal(url.port, process.env.GITHUB_ACTIONS === 'true' ? '3306' : '33326')
   assert.equal(url.pathname, '/ecfc_shun_qa')
   assert.equal(await prisma.shunMasterRound.count(), 0, 'requires an empty isolated fixture')
+  const approve = async (userId: string) => shunJoin(userId, true, (await shunStatus(userId)).rulesVersion)
   const createUser = async (points = 0, contact?: string, age = 9) => {
     const name = 'shun-qa-' + randomUUID()
     return prisma.user.create({ data: { username: name, usernameNormalized: name, nickname: name,
@@ -26,9 +27,24 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     ])
     const config = { ...defaultShunConfig, enabled: true, budget: 500 }
     await updateShunConfig(operator.id, config)
-    const fresh = await createUser(100, undefined, 1)
-    await assert.rejects(shunJoin(fresh.id, true, { victimCap: 4 }), { code: 'JOIN' })
-    for (const user of [victim, ...actors]) await shunJoin(user.id, true, { victimCap: 4 })
+    const fresh = await createUser(0, undefined, 0)
+    await prisma.user.update({ where: { id: fresh.id }, data: { email: null, emailVerifiedAt: null } })
+    await assert.rejects(shunJoin(fresh.id, true), { code: 'CONSENT_REQUIRED' })
+    await Promise.all([approve(fresh.id), approve(fresh.id)])
+    assert.equal(await prisma.shunMasterConsent.count({ where: { userId: fresh.id } }), 1)
+    assert.equal((await shunStatus(fresh.id)).joined, true)
+    await shunJoin(fresh.id, false)
+    await shunJoin(fresh.id, true)
+    assert.equal((await shunStatus(fresh.id)).hasAcceptedRules, true)
+    const originalVersion = (await shunStatus(fresh.id)).rulesVersion
+    await updateShunConfig(operator.id, { ...config, budget: config.budget + 1 })
+    assert.equal((await shunStatus(fresh.id)).rulesVersion, originalVersion)
+    assert.equal((await shunStatus(fresh.id)).hasAcceptedRules, true)
+    await updateShunConfig(operator.id, config)
+    await shunJoin(fresh.id, false)
+    await prisma.user.update({ where: { id: fresh.id }, data: { status: 'BANNED' } })
+    await assert.rejects(shunJoin(fresh.id, true), { code: 'ACCOUNT' })
+    for (const user of [victim, ...actors]) await approve(user.id)
     const ids = actors.map(() => randomUUID())
     // Exclude every actor from the other actors' target pools even after their winnings are credited.
     await prisma.block.createMany({ data: actors.flatMap((actor, index) => actors.slice(index + 1).map((other) =>
@@ -108,7 +124,12 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
 
     const [limitActor, ...targets] = await Promise.all([createUser(), ...Array.from({ length: 10 }, () => createUser(1))])
     await updateShunConfig(operator.id, { ...config, victimCap: 5 })
-    for (const user of [limitActor, ...targets]) await shunJoin(user.id, true, { victimCap: 5 })
+    const revised = await shunStatus(owner.id)
+    assert.equal(revised.hasAcceptedRules, false)
+    assert.equal(revised.joined, false)
+    await assert.rejects(shunJoin(owner.id, true, revised.rulesVersion - 1), { code: 'CONSENT_REQUIRED' })
+    await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'MEMBERSHIP' })
+    for (const user of [limitActor, ...targets]) await approve(user.id)
     const dayResults = await Promise.allSettled(Array.from({ length: 10 }, () => shunAttempt(limitActor.id, randomUUID())))
     const won = dayResults.flatMap((outcome) => outcome.status === 'fulfilled' ? [outcome.value] : [])
     assert.equal(won.length, 7)
@@ -116,14 +137,14 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     assert.ok(won.every((round) => round.amount === 1))
     assert.equal((await shunStatus(limitActor.id)).remaining, 0)
     const overflow = await createUser(2147483647)
-    await shunJoin(overflow.id, true, { victimCap: 5 })
+    await approve(overflow.id)
     const before = await prisma.shunMasterRound.count()
     await assert.rejects(shunAttempt(overflow.id, randomUUID()), { code: 'BALANCE' })
     assert.equal(await prisma.shunMasterRound.count(), before)
     assert.equal((await shunStatus(overflow.id)).remaining, 7)
 
     const invalidLegacyBalance = await createUser(-1)
-    await shunJoin(invalidLegacyBalance.id, true, { victimCap: 5 })
+    await approve(invalidLegacyBalance.id)
     await assert.rejects(shunAttempt(invalidLegacyBalance.id, randomUUID()), { code: 'BALANCE' })
     assert.equal(await prisma.shunMasterRound.count(), before)
     assert.equal((await shunStatus(invalidLegacyBalance.id)).remaining, 7)
@@ -134,10 +155,10 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     const [hot, related, ...crowd] = await Promise.all([
       createUser(500, contact), createUser(0, contact), ...Array.from({ length: 32 }, () => createUser()),
     ])
-    await shunJoin(hot.id, true, { victimCap: 4 })
-    await shunJoin(related.id, true, { victimCap: 4 })
+    await approve(hot.id)
+    await approve(related.id)
     await assert.rejects(shunAttempt(related.id, randomUUID()), { code: 'NO_TARGET' })
-    for (const player of crowd) await shunJoin(player.id, true, { victimCap: 4 })
+    for (const player of crowd) await approve(player.id)
     await prisma.block.createMany({ data: crowd.flatMap((actor, index) => crowd.slice(index + 1)
       .map((other) => ({ blockerId: actor.id, blockedId: other.id }))) })
 

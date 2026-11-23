@@ -6,6 +6,12 @@ export const defaultShunConfig = {
 }
 export type ShunConfig = typeof defaultShunConfig
 
+export function shunRulesChanged(previous: ShunConfig, next: ShunConfig) {
+  return previous.attempts !== next.attempts || previous.victimCap !== next.victimCap
+    || previous.goldenMinutes !== next.goldenMinutes
+    || previous.probabilities.some((value, i) => value !== next.probabilities[i])
+}
+
 export function validateShunConfig(value: unknown): ShunConfig | null {
   if (!value || typeof value !== 'object') return null
   const c = value as ShunConfig

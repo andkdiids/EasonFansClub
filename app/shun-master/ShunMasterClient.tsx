@@ -11,7 +11,7 @@ import styles from './shun.module.css'
 type Person = { uid: number; nickname: string; avatarUrl: string | null }
 type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' | 'FAILED' | null
   createdAt: string; goldenUntil: string; person: Person | null; canCapture: boolean }
-type Status = { enabled: boolean; joined: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
+type Status = { enabled: boolean; joined: boolean; hasAcceptedRules: boolean; rulesVersion: number; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null }
 type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
 type Side = 'in' | 'out'
@@ -163,17 +163,29 @@ export function ShunMasterClient({ focusedRecord, initialSide }: { focusedRecord
         {guest && <Link href="/login?callbackUrl=%2Fshun-master">登录参与顺大师</Link>}
         {!guest && !status && <button onClick={() => void loadStatus()}>刷新状态</button>}
         {status && <>
-          <dl className={styles.stats}><div><dt>我的挂号费</dt><dd>{status.balance}</dd></div><div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div></dl>
-          {!status.enabled && <p>顺大师暂未开放，已有记录仍可抓捕。</p>}
-          {status.joined ? <>
-            <button className={styles.primary} disabled={!!busy || !status.remaining || !status.enabled} onClick={() => void attempt()}>
+          <dl className={styles.stats}>
+            <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
+            <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
+          </dl>
+          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : status.joined ? <>
+            <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => void attempt()}>
               {busy === 'attempt' ? '看看哪个 EF 这么幸运...' : status.remaining ? (result ? '再顺一次' : '顺一手') : '今日收工，明天继续！'}
             </button>
             <button disabled={!!busy} onClick={() => void perform('membership', async () => { await api('membership', { joined: false }); await loadStatus() })}>退出后续匹配</button>
-          </> : <details open={status.enabled}><summary>参与规则</summary><p>加入后每日最多被顺 {status.victimCap} 次、单次最多 7 挂号费。抓捕失败不会返还。退出后不再参与匹配，已有记录仍可抓捕。</p>
-            <button className={styles.primary} disabled={!!busy || !status.enabled} onClick={() => void perform('membership', async () => {
-              await api('membership', { joined: true, victimCap: status.victimCap }); await loadStatus()
-            })}>同意规则并加入</button></details>}
+          </> : <section className={styles.join}>
+            {!status.hasAcceptedRules && <><h2>参与规则</h2>
+              <p>每天可顺取 {status.attempts} 次，最多被顺 {status.victimCap} 次，每笔 1–7 挂号费，次数在北京时间零点重置。</p>
+              <p>被顺后有一次抓捕机会。前 {status.goldenMinutes} 分钟二选一，之后三选一。猜中全额追回，猜错不返还。退出后不再参与新匹配，已有记录仍可抓捕。</p></>}
+            <button className={styles.primary} disabled={!!busy} onClick={() => void perform('membership', async () => {
+              try {
+                await api('membership', { joined: true, ...(!status.hasAcceptedRules && { acceptedRulesVersion: status.rulesVersion }) })
+              } catch (error) {
+                if (error instanceof RequestError && error.code === 'CONSENT_REQUIRED') await loadStatus()
+                throw error
+              }
+              await loadStatus()
+            })}>{status.hasAcceptedRules ? '重新加入顺大师' : '同意规则并开启顺大师'}</button>
+          </section>}
         </>}
         {result && <div className={styles.result} role="status"><strong>顺走啦！</strong><PersonLabel person={result.person} link /><span> +{result.amount} 挂号费</span></div>}
         <details><summary>玩法说明</summary><p>以北京时间零点重置每日机会。黄金抓捕期内二选一，之后三选一。每条记录可以猜一次，猜中原额追回。</p></details>

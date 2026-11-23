@@ -145,5 +145,14 @@ jobs:
           trap 'rm -f "$base_schema"' EXIT
           git show "$BASE_SHA:prisma/schema.prisma" > "$base_schema"
           pnpm exec prisma db push --schema "$base_schema" --skip-generate
-          pnpm exec prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261123133000_add_shun_master/migration.sql
+          initial_migration=prisma/migrations/20261123133000_add_shun_master/migration.sql
+          if git cat-file -e "$BASE_SHA:$initial_migration" 2>/dev/null; then
+            git show "$BASE_SHA:$initial_migration" | sed -n '/^INSERT INTO /,$p' |
+              mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only ecfc_shun_qa
+          fi
+          for migration in prisma/migrations/*_shun_master*/migration.sql; do
+            if ! git cat-file -e "$BASE_SHA:$migration" 2>/dev/null; then
+              pnpm exec prisma db execute --schema prisma/schema.prisma --file "$migration"
+            fi
+          done
           pnpm exec tsx --test tests/shun-master-mysql.test.ts
