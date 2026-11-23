@@ -50,6 +50,7 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
     const rejected = await request('attempt', { ...session, Origin: 'https://untrusted.example.invalid' }, { requestId: randomUUID() })
     assert.equal(rejected.status, 403)
     assert.equal(await prisma.shunMasterRound.count({ where: { actorId: actor.id } }), 0)
+    await setShunEnabled(actor.id, false)
     const closed = await request('attempt', mobile, { requestId: randomUUID() })
     assert.ok(closed.status >= 400)
 
@@ -110,6 +111,9 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
     const users = await prisma.user.findMany({ where: { id: { in: [actor.id, other.id] } }, select: { id: true, points: true } })
     assert.equal(users.find(user => user.id === actor.id)?.points, 71)
     assert.equal(users.find(user => user.id === other.id)?.points, 13)
+    const retries = await Promise.all(Array.from({ length: 19 }, () => request('attempt', mobile, { requestId })))
+    assert.ok(retries.some(response => response.status === 429), 'write throttling must apply to Bearer requests')
+    assert.equal(await prisma.shunMasterRound.count({ where: { actorId: actor.id } }), 1)
   } finally {
     await prisma.$disconnect()
   }
