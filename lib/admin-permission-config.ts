@@ -83,6 +83,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/changelog': 'changelog_manage',
   '/admin/notifications': 'notification_manage',
   '/admin/appearance': 'site_config_manage',
+  '/admin/shun-master': 'site_config_manage',
   '/admin/ecenter-features': 'nav_manage',
   '/admin/studio': 'studio_manage',
   '/admin/visuals': 'site_config_manage',

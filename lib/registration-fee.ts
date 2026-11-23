@@ -39,6 +39,9 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   GROWTH_REWARD: '成长奖励',
   GROWTH_REWARD_REVERSAL: '成长奖励追回',
   GLOBAL_POINTS_GRANT: '全站挂号费发放',
+  SHUN_STEAL: '顺大师 · 顺取',
+  SHUN_RECOVERY: '顺大师 · 追回',
+  SHUN_COMPENSATION: '顺大师 · 平台补偿',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
@@ -219,6 +222,7 @@ type RegistrationFeeConsumptionInput = {
   action: PointActionType
   reason: string
   businessKey: string
+  reversalOfBusinessKey?: string
   now?: Date
   checkInId?: string
   activityId?: string
@@ -257,6 +261,7 @@ export async function consumeRegistrationFee(
       after,
       reason: input.reason,
       businessKey: input.businessKey,
+      reversalOfBusinessKey: input.reversalOfBusinessKey,
       checkInId: input.checkInId,
       activityId: input.activityId,
       activityRegistrationId: input.activityRegistrationId,

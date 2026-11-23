@@ -106,6 +106,7 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     desc: '统一进入歌词、听听题库与游戏相关配置。',
     items: [
       { href: '/admin/entertainment/lyrics', title: '歌词处方库', desc: '维护娱乐天空每日抽奖使用的歌词处方。' },
+      { href: '/admin/shun-master', title: '顺大师', desc: '管理顺大师配置、挂号费结算与平台补偿。' },
       { href: '/admin/entertainment/guess-song', title: '听听题库', desc: '维护听听题目、答案与私有音频变体。' },
       { href: '/admin/entertainment/guess-song/leaderboard', title: '听听排行榜', desc: '管理听听周榜、月榜、年榜和成绩补分。' },
       { href: '/admin/entertainment/guess-song/duel', title: '听听·对决管理', desc: '查看实时 1v1 对决、结算、断线与风控审计。' },
