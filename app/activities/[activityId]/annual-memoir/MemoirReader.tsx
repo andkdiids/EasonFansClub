@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { describeMemoirPage, drawMemoirPage, memoirChapters, type MemoirAlbum } from '@/lib/annual-memoir-art'
 import { loadMemoirBadges } from '@/lib/annual-memoir-badges'
+import { useMemoirSwipe } from '@/lib/annual-memoir-swipe'
 import { MemoirImageGallery } from './MemoirImageGallery'
 
 const duration = 520
@@ -34,7 +35,6 @@ export function MemoirReader({ activityId, year, initialReport, preview = false,
   const [previous, setPrevious] = useState<number | null>(null)
   const timer = useRef<number | null>(null)
   const position = useRef(0)
-  const touch = useRef<{ x: number; y: number; id: number } | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const [error, setError] = useState('')
   const exporting = useRef(false)
@@ -89,6 +89,7 @@ export function MemoirReader({ activityId, year, initialReport, preview = false,
     }
     setPage(next)
   }, [gallery])
+  const swipe = useMemoirSwipe(move)
   useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current) }, [])
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -184,7 +185,7 @@ export function MemoirReader({ activityId, year, initialReport, preview = false,
       [data-memoir-layer="incoming"] { animation: memoir-fade-in 520ms cubic-bezier(.22,1,.36,1) both; }
       @keyframes memoir-fade-out { from { opacity: 1 } to { opacity: 0 } }
       @keyframes memoir-fade-in { from { opacity: 0 } to { opacity: 1 } }
-      @keyframes memoir-hint { 0%,100% {opacity:0} 20%,65% {opacity:1} 75% {transform:translateX(7px)} }
+      @keyframes memoir-hint { 0% {opacity:0;transform:translateX(0)} 20%,65% {opacity:1} 100% {opacity:0;transform:translateX(-7px)} }
       @media (pointer:coarse) { .memoir-arrow {display:none} .memoir-reader footer {justify-content:center} }
       @media (prefers-reduced-motion:reduce) {
         [data-memoir-layer="outgoing"] {display:none}
@@ -206,31 +207,14 @@ export function MemoirReader({ activityId, year, initialReport, preview = false,
         </select>}
         <span role="status">{page + 1} / {memoirChapters.length}</span>
       </header>
-      <section aria-label="年度报告画册" className="memoir-stage"
-        onTouchStart={(event) => {
-          const point = event.touches[0]
-          if (event.touches.length !== 1 || !point || point.clientX <= 24 || point.clientX >= innerWidth - 24) {
-            touch.current = null
-            return
-          }
-          touch.current = { x: point.clientX, y: point.clientY, id: point.identifier }
-        }}
-        onTouchCancel={() => { touch.current = null }}
-        onTouchEnd={(event) => {
-          const start = touch.current
-          touch.current = null
-          const end = start && Array.from(event.changedTouches).find(({ identifier }) => identifier === start.id)
-          if (!start || !end || event.touches.length) return
-          const dx = end.clientX - start.x
-          if (Math.abs(dx) >= 48 && Math.abs(dx) > 1.5 * Math.abs(end.clientY - start.y)) move(dx > 0 ? 1 : -1)
-        }}>
+      <section aria-label="年度报告画册" className="memoir-stage" {...swipe}>
         {previous !== null && <AlbumPage key={previous} report={report} year={year} page={previous} badgeImages={badgeImages} layer="outgoing" />}
         <AlbumPage key={page} report={report} year={year} page={page} badgeImages={badgeImages} layer={previous === null ? undefined : 'incoming'} />
       </section>
       <footer className="memoir-reader-bar">
         <button className="memoir-arrow" type="button" disabled={page === 0 || previous !== null} onClick={() => move(-1)}>上一页</button>
         <div className="memoir-footer-action">
-          {showHint && page === 0 && <span className="memoir-swipe-hint">向右轻滑，翻开下一页 →</span>}
+          {showHint && page === 0 && <span className="memoir-swipe-hint">← 向左轻滑，翻开下一页</span>}
           {page === finalPage && <>
             {(!wechat || preview) && <button type="button" disabled={previous !== null || exportProgress !== null} onClick={() => void save(false)}>下载全部图片（ZIP）</button>}
             <button type="button" disabled={previous !== null || exportProgress !== null} onClick={() => void save(true)}>{wechat ? '逐张保存图片' : '查看单张 JPG'}</button>
