@@ -4,6 +4,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
 import { effectivePharmacyCampaignStatus } from '@/lib/pharmacy'
+import { getShunLedgerDisplay } from '@/lib/registration-fee'
 
 export const USER_OPERATION_CATEGORIES = [
   'ALL',
@@ -762,14 +763,14 @@ async function loadPointEvents(options: OperationLoadOptions) {
     where: { ...scopeFor('userId', options), createdAt: dateRange(options.from, options.to), pharmacyDrawId: null, pharmacyRecycleLogId: null },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: options.take,
-    select: { id: true, userId: true, action: true, points: true, before: true, after: true, reason: true, createdAt: true, businessKey: true, growthTaskCode: true },
+    select: { id: true, userId: true, action: true, points: true, before: true, after: true, reason: true, createdAt: true, businessKey: true, reversalOfBusinessKey: true, growthTaskCode: true },
   }), [])
   return rows.map((row) => event({
     id: `POINT_LOG:${row.id}`,
     userId: row.userId,
     category: 'REWARD',
     action: String(row.action),
-    summary: row.reason || `挂号费变动 ${row.points >= 0 ? '+' : ''}${row.points}`,
+    summary: getShunLedgerDisplay(row)?.label || row.reason || `挂号费变动 ${row.points >= 0 ? '+' : ''}${row.points}`,
     source: 'PointLog',
     detail: detailOf({ points: row.points, before: row.before, after: row.after, businessKey: row.businessKey, growthTaskCode: row.growthTaskCode }),
     operator: operator('SYSTEM'),

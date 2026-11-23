@@ -5,6 +5,7 @@ import type { ShunConfig } from '@/lib/shun-master-rules'
 
 type Summary = {
   rulesVersion: number
+  launchNoticeId: string | null
   config: ShunConfig; day: string; reserved: number; compensated: number; budgetWarning: boolean; activePlayers: number; hasMore: boolean
   totals: { _count: number; _sum: { amount: number | null; recovered: number | null; compensation: number | null } }
   amounts: { rolled: number; amount: number; _count: { _all: number } }[]
@@ -26,6 +27,8 @@ export function ShunMasterAdmin() {
   const [refresh, setRefresh] = useState(0)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
+  const [noticeId, setNoticeId] = useState<string>()
+  const [confirmProtection, setConfirmProtection] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
     const query = new URLSearchParams({ page: String(page) })
@@ -46,10 +49,12 @@ export function ShunMasterAdmin() {
     setSaving(true)
     setMessage('')
     try {
-      const response = await fetch('/api/admin/shun-master', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
+      const response = await fetch('/api/admin/shun-master', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...config, launchNoticeId: (noticeId ?? data?.launchNoticeId ?? '').trim(), confirmProtection }) })
       const json = await response.json()
       if (!response.ok) throw new Error(json.message || '保存失败。')
       setConfig(json.config)
+      setConfirmProtection(false)
       setMessage('顺大师规则已保存。')
       setRefresh((value) => value + 1)
     } catch (error) { setMessage(error instanceof Error ? error.message : '保存失败。') } finally { setSaving(false) }
@@ -70,7 +75,8 @@ export function ShunMasterAdmin() {
             onChange={(event) => setConfig({ ...config, [key]: config[key].map((item, position) => position === index ? Number(event.target.value) : item) })} />
         </label>)}
       </fieldset>)}
-      <p>当前规则版本 {data?.rulesVersion ?? '—'}。发布新的次数上限、金额概率或黄金期时长后，参与者需确认一次新版本。</p>
+      <label>已发布的全站公告 ID <input className="border p-2" value={noticeId ?? data?.launchNoticeId ?? ''} onChange={(event) => setNoticeId(event.target.value)} /></label>
+      {config.enabled && <label><input type="checkbox" checked={confirmProtection} onChange={(event) => setConfirmProtection(event.target.checked)} /> 已核对全站公告、余额保护与补偿预算，确认开放</label>}
       <button className="flat-button-primary w-fit" disabled={saving}>保存并发布配置</button>
     </form>}
     <label>顺取日（北京时间） <input type="date" value={day || data?.day || ''} onChange={(event) => { setDay(event.target.value); setPage(1) }} /></label>
@@ -83,7 +89,7 @@ export function ShunMasterAdmin() {
       <details><summary>实际金额分布</summary><ul>{data.amounts.map((row) =>
         <li key={row.rolled + ':' + row.amount}>抽中 {row.rolled} · 实付 {row.amount} · {row._count._all} 笔</li>)}</ul></details>
       <div className="overflow-x-auto"><table className="w-full border text-left">
-        <thead><tr>{['记录', '顺取者', '被顺者', '顺取时间', '抽中 / 实付', '结果', '追回 / 补偿'].map((title) => <th className="p-2" key={title}>{title}</th>)}</tr></thead>
+        <thead><tr>{['记录', '顺走入账方', '被顺扣款方', '顺取时间', '抽中 / 实付', '结果', '原额追回 / 平台补偿'].map((title) => <th className="p-2" key={title}>{title}</th>)}</tr></thead>
         <tbody>{data.records.map((row) => <tr key={row.id} className="border-t">
           <td className="p-2">{row.id}</td><td>{row.actorId}</td><td>{row.victimId}</td><td>{new Date(row.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</td>
           <td>{row.rolled} / {row.amount}</td><td>{row.result ?? '未抓捕'}</td><td>{row.recovered} / {row.compensation}</td>

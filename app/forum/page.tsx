@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { ForumHome } from '@/components/ForumHome'
 
 export const dynamic = 'force-dynamic'
+export const metadata = { title: '小E书' }
 
 export default function ForumPage() {
   return <>

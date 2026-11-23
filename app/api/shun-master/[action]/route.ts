@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
-import { ShunError, shunAttempt, shunJoin, shunRecords, shunStatus } from '@/lib/shun-master'
+import { ShunError, setShunProtection, shunAttempt, shunRecords, shunStatus } from '@/lib/shun-master'
+import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -30,7 +31,17 @@ export async function GET(request: Request, { params }: Context) {
       if ((side !== 'in' && side !== 'out') || [cursor, focus].some((id) => id && !/^[a-z0-9]{1,40}$/.test(id))) {
         return json({ message: '查询参数无效。' }, 400)
       }
-      return json(await shunRecords(guard.user.id, side, cursor || undefined, focus || undefined))
+      const range = query.get('range') || 'all'
+      if (range !== 'all' && range !== 'today' && range !== 'yesterday' && range !== 'week' && range !== 'date') {
+        return json({ message: '日期范围无效。' }, 400)
+      }
+      const windowAt = cursor ? query.get('windowAt') : null
+      const now = windowAt ? new Date(windowAt) : undefined
+      if (now && (!Number.isFinite(now.getTime()) || now.getTime() > Date.now())) {
+        return json({ message: '分页日期无效。' }, 400)
+      }
+      return json(await shunRecords(guard.user.id, side, cursor || undefined, focus || undefined,
+        { range, dateKey: query.get('dateKey') || undefined, now }))
     }
     return json({ message: '未找到操作。' }, 404)
   } catch (error) { return handleShunError(error) }
@@ -42,7 +53,7 @@ export async function POST(request: Request, { params }: Context) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
   const { action } = await params
-  if (action !== 'attempt' && action !== 'membership') return json({ message: '未找到操作。' }, 404)
+  if (action !== 'attempt' && action !== 'protection' && action !== 'membership') return json({ message: '未找到操作。' }, 404)
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'shun-master:' + action, user: { limit: 18, windowSeconds: 60 }, ip: { limit: 120, windowSeconds: 60 },
   })
@@ -53,15 +64,14 @@ export async function POST(request: Request, { params }: Context) {
       && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(body.requestId)) {
       return json(await shunAttempt(guard.user.id, body.requestId))
     }
-    if (action === 'membership' && typeof body?.joined === 'boolean') {
-      const version = Number.isSafeInteger(body.acceptedRulesVersion) ? body.acceptedRulesVersion : undefined
-      return json(await shunJoin(guard.user.id, body.joined, version))
-    }
+    if (action === 'protection' && typeof body?.protected === 'boolean') return json(await setShunProtection(guard.user.id, body.protected))
+    if (action === 'membership' && body?.joined === false) return json(await setShunProtection(guard.user.id, true))
     return json({ message: '请求参数无效。' }, 400)
   } catch (error) { return handleShunError(error) }
 }
 
 function handleShunError(error: unknown) {
+  if (error instanceof RegistrationFeeHistoryQueryError) return json({ message: '请选择有效日期。' }, 400)
   if (error instanceof ShunError) return json({ code: error.code, message: error.message }, error.status)
   return json({ message: '目前无法完成操作，请稍后重试。' }, 500)
 }

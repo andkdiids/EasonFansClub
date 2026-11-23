@@ -7012,6 +7012,7 @@ model ShunMasterSettings {
   id Int @id
   config Json
   rulesVersion Int @default(1)
+  launchNoticeId String?
   reserved Int @default(0)
   compensated Int @default(0)
 }
@@ -7020,6 +7021,14 @@ model ShunMasterMember {
   userId String @id
   joined Boolean @default(true)
   updatedAt DateTime @updatedAt
+}
+
+model ShunMasterProtection {
+  userId String @id
+  protected Boolean @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@index([protected, userId])
 }
 
 model ShunMasterConsent {

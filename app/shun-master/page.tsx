@@ -1,6 +1,6 @@
 import { ShunMasterClient } from './ShunMasterClient'
 
-export const metadata = { title: '顺大师 · 私家E院' }
+export const metadata = { title: '顺大师' }
 
 export default async function ShunMasterPage({ searchParams }: { searchParams: Promise<{ record?: string; side?: string }> }) {
   const { record, side } = await searchParams

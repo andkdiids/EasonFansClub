@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     prisma.shunMasterRound.groupBy({ by: ['rolled', 'amount'], where: { day }, _count: { _all: true } }),
     prisma.shunMasterRound.aggregate({ where: { day }, _count: true, _sum: { amount: true, recovered: true, compensation: true } }),
     prisma.shunMasterRound.groupBy({ by: ['actorId'], where: { day } }),
-    prisma.userOperationLog.findMany({ where: { category: 'SHUN_MASTER', action: { in: ['CONFIG_UPDATE', 'COMPENSATION'] } },
+    prisma.userOperationLog.findMany({ where: { category: 'SHUN_MASTER', action: { in: ['CONFIG_UPDATE', 'COMPENSATION', 'NO_TARGET'] } },
       orderBy: { occurredAt: 'desc' }, take: 30, select: { action: true, occurredAt: true, operatorUserId: true, summary: true, metadata: true } }),
     prisma.accountSecurityLog.findMany({ where: { action: 'API_ABUSE_RATE_LIMIT', metadata: { path: '$.endpoint', string_starts_with: 'shun-master:' } },
       orderBy: { createdAt: 'desc' }, take: 30, select: { id: true, userId: true, createdAt: true, metadata: true } }),
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
   const config = validateShunConfig(settings?.config) || defaultShunConfig
   const reserved = settings?.reserved || 0
   const compensated = settings?.compensated || 0
-  return json({ config, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated, budgetWarning: config.budget - reserved - compensated < 7,
+  return json({ config, launchNoticeId: settings?.launchNoticeId ?? null, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated, budgetWarning: config.budget - reserved - compensated < 7,
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
     outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest } })
 }
@@ -44,10 +44,14 @@ export async function PATCH(request: Request) {
   if (origin) return origin
   const guard = await requireAdmin('site_config_manage')
   if (!guard.user) return guard.response
-  const config = validateShunConfig(await request.json().catch(() => null))
+  const body = await request.json().catch(() => null)
+  const config = validateShunConfig(body)
   if (!config) return json({ message: '检查次数、预算、活跃权重及递减概率。概率必须合计 100%。' }, 400)
-  try { return json(await updateShunConfig(guard.user.id, config)) } catch (error) {
-    if (error instanceof ShunError) return json({ message: error.message }, error.status)
+  if (body.launchNoticeId !== undefined && (typeof body.launchNoticeId !== 'string' || !/^[a-z0-9]{0,40}$/.test(body.launchNoticeId))) {
+    return json({ message: '公告 ID 格式无效。' }, 400)
+  }
+  try { return json(await updateShunConfig(guard.user.id, config, { noticeId: body.launchNoticeId, confirmed: body.confirmProtection === true })) } catch (error) {
+    if (error instanceof ShunError) return json({ code: error.code, message: error.message }, error.status)
     return json({ message: '配置保存失败。' }, 500)
   }
 }
