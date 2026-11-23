@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { ShunError, shunCapture } from '@/lib/shun-master'
 
 export const runtime = 'nodejs'
@@ -8,7 +8,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const json = (data: unknown, status = 200) => NextResponse.json(data, { status, headers: { 'Cache-Control': 'private, no-store' } })
   const origin = rejectInvalidRequestOrigin(request)
   if (origin) return origin
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { id, action } = await params
   if (!/^[a-z0-9]{1,40}$/.test(id) || (action !== 'start' && action !== 'guess')) return json({ message: '未找到操作。' }, 404)
