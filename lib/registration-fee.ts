@@ -341,6 +341,9 @@ export function sumPositiveRegistrationFees(records: ReadonlyArray<{ points: num
 
 const registrationFeeRecordSelect = {
   id: true,
+  userId: true,
+  businessKey: true,
+  reversalOfBusinessKey: true,
   points: true,
   action: true,
   reason: true,
@@ -354,7 +357,30 @@ const registrationFeeRecordSelect = {
   dailyDrawId: true,
 } satisfies Prisma.PointLogSelect
 
-type RegistrationFeeRecord = Prisma.PointLogGetPayload<{ select: typeof registrationFeeRecordSelect }>
+type RegistrationFeeRow = Prisma.PointLogGetPayload<{ select: typeof registrationFeeRecordSelect }>
+type ShunLedgerIdentity = 'userId' | 'businessKey' | 'reversalOfBusinessKey'
+type RegistrationFeeRecord = Omit<RegistrationFeeRow, ShunLedgerIdentity> & Partial<Pick<RegistrationFeeRow, ShunLedgerIdentity>>
+
+export function getShunLedgerDisplay(record: Pick<RegistrationFeeRecord, 'action' | 'points' | ShunLedgerIdentity>) {
+  const [namespace, roundId, kind, account, extra] = record.businessKey?.split(':') ?? []
+  // Each signed leg is generated with a distinct event and owner-scoped business key.
+  if (namespace !== 'shun' || !roundId || !record.userId || account !== record.userId || extra !== undefined) return null
+  if (record.action === 'SHUN_STEAL' && kind === 'take' && record.points !== 0) {
+    return record.points > 0
+      ? { label: '顺大师 · 顺走', description: '顺大师 · 成功顺走' }
+      : { label: '顺大师 · 被顺', description: '顺大师 · 被其他 EF 顺取' }
+  }
+  if (record.reversalOfBusinessKey !== `shun:${roundId}:take:${account}`) return null
+  if (record.action === 'SHUN_RECOVERY' && kind === 'recover' && record.points !== 0) {
+    return record.points > 0
+      ? { label: '顺大师 · 抓捕追回', description: '成功抓捕，追回被顺走的挂号费' }
+      : { label: '顺大师 · 被追回', description: '顺走的挂号费已被对方追回' }
+  }
+  if (record.action === 'SHUN_COMPENSATION' && kind === 'compensate' && record.points > 0) {
+    return { label: '顺大师 · 平台补偿', description: '顺大师抓捕结算补偿' }
+  }
+  return null
+}
 
 export type RegistrationFeeHistoryRange = 'all' | 'today' | 'yesterday' | 'week' | 'date'
 
@@ -443,12 +469,13 @@ function getRegistrationFeeRelatedId(record: RegistrationFeeRecord) {
 
 export function serializeRegistrationFeeRecord(record: RegistrationFeeRecord) {
   const displayDateTime = formatBeijingDateTimeMinute(record.createdAt)
+  const shun = getShunLedgerDisplay(record)
   return {
     id: record.id,
     amount: record.points,
     sourceType: record.action,
-    sourceLabel: getRegistrationFeeSourceLabel(record.action),
-    description: record.reason,
+    sourceLabel: shun?.label ?? getRegistrationFeeSourceLabel(record.action),
+    description: shun?.description ?? record.reason,
     relatedId: getRegistrationFeeRelatedId(record),
     activityRegistrationId: record.activityRegistrationId,
     createdAt: record.createdAt.toISOString(),

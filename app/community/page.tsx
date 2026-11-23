@@ -13,12 +13,12 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function generateMetadata(): Promise<Metadata> {
-  return buildPageMetadata({
+  return { ...buildPageMetadata({
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
     canonical: '/community',
     imageUrl: WECHAT_SHARE_IMAGE_PATH,
-  })
+  }), title: '私家E院' }
 }
 
 export default async function CommunityPage() {

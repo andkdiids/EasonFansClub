@@ -238,7 +238,7 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   const pointActions = currentMainBlocks.get('PointActionType')!
   assert.deepEqual(comparableBlocks.get('PointActionType'), [...pointActions, 'SHUN_STEAL', 'SHUN_RECOVERY', 'SHUN_COMPENSATION'])
   comparableBlocks.set('PointActionType', pointActions)
-  for (const name of ['ShunMasterSettings', 'ShunMasterMember', 'ShunMasterConsent', 'ShunMasterRound']) {
+  for (const name of ['ShunMasterSettings', 'ShunMasterMember', 'ShunMasterConsent', 'ShunMasterProtection', 'ShunMasterRound']) {
     assert.ok(comparableBlocks.delete(name), `required Shun Master model retained: ${name}`)
   }
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')

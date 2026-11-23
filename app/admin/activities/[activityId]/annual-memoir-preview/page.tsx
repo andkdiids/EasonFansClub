@@ -9,6 +9,7 @@ import { previewMemoirBadges } from '@/lib/annual-memoir-badge-data'
 import { memoirIdentity } from '@/lib/annual-memoir-identity'
 
 export const dynamic = 'force-dynamic'
+export const metadata = { title: '《葡萄成熟时》' }
 
 const cases = {
   posts: { posts: 6 }, games: { games: 8 }, badges: { badges: 6 },
