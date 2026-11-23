@@ -10,9 +10,9 @@ import { captureMode, defaultShunConfig, shunDay, shunRulesChanged, shuffle, val
 type Tx = Prisma.TransactionClient
 type Round = Prisma.ShunMasterRoundGetPayload<Record<string, never>>
 const eligible = { isDeleted: false, status: 'ACTIVE' } as const
-const transactionAccount = { ...eligible, role: 'USER', Profile: { isNot: null } } as const
+const transactionAccount = { ...eligible, Profile: { isNot: null } } as const
 const candidateAccount = Prisma.sql`
-  u.status = 'ACTIVE' AND u.isDeleted = false AND u.role = 'USER'
+  u.status = 'ACTIVE' AND u.isDeleted = false
   AND EXISTS (SELECT 1 FROM Profile p WHERE p.userId = u.id)
 `
 // Existing refusals are durable. Any future time-limited protection belongs
@@ -115,9 +115,13 @@ async function present(tx: Tx, round: Round, side: 'out' | 'in') {
   }
 }
 
-async function validLaunchNotice(tx: Tx, id: string | null | undefined) {
-  return !!id && !!await tx.systemNotification.findFirst({ where: { id, ...effectiveSystemNotificationWhere(),
-    title: { contains: '顺大师' }, AND: [{ content: { contains: '挂号费' } }, { content: { contains: '保护' } }] }, select: { id: true } })
+function launchNoticeWhere(): Prisma.SystemNotificationWhereInput {
+  return { ...effectiveSystemNotificationWhere(), title: { contains: '顺大师' },
+    AND: [{ content: { contains: '挂号费' } }, { content: { contains: '保护' } }] }
+}
+
+export async function validLaunchNotice(tx: Tx, id: string | null | undefined) {
+  return !!id && !!await tx.systemNotification.findFirst({ where: { id, ...launchNoticeWhere() }, select: { id: true } })
 }
 
 export async function shunStatus(userId: string) {
@@ -183,10 +187,10 @@ export async function shunAttempt(actorId: string, requestId: string) {
       ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 128`
     if (!pool.length) {
       const [funded, protectedFunded] = await Promise.all([
-        tx.user.count({ where: { ...eligible, role: 'USER', points: { gt: 0 } } }),
+        tx.user.count({ where: { ...transactionAccount, points: { gt: 0 } } }),
         tx.$queryRaw<{ count: bigint }[]>`
           SELECT COUNT(*) AS count FROM ShunMasterProtection p JOIN User u ON u.id = p.userId
-          WHERE p.protected = true AND u.status = 'ACTIVE' AND u.isDeleted = false AND u.role = 'USER' AND u.points > 0
+          WHERE p.protected = true AND ${candidateAccount} AND ${hasSpendableBalance}
         `,
       ])
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
@@ -315,19 +319,43 @@ export function shunCapture(userId: string, id: string, guess?: { mode: number; 
   })
 }
 
-export async function updateShunConfig(userId: string, config: ShunConfig, launch?: { noticeId?: string; confirmed?: boolean }) {
+export async function updateShunConfig(userId: string, draft: ShunConfig) {
   return shunTransaction(async (tx) => {
     const { state, config: old } = await settings(tx)
+    const config = { ...draft, enabled: old.enabled }
     if (config.budget < state.reserved + state.compensated) throw new ShunError('BUDGET', '预算不能低于已补偿金额与未结索赔准备金。')
-    const launchNoticeId = launch?.noticeId === undefined ? state.launchNoticeId : launch.noticeId || null
-    if (config.enabled && ((!old.enabled || launchNoticeId !== state.launchNoticeId) && !launch?.confirmed
-      || !await validLaunchNotice(tx, launchNoticeId))) {
-      throw new ShunError('NOTICE_REQUIRED', '请先发布顺大师全站公告，说明挂号费扣除和历史拒绝记录保护，并确认开放。')
-    }
     const rulesVersion = state.rulesVersion + Number(shunRulesChanged(old, config))
-    await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config, rulesVersion, launchNoticeId } })
+    await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config, rulesVersion } })
     await tx.userOperationLog.create({ data: { userId, operatorUserId: userId, category: 'SHUN_MASTER',
-      action: 'CONFIG_UPDATE', summary: '发布顺大师配置', metadata: { old, config, rulesVersion, launchNoticeId }, source: 'WEB', operatorType: 'ADMIN' } })
+      action: 'CONFIG_UPDATE', summary: '保存顺大师配置', metadata: { old, config, rulesVersion }, source: 'WEB', operatorType: 'ADMIN' } })
     return { config, rulesVersion }
+  })
+}
+
+export async function setShunEnabled(userId: string, enabled: boolean, confirmed = false) {
+  return shunTransaction(async (tx) => {
+    const { state, config: old } = await settings(tx)
+    let launchNoticeId = state.launchNoticeId
+    if (enabled) {
+      if (!confirmed) throw new ShunError('CONFIRM_REQUIRED', '请确认已核对公告、历史拒绝记录保护与补偿预算。')
+      const notice = await tx.systemNotification.findFirst({
+        where: { ...launchNoticeWhere(), type: 'ANNOUNCEMENT' },
+        orderBy: [{ publishAt: 'desc' }, { id: 'desc' }],
+        select: { id: true },
+      })
+      if (!notice) throw new ShunError('NOTICE_REQUIRED', '请先发布顺大师全站公告，说明挂号费变动和拒绝扣费保护。')
+      if (old.budget - state.reserved - state.compensated < 7) {
+        throw new ShunError('BUDGET', '可用补偿预算不足，暂不能开放顺大师。')
+      }
+      launchNoticeId = notice.id
+    }
+    const config = { ...old, enabled }
+    if (old.enabled !== enabled || state.launchNoticeId !== launchNoticeId) {
+      await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config, launchNoticeId } })
+      await tx.userOperationLog.create({ data: { userId, operatorUserId: userId, category: 'SHUN_MASTER',
+        action: 'CONFIG_UPDATE', summary: enabled ? '正式启用顺大师' : '关闭顺大师',
+        metadata: { old, config, launchNoticeId, confirmed }, source: 'WEB', operatorType: 'ADMIN' } })
+    }
+    return { config, rulesVersion: state.rulesVersion, effectiveEnabled: enabled }
   })
 }
