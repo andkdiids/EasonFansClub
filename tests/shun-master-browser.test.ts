@@ -40,16 +40,26 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
     assert.equal((await request('/api/shun-master/status')).status, 401)
     assert.equal((await request('/api/shun-master/attempt', undefined, { requestId: randomUUID() })).status, 401)
     assert.equal((await request('/api/admin/shun-master', actorToken)).status, 403)
+    assert.equal((await request('/api/admin/shun-master', actorToken, { operation: 'enable', confirmed: true }, 'PATCH')).status, 403)
+    assert.equal((await request('/api/admin/shun-master', adminToken, { operation: 'disable' }, 'PATCH')).status, 200)
+    await prisma.systemNotification.updateMany({ where: { title: { contains: '顺大师' } }, data: { published: false } })
+    const custom = { ...defaultShunConfig, enabled: true, attempts: 8, victimCap: 3, goldenMinutes: 12,
+      probabilities: [24, 22, 17, 14, 10, 7, 6], weights: [129, 120, 115, 108, 100], budget: 900 }
+    const saved = await request('/api/admin/shun-master', adminToken, custom, 'PATCH')
+    assert.equal(saved.status, 200)
+    assert.deepEqual(saved.body.config, { ...custom, enabled: false })
     assert.equal((await request('/api/admin/shun-master', adminToken, defaultShunConfig, 'PATCH')).status, 200)
     assert.equal((await request('/api/shun-master/attempt', actorToken, { requestId: randomUUID() })).body.code, 'DISABLED')
     const refusal = await prisma.shunMasterProtection.create({ data: { userId: actor.id, protected: true } })
     await prisma.userOperationLog.create({ data: { userId: actor.id, category: 'SHUN_MASTER', action: 'LEAVE',
       summary: '合成旧退出记录', source: 'WEB', operatorType: 'USER' } })
-    assert.equal((await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, probabilities: [1, 1, 1, 1, 1, 1, 1] }, 'PATCH')).status, 400)
-    assert.equal((await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, enabled: true }, 'PATCH')).body.code, 'NOTICE_REQUIRED')
-    const notice = await prisma.systemNotification.create({ data: { createdById: admin.id, title: '顺大师初次开放公告', content: '挂号费扣除规则与匹配保护', published: true } })
-    assert.equal((await request('/api/admin/shun-master', adminToken,
-      { ...defaultShunConfig, enabled: true, launchNoticeId: notice.id, confirmProtection: true }, 'PATCH')).status, 200)
+    assert.equal((await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, enabled: false, probabilities: [1, 1, 1, 1, 1, 1, 1] }, 'PATCH')).status, 400)
+    assert.equal((await request('/api/admin/shun-master', adminToken, { operation: 'enable' }, 'PATCH')).body.code, 'CONFIRM_REQUIRED')
+    assert.equal((await request('/api/admin/shun-master', adminToken, { operation: 'enable', confirmed: true }, 'PATCH')).body.code, 'NOTICE_REQUIRED')
+    const notice = await prisma.systemNotification.create({ data: { createdById: admin.id, title: '顺大师初次开放公告', content: '顺大师挂号费扣除规则与匹配保护',
+      type: 'ANNOUNCEMENT', isPublished: true, published: true, publishedAt: new Date(), publishAt: new Date() } })
+    assert.equal((await request('/api/admin/shun-master', adminToken, { operation: 'enable', confirmed: true }, 'PATCH')).status, 200)
+    assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId, notice.id)
     assert.equal((await request('/api/shun-master/protection', undefined, { protected: true })).status, 401)
     assert.equal((await request('/api/shun-master/protection', actorToken, { protected: false })).status, 404)
     assert.equal((await request('/api/shun-master/membership', actorToken, { joined: false })).status, 404)
@@ -62,8 +72,12 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
     const page = await desktop.newPage()
     const guest = await client.newPage()
     await guest.goto(base + '/shun-master')
-    await guest.getByText('玩法说明', { exact: true }).click()
-    await guest.getByText(/正式开放前，管理员会发布全站公告/).waitFor()
+    const guestRules = guest.locator('details').filter({ hasText: '顺大师 · 玩法说明' })
+    assert.equal(await guestRules.getAttribute('open'), null)
+    await guestRules.locator('summary').click()
+    await guestRules.getByText('每日机会于北京时间 00:00 重置。', { exact: true }).waitFor()
+    const rulesText = await guestRules.innerText()
+    assert.doesNotMatch(rulesText, /候选池|准备金|余额不足|平台补偿|同意规则/)
     assert.equal(await guest.getByRole('button', { name: '顺一手' }).count(), 0)
     await guest.getByRole('link', { name: '登录参与顺大师' }).waitFor()
     assert.equal(new URL(guest.url()).pathname, '/shun-master')
@@ -186,6 +200,36 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
     await adminPage.getByText('近期高频请求拦截', { exact: true }).click()
     await adminPage.getByText('shun-master:attempt', { exact: false }).first().waitFor()
     if (output) await adminPage.screenshot({ path: join(output, 'admin.png') })
+    await adminPage.getByRole('button', { name: '关闭顺大师' }).click()
+    const state = adminPage.getByRole('region', { name: '游戏状态' })
+    await state.getByText('已关闭', { exact: true }).waitFor()
+    await adminPage.getByRole('button', { name: '保存配置' }).click()
+    await adminPage.getByText('顺大师规则已保存，启停状态未改变。', { exact: true }).waitFor()
+    assert.equal(await adminPage.getByText('已发布的全站公告 ID', { exact: false }).count(), 0)
+    assert.equal((await request('/api/shun-master/attempt', victimToken, { requestId: randomUUID() })).body.code, 'DISABLED')
+    await adminPage.evaluate(() => window.scrollTo(0, 0))
+    if (output) await adminPage.screenshot({ path: join(output, 'admin-after.png') })
+    adminPage.once('dialog', (popup) => popup.dismiss())
+    await adminPage.getByRole('button', { name: '启用顺大师' }).click()
+    assert.equal((await request('/api/admin/shun-master', adminToken)).body.effectiveEnabled, false)
+    adminPage.once('dialog', (popup) => popup.accept())
+    await adminPage.getByRole('button', { name: '启用顺大师' }).click()
+    await state.getByText('已启用', { exact: true }).waitFor()
+    for (const theme of ['day', 'midnight']) {
+      await adminPage.evaluate((value) => { document.documentElement.dataset.theme = value }, theme)
+      for (const width of [320, 360, 375, 390, 414, 430, 768, 1280]) {
+        await adminPage.setViewportSize({ width, height: 844 })
+        const form = adminPage.locator('main form')
+        const layout = await form.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          return { width: innerWidth, documentWidth: document.documentElement.scrollWidth,
+            formWidth: element.clientWidth, formScrollWidth: element.scrollWidth, left: rect.x, right: rect.right }
+        })
+        assert.ok(layout.documentWidth <= layout.width && layout.formScrollWidth <= layout.formWidth
+          && layout.left >= 0 && layout.right <= layout.width, `admin ${theme} ${width} ${JSON.stringify(layout)}`)
+        if (output && width === 390) await adminPage.screenshot({ path: join(output, `admin-h5-${theme}.png`) })
+      }
+    }
     const stamp = new Date()
     const memoir = await prisma.activity.create({ data: { title: '葡萄成熟时', description: 'Browser fixture', type: 'TOPIC_ACTIVITY',
       annualMemoirConfig: { create: { year: 2026, previewAt: stamp, reservationOpensAt: stamp, reservationClosesAt: stamp,
@@ -221,5 +265,11 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
         if (output && width === 390) await phone.screenshot({ path: join(output, `h5-${theme}.png`) })
       }
     }
+    await phone.setViewportSize({ width: 390, height: 844 })
+    const phoneRules = phone.locator('details').filter({ hasText: '顺大师 · 玩法说明' })
+    assert.equal(await phoneRules.getAttribute('open'), null)
+    await phoneRules.locator('summary').click()
+    assert.equal(await phoneRules.innerText(), rulesText)
+    if (output) await phoneRules.screenshot({ path: join(output, 'rules-h5.png') })
   } finally { await client.close(); await prisma.$disconnect() }
 })

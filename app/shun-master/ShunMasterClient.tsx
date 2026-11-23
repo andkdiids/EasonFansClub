@@ -185,9 +185,14 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
           </button>}
         </>}
         <details><summary>玩法说明</summary>
-          <p>顺大师是私家E院的互动游戏。正式开放前，管理员会发布全站公告。游戏开放后，正常登录用户可以直接顺取，符合条件的账号可能被匹配。</p>
-          <p>顺取成功后，双方挂号费余额会发生等额变化。每天最多顺取 {status?.attempts ?? 7} 次、被顺 {status?.victimCap ?? 4} 次，每笔 1–7 挂号费，北京时间零点重置。</p>
-          <p>被顺后有一次抓捕机会。前 {status?.goldenMinutes ?? 10} 分钟二选一，之后三选一。猜中全额追回，对方余额不足的部分由平台补足，猜错不返还。</p>
+          <h2>顺大师 · 玩法说明</h2>
+          <p>顺一手，缘分随天。</p>
+          <p>每天有 {status?.attempts ?? 7} 次「顺一手」的机会，每次随机顺走一位幸运 EF 的 1–7 挂号费，每人每天最多被顺 {status?.victimCap ?? 4} 次。</p>
+          <p>被顺走挂号费后，你会收到站内通知，并获得一次抓捕机会。</p>
+          <p>{status?.goldenMinutes ?? 10} 分钟内抓捕：二选一。</p>
+          <p>超过 {status?.goldenMinutes ?? 10} 分钟：三选一。</p>
+          <p>猜中即可追回被顺走的挂号费，猜错则无法追回。</p>
+          <p>每日机会于北京时间 00:00 重置。</p>
         </details>
       </section>
       {status && <section className={styles.panel} aria-label="历史记录">

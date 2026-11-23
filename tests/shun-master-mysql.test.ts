@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { prisma } from '../lib/prisma'
-import { getShunCandidateSummary, shunAttempt, shunCapture, shunRecords, shunStatus, shunTransaction, updateShunConfig } from '../lib/shun-master'
+import { getShunCandidateSummary, setShunEnabled, shunAttempt, shunCapture, shunRecords, shunStatus, shunTransaction, updateShunConfig } from '../lib/shun-master'
 import { defaultShunConfig, shunDay } from '../lib/shun-master-rules'
 import { getShunLedgerDisplay } from '../lib/registration-fee'
 
@@ -26,24 +26,30 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     const [operator, victim, ...actors] = await Promise.all([
       createUser(), createUser(40, undefined, 0), ...Array.from({ length: 8 }, () => createUser()),
     ])
-    const config = { ...defaultShunConfig, enabled: true, budget: 500 }
-    await assert.rejects(updateShunConfig(operator.id, config), { code: 'NOTICE_REQUIRED' })
+    const config = { ...defaultShunConfig, enabled: false, budget: 500 }
+    await updateShunConfig(operator.id, config)
+    assert.equal((await shunStatus(operator.id)).enabled, false)
+    await assert.rejects(setShunEnabled(operator.id, true), { code: 'CONFIRM_REQUIRED' })
+    await assert.rejects(setShunEnabled(operator.id, true, true), { code: 'NOTICE_REQUIRED' })
     const notice = await prisma.systemNotification.create({ data: { createdById: operator.id, title: '顺大师开放公告',
-      content: '挂号费扣除规则及匹配保护方式', published: true } })
-    const publish = (settings: typeof config) => updateShunConfig(operator.id, settings, { noticeId: notice.id, confirmed: true })
+      content: '顺大师挂号费扣除规则与匹配保护方式', type: 'ANNOUNCEMENT', isPublished: true, published: true,
+      publishedAt: new Date(), publishAt: new Date() } })
+    const publish = async (settings: typeof config) => { await updateShunConfig(operator.id, settings); await setShunEnabled(operator.id, true, true) }
     await publish(config)
-    const [protectedUser, banned, deleted, system] = await Promise.all(Array.from({ length: 4 }, () => createUser(100)))
+    assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId, notice.id)
+    const [protectedUser, banned, deleted, protectedAdmin] = await Promise.all(Array.from({ length: 4 }, () => createUser(100)))
     await seedRefusal(protectedUser.id)
-    await prisma.user.update({ where: { id: victim.id }, data: { email: null, emailVerifiedAt: null } })
+    await seedRefusal(protectedAdmin.id)
+    await prisma.user.update({ where: { id: victim.id }, data: { email: null, emailVerifiedAt: null, role: 'ADMIN' } })
+    await prisma.user.update({ where: { id: actors[0].id }, data: { role: 'MODERATOR' } })
     await prisma.user.update({ where: { id: banned.id }, data: { status: 'BANNED' } })
     await prisma.user.update({ where: { id: deleted.id }, data: { isDeleted: true } })
-    await prisma.user.update({ where: { id: system.id }, data: { role: 'SUPER_ADMIN' } })
+    await prisma.user.update({ where: { id: protectedAdmin.id }, data: { role: 'SUPER_ADMIN' } })
     await assert.rejects(shunAttempt(banned.id, randomUUID()), { code: 'ACCOUNT' })
-    await assert.rejects(shunAttempt(system.id, randomUUID()), { code: 'ACCOUNT' })
     const pool = await getShunCandidateSummary(prisma, shunDay(new Date()), 4)
     assert.equal(pool.eligible, 1)
-    assert.equal(pool.excluded.refused, 1)
-    assert.equal(pool.excluded.account, 3)
+    assert.equal(pool.excluded.refused, 2)
+    assert.equal(pool.excluded.account, 2)
     assert.ok(pool.excluded.balance >= 9)
     assert.equal(await prisma.shunMasterMember.count({ where: { userId: victim.id } }), 0)
     assert.equal(await prisma.shunMasterConsent.count({ where: { userId: victim.id } }), 0)
@@ -57,6 +63,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     assert.ok(rounds.every((round) => round.victimId === victim.id && round.actorId !== victim.id))
     assert.equal((await getShunCandidateSummary(prisma, shunDay(rounds[0].createdAt), 4)).excluded.dailyCap, 1)
     assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: protectedUser.id }, select: { points: true } })).points, 100)
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: protectedAdmin.id }, select: { points: true } })).points, 100)
     const [first, failed, expired, compensated] = rounds
     const owner = actors.find(({ id }) => id === first.actorId)!
     await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'NO_TARGET' })
@@ -126,7 +133,9 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     await updateShunConfig(operator.id, { ...config, budget: state.reserved + state.compensated })
     await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'BUDGET' })
     assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved, expired.amount)
-    await updateShunConfig(operator.id, { ...config, enabled: false, budget: state.reserved + state.compensated })
+    await updateShunConfig(operator.id, { ...config, budget: state.reserved + state.compensated })
+    await setShunEnabled(operator.id, false)
+    await assert.rejects(setShunEnabled(operator.id, true, true), { code: 'BUDGET' })
     await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'DISABLED' })
     assert.equal((await shunCapture(victim.id, expired.id, { mode: 3, uid: expiredOwner.uid })).record?.result, 'SUCCESS')
     assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved, 0)
