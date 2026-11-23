@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { defaultShunConfig, shunDay, validateShunConfig } from '@/lib/shun-master-rules'
-import { getShunCandidateSummary, setShunEnabled, ShunError, updateShunConfig, validLaunchNotice } from '@/lib/shun-master'
+import { getShunCandidateSummary, setShunEnabled, ShunError, updateShunConfig } from '@/lib/shun-master'
 
 export const dynamic = 'force-dynamic'
 const json = (data: unknown, status = 200) => NextResponse.json(data, { status, headers: { 'Cache-Control': 'private, no-store' } })
@@ -37,14 +37,13 @@ export async function GET(request: Request) {
   const config = validateShunConfig(settings?.config) || defaultShunConfig
   const reserved = settings?.reserved || 0
   const compensated = settings?.compensated || 0
-  const [candidatePool, refusalCount, activeRefusals, effectiveEnabled] = await Promise.all([
+  const [candidatePool, refusalCount, activeRefusals] = await Promise.all([
     getShunCandidateSummary(prisma, shunDay(new Date()), config.victimCap),
     prisma.shunMasterProtection.count({ where: { protected: true } }),
     prisma.shunMasterProtection.findMany({ where: { protected: true }, orderBy: [{ updatedAt: 'desc' }, { userId: 'asc' }],
       take: 50, select: { userId: true, updatedAt: true } }),
-    config.enabled && validLaunchNotice(prisma, settings?.launchNoticeId),
   ])
-  return json({ config, effectiveEnabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated, budgetWarning: config.budget - reserved - compensated < 7,
+  return json({ config, effectiveEnabled: config.enabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated, budgetWarning: config.budget - reserved - compensated < 7,
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
     outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit })
 }
@@ -55,9 +54,10 @@ export async function PATCH(request: Request) {
   const guard = await requireAdmin('site_config_manage')
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
+  const isToggle = body?.operation === 'enable' || body?.operation === 'disable'
   try {
-    if (body?.operation === 'enable' || body?.operation === 'disable') {
-      return json(await setShunEnabled(guard.user.id, body.operation === 'enable', body.confirmed === true))
+    if (isToggle) {
+      return json(await setShunEnabled(guard.user.id, body.operation === 'enable'))
     }
     if (body?.operation !== undefined) return json({ message: '不支持的配置操作。' }, 400)
     const config = validateShunConfig({ ...body, enabled: false })
@@ -65,6 +65,6 @@ export async function PATCH(request: Request) {
     return json(await updateShunConfig(guard.user.id, config))
   } catch (error) {
     if (error instanceof ShunError) return json({ code: error.code, message: error.message }, error.status)
-    return json({ message: '配置保存失败。' }, 500)
+    return json({ message: isToggle ? '游戏状态更新失败，请重试。' : '配置保存失败。' }, 500)
   }
 }

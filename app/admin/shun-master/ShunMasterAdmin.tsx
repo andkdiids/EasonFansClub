@@ -63,17 +63,16 @@ export function ShunMasterAdmin() {
   }
   async function setEnabled(enabled: boolean) {
     if (saving || !config) return
-    if (enabled && !window.confirm('即将开放真实挂号费转移功能。请确认全站告知已完成、历史明确拒绝记录仍受保护、补偿预算已核对。确定启用顺大师吗？')) return
     setSaving(true)
     setMessage('')
     try {
       const response = await fetch('/api/admin/shun-master', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operation: enabled ? 'enable' : 'disable', confirmed: enabled }) })
+        body: JSON.stringify({ operation: enabled ? 'enable' : 'disable' }) })
       const json = await response.json()
       if (!response.ok) throw new Error(json.message || '状态更新失败。')
       setConfig((current) => current && { ...current, enabled: json.config.enabled })
       setData((current) => current && { ...current, config: json.config, effectiveEnabled: json.effectiveEnabled })
-      setMessage(enabled ? '顺大师已启用。' : '顺大师已关闭。')
+      setMessage(enabled ? '顺大师已开启。' : '顺大师已关闭。')
       setRefresh((value) => value + 1)
     } catch (error) { setMessage(error instanceof Error ? error.message : '状态更新失败。') } finally { setSaving(false) }
   }
@@ -86,7 +85,7 @@ export function ShunMasterAdmin() {
       <section className="grid gap-2 border-b pb-4" aria-label="游戏状态">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><h2 className="font-semibold">游戏状态</h2><p className="text-sm text-[var(--foreground-muted)]">启用使用已保存的规则和预算。保存配置不会改变启停状态。</p></div>
-          <strong aria-live="polite">{effectiveEnabled ? '已启用' : '已关闭'}</strong>
+          <strong aria-live="polite">{effectiveEnabled ? '已开启' : '已关闭'}</strong>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="flat-button-primary" disabled={saving || effectiveEnabled} onClick={() => void setEnabled(true)}>启用顺大师</button>
