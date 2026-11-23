@@ -7011,6 +7011,7 @@ model TopicActivityLotteryNotice {
 model ShunMasterSettings {
   id Int @id
   config Json
+  rulesVersion Int @default(1)
   reserved Int @default(0)
   compensated Int @default(0)
 }
@@ -7019,6 +7020,15 @@ model ShunMasterMember {
   userId String @id
   joined Boolean @default(true)
   updatedAt DateTime @updatedAt
+}
+
+model ShunMasterConsent {
+  userId String
+  rulesVersion Int
+  acceptedAt DateTime @default(now())
+
+  @@id([userId, rulesVersion])
+  @@index([rulesVersion])
 }
 
 model ShunMasterRound {

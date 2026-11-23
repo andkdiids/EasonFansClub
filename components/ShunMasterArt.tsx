@@ -7,7 +7,5 @@ export function ShunMasterArt() {
     <path fill="var(--shun-surface)" d="M125 279q4-70 32-96l32-18 9-26h31l10 25 35 17q29 27 34 98Z" />
     <path fill="var(--shun-surface)" d="M182 102q-10-9-2-21-8-16 7-22 2-17 20-14 12-12 26-1 17-2 22 14 11 13 1 28l-5 19q1 21-16 36-15 12-29 4-22-14-24-43Z" />
     <path d="M183 102q7-3 10-14 9 3 15-8 11 9 21-3 7 13 22 13m-55 20 7-2m23 1 8 1m-18 1-2 14 5 1m-11 10q9 5 17-1m-36 32q24 36 52-2m-87 50-5 64m128-65 5 65m-106-38 12 38m55-45-9 45" />
-    <circle className="shun-coin" cx="318" cy="96" r="10" stroke="#9b6a2d" />
-    <path className="shun-coin" d="M315 96h6m-3-3v6" stroke="#9b6a2d" />
   </svg>
 }

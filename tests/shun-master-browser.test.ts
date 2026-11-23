@@ -19,8 +19,7 @@ test('real HTTP and browser exercise Shun Master opt-in, anonymity, capture and 
   const create = (points: number, role: 'USER' | 'SUPER_ADMIN' = 'USER') => {
     const name = 'shun-browser-' + randomUUID()
     return prisma.user.create({ data: { username: name, usernameNormalized: name, nickname: name,
-      email: name + '@example.invalid', emailVerifiedAt: new Date(), points, passwordHash: 'fixture', role,
-      createdAt: new Date(Date.now() - 9 * 86400000), Profile: { create: { displayName: name } } } })
+      points, passwordHash: 'fixture', role, Profile: { create: { displayName: name } } } })
   }
   const client = await chromium.launch({ executablePath: process.env.SHUN_MASTER_BROWSER_PATH, headless: true })
   try {
@@ -40,11 +39,14 @@ test('real HTTP and browser exercise Shun Master opt-in, anonymity, capture and 
     assert.equal((await request('/api/admin/shun-master', actorToken)).status, 403)
     assert.equal((await request('/api/admin/shun-master', adminToken, defaultShunConfig, 'PATCH')).status, 200)
     assert.equal((await request('/api/shun-master/attempt', actorToken, { requestId: randomUUID() })).body.code, 'DISABLED')
-    assert.equal((await request('/api/shun-master/membership', actorToken, { joined: true, victimCap: 4 })).body.code, 'JOIN')
+    assert.equal((await request('/api/shun-master/membership', actorToken, { joined: true })).body.code, 'DISABLED')
     assert.equal((await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, probabilities: [1, 1, 1, 1, 1, 1, 1] }, 'PATCH')).status, 400)
     assert.equal((await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, enabled: true }, 'PATCH')).status, 200)
+    const { rulesVersion } = (await request('/api/shun-master/status', actorToken)).body
+    assert.equal((await request('/api/shun-master/membership', undefined, { joined: true })).status, 401)
+    assert.equal((await request('/api/shun-master/membership', actorToken, { joined: true })).body.code, 'CONSENT_REQUIRED')
     for (const token of [victimToken, ...decoyTokens]) {
-      assert.equal((await request('/api/shun-master/membership', token, { joined: true, victimCap: 4 })).status, 200)
+      assert.equal((await request('/api/shun-master/membership', token, { joined: true, acceptedRulesVersion: rulesVersion })).status, 200)
     }
     const config = await request('/api/shun-master/config', actorToken)
     assert.equal(config.status, 200)
@@ -57,7 +59,13 @@ test('real HTTP and browser exercise Shun Master opt-in, anonymity, capture and 
     await page.getByRole('link', { name: '进入顺大师' }).waitFor()
     await page.locator('.app-topbar').getByRole('link', { name: '顺大师' }).click()
     await page.getByRole('heading', { name: '顺大师', exact: true }).waitFor()
-    await page.getByRole('button', { name: '同意规则并加入' }).click()
+    const approval = page.getByRole('button', { name: '同意规则并开启顺大师' })
+    await approval.click()
+    await page.getByRole('button', { name: '顺一手' }).waitFor()
+    await page.reload()
+    await page.getByRole('button', { name: '顺一手' }).waitFor()
+    assert.equal(await approval.count(), 0)
+    assert.equal((await request('/api/shun-master/status', await createSessionToken(actor))).body.hasAcceptedRules, true)
     await page.getByRole('button', { name: '顺一手' }).click()
     await page.getByText('看看哪个 EF 这么幸运...', { exact: true }).waitFor()
     assert.notEqual(await page.locator('.shun-hands').evaluate((el) => getComputedStyle(el).animationName), 'none')
@@ -120,12 +128,28 @@ test('real HTTP and browser exercise Shun Master opt-in, anonymity, capture and 
     await adminPage.getByText('近期高频请求拦截', { exact: true }).click()
     await adminPage.getByText('shun-master:attempt', { exact: false }).first().waitFor()
     if (output) await adminPage.screenshot({ path: join(output, 'admin.png') })
-    await phone.locator('.app-topbar').getByRole('button', { name: '切换到深夜主题' }).click()
-    assert.equal(await phone.locator('html').getAttribute('data-theme'), 'midnight')
-    for (const width of [320, 360, 375, 390, 414, 430]) {
-      await phone.setViewportSize({ width, height: 844 })
-      assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    for (const theme of ['day', 'midnight']) {
+      if (theme === 'midnight') await phone.locator('.app-topbar').getByRole('button', { name: '切换到深夜主题' }).click()
+      assert.equal(await phone.locator('html').getAttribute('data-theme'), theme)
+      for (const width of [320, 360, 375, 390, 414, 430, 768, 1280]) {
+        await phone.setViewportSize({ width, height: 844 })
+        assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+        const layout = await phone.locator('[data-shun-balance-icon]').evaluate((icon) => {
+          const stats = icon.closest('dl')!
+          const columns = [...stats.children].map((column) => column.getBoundingClientRect().width)
+          const art = icon.closest('section')!.querySelector('svg.shun-art')!.getBoundingClientRect()
+          const area = icon.closest('section')!.getBoundingClientRect()
+          const page = icon.closest('main')!
+          const frame = page.parentElement!.getBoundingClientRect()
+          const pageRect = page.getBoundingClientRect()
+          return Math.max(...columns) - Math.min(...columns) < 1
+            && Math.abs((art.left + art.right) - (area.left + area.right)) < 2
+            && Math.abs((pageRect.left + pageRect.right) - (frame.left + frame.right)) < 2
+            && icon.parentElement?.tagName === 'DD'
+        })
+        assert.equal(layout, true, `${theme} ${width}`)
+        if (output && width === 390) await phone.screenshot({ path: join(output, `h5-${theme}.png`) })
+      }
     }
-    if (output) await phone.screenshot({ path: join(output, 'h5-midnight-capture-result.png') })
   } finally { await client.close(); await prisma.$disconnect() }
 })

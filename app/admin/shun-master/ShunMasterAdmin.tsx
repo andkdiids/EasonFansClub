@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { ShunConfig } from '@/lib/shun-master-rules'
 
 type Summary = {
+  rulesVersion: number
   config: ShunConfig; day: string; reserved: number; compensated: number; budgetWarning: boolean; activePlayers: number; hasMore: boolean
   totals: { _count: number; _sum: { amount: number | null; recovered: number | null; compensation: number | null } }
   amounts: { rolled: number; amount: number; _count: { _all: number } }[]
@@ -69,8 +70,8 @@ export function ShunMasterAdmin() {
             onChange={(event) => setConfig({ ...config, [key]: config[key].map((item, position) => position === index ? Number(event.target.value) : item) })} />
         </label>)}
       </fieldset>)}
-      <p>黄金期显示 2 人，普通期显示 3 人。修改被顺上限后，参与者需要重新确认规则。</p>
-      <button className="flat-button-primary w-fit" disabled={saving}>保存规则</button>
+      <p>当前规则版本 {data?.rulesVersion ?? '—'}。发布新的次数上限、金额概率或黄金期时长后，参与者需确认一次新版本。</p>
+      <button className="flat-button-primary w-fit" disabled={saving}>保存并发布配置</button>
     </form>}
     <label>顺取日（北京时间） <input type="date" value={day || data?.day || ''} onChange={(event) => { setDay(event.target.value); setPage(1) }} /></label>
     {data && <>
