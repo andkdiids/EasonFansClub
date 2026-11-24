@@ -3,8 +3,9 @@ import { randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { createNotificationWithDb } from '@/lib/notification-write'
 import { awardRegistrationFee, consumeRegistrationFee, getRegistrationFeeHistoryWindow, type RegistrationFeeHistoryRange } from '@/lib/registration-fee'
-import { activityTier, captureMode, defaultShunConfig, friendPoolDraw, pickStratified, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, type ShunConfig } from './shun-master-rules'
-import { ANONYMOUS_LETTER_NOTIFICATION, anonymousLetterNotificationLink, readAnonymousMessageField } from './shun-anonymous-letter'
+import { activityTier, captureMode, defaultShunConfig, friendPoolDraw, pickStratified, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, SHUN_NOTIFY_STATUS, SHUN_NOTIFY_WINDOW_MS, type ShunConfig } from './shun-master-rules'
+import { ANONYMOUS_LETTER_NOTIFICATION, anonymousLetterNotificationLink, readAnonymousMessageField, type AnonymousMessageField } from './shun-anonymous-letter'
+import { shunInvestigationLink } from './shun-letter-notification'
 import { shunPerson } from './shun-person'
 
 // Re-exported for callers that historically imported it from the service.
@@ -145,7 +146,6 @@ function notify(tx: Tx, id: string, recipientId: string, title: string, content:
     key: `shun:${id}:${kind}`,
   } })
 }
-
 async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = false) {
   const visible = side === 'out' || round.result !== null
   return {
@@ -174,7 +174,7 @@ export async function shunStatus(userId: string) {
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes, serverNow }
 }
 
-export async function shunAttempt(actorId: string, requestId: string, anonymousMessage?: string | null) {
+export async function shunAttempt(actorId: string, requestId: string) {
   const now = new Date()
   const day = shunDay(now)
   const rangeStart = new Date(`${shunDay(new Date(now.getTime() - 6 * 86_400_000))}T00:00:00+08:00`)
@@ -188,12 +188,9 @@ export async function shunAttempt(actorId: string, requestId: string, anonymousM
   const result = await shunTransaction(async (tx) => {
     const { config } = await settings(tx)
     const previous = await tx.shunMasterRound.findUnique({ where: { actorId_requestId: { actorId, requestId } } })
-    // A replay of a completed request must never rewrite an existing letter,
-    // even when the retry carries a different message body.
+    // A replay of a completed request must never take a second fee, and must
+    // never reopen the letter decision either.
     if (previous) return present(tx, previous, 'out')
-    const letter = readAnonymousMessageField(anonymousMessage)
-    if (letter.provided && letter.error) throw new ShunError('LETTER_INVALID', letter.error, 400)
-    const letterContent = letter.provided && !letter.error ? letter.content : null
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
     const actor = await tx.user.findFirst({ where: { id: actorId, ...transactionAccount },
       select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } })
@@ -274,28 +271,88 @@ export async function shunAttempt(actorId: string, requestId: string, anonymousM
       // Match-source audit for the admin-only statistics. Never exposed to a
       // player, never part of a notification or a letter.
       friendHit: friendPoolUsed, victimTier: victim.tier,
+      // The transfer is settled now; the victim is told once the actor decides
+      // whether to write, or when this window expires (server-side sweep).
+      notifyStatus: SHUN_NOTIFY_STATUS.pending,
+      notifyDueAt: new Date(now.getTime() + SHUN_NOTIFY_WINDOW_MS),
     } })
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { reserved: { increment: amount } } })
     await ledger(tx, round.id, actorId, actorBalance, amount, 'take')
     await ledger(tx, round.id, victim.id, victimBalance, -amount, 'take')
-    if (letterContent) {
-      // Written inside the same transaction as the round: if the letter cannot
-      // be stored the transfer rolls back, so a failed send can never leave an
-      // orphan envelope behind.
-      await tx.shunMasterAnonymousLetter.create({ data: {
-        roundId: round.id, senderId: actorId, recipientId: victim.id, content: letterContent,
-      } })
-      await notify(tx, round.id, victim.id, ANONYMOUS_LETTER_NOTIFICATION.title,
-        ANONYMOUS_LETTER_NOTIFICATION.content, 'taken-letter', anonymousLetterNotificationLink(round.id))
-    } else {
-      await notify(tx, round.id, victim.id, '挂号费被顺走啦！',
-        `一位神秘 EF 顺走了你 ${amount} 挂号费！黄金抓捕期已开启，现在抓捕只需二选一！`, 'taken')
-    }
-    const view = await present(tx, round, 'out')
-    return letterContent ? { ...view, hasLetter: true } : view
+    return present(tx, round, 'out')
   })
   if (!result) throw new ShunError('NO_TARGET', '暂时没有可顺取的 EF，今日次数不会扣除。')
   return result
+}
+
+/** Copy of the ordinary (no letter) victim notification. */
+export const SHUN_PLAIN_NOTIFICATION_TITLE = '你的挂号费被顺走啦！'
+export function shunPlainNotificationContent(amount: number) {
+  return `一位神秘 EF 顺走了你 ${amount} 挂号费，快去调查是谁！`
+}
+
+/**
+ * Turns one pending round into a delivered notification.
+ *
+ * The transfer itself was settled when the round was created, so this only
+ * decides *how* the victim learns about it. Three callers share it:
+ * - the actor choosing "no letter" (`auto = false`, plain),
+ * - the actor sending a letter (`auto = false`, letter),
+ * - the server sweep for an abandoned round (`auto = true`, plain).
+ *
+ * Everything happens under the settings row lock, so the sweeper and a late
+ * "send letter" can never both win, a second notification is impossible, and
+ * the golden capture window is only ever set from the real delivery time.
+ */
+export async function shunNotifyRound(roundId: string, letter: AnonymousMessageField, options: {
+  actorId?: string; auto?: boolean
+} = {}) {
+  return shunTransaction(async (tx) => {
+    const { config } = await settings(tx)
+    const round = await tx.shunMasterRound.findFirst({
+      where: { id: roundId, ...(options.actorId ? { actorId: options.actorId } : {}) },
+    })
+    if (!round) throw new ShunError('NOT_FOUND', '未找到这条记录。', 404)
+    // Already delivered: replaying a plain request is a no-op, but a letter can
+    // never be appended afterwards (that would be a second notification).
+    if (round.notifyStatus === SHUN_NOTIFY_STATUS.letter) {
+      return { status: SHUN_NOTIFY_STATUS.letter, roundId: round.id, goldenUntil: round.goldenUntil }
+    }
+    if (round.notifyStatus !== SHUN_NOTIFY_STATUS.pending) {
+      if (letter.provided) throw new ShunError('ALREADY_NOTIFIED', '本次通知已发送，无法再补充匿名留言。')
+      return { status: round.notifyStatus, roundId: round.id, goldenUntil: round.goldenUntil }
+    }
+    if (letter.provided && letter.error) throw new ShunError('LETTER_INVALID', letter.error, 400)
+    const now = new Date()
+    // The golden capture window starts when the victim is actually told, for all
+    // three paths. It is written once and never re-extended by re-notification.
+    const goldenUntil = new Date(now.getTime() + config.goldenMinutes * 60000)
+    if (letter.provided && letter.content) {
+      await tx.shunMasterAnonymousLetter.create({ data: {
+        roundId: round.id, senderId: round.actorId, recipientId: round.victimId, content: letter.content,
+      } })
+      await notify(tx, round.id, round.victimId, ANONYMOUS_LETTER_NOTIFICATION.title,
+        ANONYMOUS_LETTER_NOTIFICATION.content, 'taken-letter', anonymousLetterNotificationLink(round.id))
+    } else {
+      await notify(tx, round.id, round.victimId, SHUN_PLAIN_NOTIFICATION_TITLE,
+        shunPlainNotificationContent(round.amount), 'taken', shunInvestigationLink(round.id))
+    }
+    const status = letter.provided ? SHUN_NOTIFY_STATUS.letter : SHUN_NOTIFY_STATUS.plain
+    await tx.shunMasterRound.update({ where: { id: round.id }, data: {
+      notifyStatus: status, notifiedAt: now, goldenUntil, notifyAuto: options.auto === true,
+    } })
+    return { status, roundId: round.id, goldenUntil }
+  })
+}
+
+/** Actor-driven choice: `null` means "no letter", a string means "send this letter". */
+export function shunSendNotification(actorId: string, roundId: string, anonymousMessage: string | null) {
+  return shunNotifyRound(roundId, readAnonymousMessageField(anonymousMessage), { actorId })
+}
+
+/** Sweeper entry point: only the expiry path, never a player request. */
+export function shunSendDueNotification(roundId: string) {
+  return shunNotifyRound(roundId, { provided: false }, { auto: true })
 }
 
 export async function shunRecords(userId: string, side: 'out' | 'in', cursor?: string, focus?: string,

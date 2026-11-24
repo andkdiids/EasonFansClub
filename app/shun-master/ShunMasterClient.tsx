@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ShunMasterArt } from '@/components/ShunMasterArt'
 import { ShunMasterLogo } from '@/components/ShunMasterLogo'
 import { AnonymousLetter, type AnonymousLetterData } from '@/components/shun-master/AnonymousLetter'
+import { SendAnonymousLetter } from '@/components/shun-master/SendAnonymousLetter'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import styles from './shun.module.css'
@@ -62,7 +63,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const [busy, setBusy] = useState('')
   const [loading, setLoading] = useState(false)
   const [recordError, setRecordError] = useState('')
-  const [compose, setCompose] = useState<'choose' | 'write' | null>(null)
+  // The take is settled first; the letter is a separate, later decision.
+  const [step, setStep] = useState<'result' | 'write' | 'sending' | 'animate' | 'delivered' | 'expired'>('result')
+  const [notice, setNotice] = useState('')
   const [message, setMessage] = useState('')
   const [letter, setLetter] = useState<AnonymousLetterData>()
   const [letterBusy, setLetterBusy] = useState(false)
@@ -80,6 +83,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   // One notification click may only open one envelope: guards against React
   // re-renders and StrictMode double effects replaying the animation.
   const letterRequested = useRef(false)
+  // A notification deep link must land on its record once, not on every render.
+  const focusOnce = useRef(false)
   const loadStatus = useCallback(async () => {
     try {
       const response = await api<Status>('status')
@@ -116,6 +121,13 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   useEffect(() => { if (!initialGuest) void loadStatus() }, [initialGuest, loadStatus])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
+  // 「前往调查」从通知里带着 roundId 进来：记录加载完成后滚到对应那条，
+  // 让点击一定落在看得见、可操作的目标上（未抓捕时同一行就有「抓捕追回」）。
+  useEffect(() => {
+    if (focusOnce.current || !focusedRecord || !list?.focused) return
+    focusOnce.current = true
+    setPendingFocus([`shun-record-${focusedRecord}`, 'shun-records'])
+  }, [focusedRecord, list])
   const openLetter = useCallback(async (id: string, instant = false) => {
     setLetterInstant(instant)
     try {
@@ -147,9 +159,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   }, [clockOffset])
   useEffect(() => {
     const modal = dialog.current
-    if (result && modal && !modal.open) modal.showModal()
-    if (!result && modal?.open) modal.close()
-  }, [result])
+    const visible = !!result && step !== 'animate'
+    if (visible && modal && !modal.open) modal.showModal()
+    if (!visible && modal?.open) modal.close()
+  }, [result, step])
   // Scrolls the first candidate target that exists, so a click that closes an
   // overlay always ends on something the user can see and act on.
   useEffect(() => {
@@ -176,15 +189,14 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       setBusy('')
     }
   }
-  function attempt(anonymousMessage?: string) {
+  function attempt() {
     return perform('attempt', async () => {
       setResult(undefined)
-      setCompose(null)
+      setStep('result')
+      setError('')
       requestId.current ||= crypto.randomUUID()
       try {
-        const round = await api<Round>('attempt', {
-          requestId: requestId.current, ...(anonymousMessage ? { anonymousMessage } : {}),
-        })
+        const round = await api<Round>('attempt', { requestId: requestId.current })
         setBusy('animation')
         const wait = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1600
         await Promise.all([
@@ -193,12 +205,77 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         ])
         requestId.current = null
         setMessage('')
+        setNotice('')
+        setStep('result')
         setResult(round)
       } catch (error) {
         if (error instanceof RequestError && error.status && error.status < 500 && error.status !== 429) requestId.current = null
         throw error
       }
     })
+  }
+  /**
+   * "No letter" and "close" both end in the ordinary notification.
+   *
+   * The request is idempotent server-side, and if it fails the server-side sweep
+   * still delivers the plain notification, so a lost response can never leave
+   * the victim unnotified.
+   */
+  async function sendPlain() {
+    const round = result
+    if (!round || lock.current || step === 'sending') return
+    lock.current = true
+    setBusy('notify')
+    setError('')
+    try {
+      await api<{ status: string }>(`round/${round.id}/notify`, {})
+      setResult(undefined)
+      setStep('result')
+      setMessage('')
+      setNotice('已发送被顺通知。')
+      await Promise.all([loadStatus(), loadRecords()])
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '通知发送失败，请重试。')
+    } finally {
+      lock.current = false
+      setBusy('')
+    }
+  }
+  /** Sends the letter, then plays the delivery animation — only after the server confirms. */
+  async function sendLetter() {
+    const round = result
+    const content = message.trim()
+    if (!round || lock.current || !content) return
+    lock.current = true
+    setBusy('letter')
+    setError('')
+    setStep('sending')
+    try {
+      const outcome = await api<{ status: string }>(`round/${round.id}/letter`, { message: content })
+      if (outcome.status !== 'SENT_LETTER') throw new RequestError('本次通知已发送，无法再补充匿名留言。', 'ALREADY_NOTIFIED')
+      setStep('animate')
+      await Promise.all([loadStatus(), loadRecords()])
+    } catch (error) {
+      if (error instanceof RequestError && error.code === 'ALREADY_NOTIFIED') {
+        // The ordinary notice already went out (user or server sweep): the letter
+        // can no longer be added, and saying "已送达" here would be a lie.
+        setStep('expired')
+        setError(error.message)
+        await Promise.all([loadStatus(), loadRecords()])
+      } else {
+        setStep('write')
+        setError(error instanceof Error ? error.message : '留言发送失败，请重试。')
+      }
+    } finally {
+      lock.current = false
+      setBusy('')
+    }
+  }
+  /** Esc / 关闭: never lets a settled take stay unnotified. */
+  function closeResult() {
+    if (busy || step === 'sending' || step === 'animate') return
+    if (step === 'delivered' || step === 'expired' || !result) { setResult(undefined); setStep('result'); return }
+    void sendPlain()
   }
   async function openCapture(id: string) {    const response = await api<Capture | { record: Round }>(`capture/${id}/start`, {})
     setSelected(undefined)
@@ -267,10 +344,13 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const remaining = (deadline: string) => Math.max(0, Math.ceil((Date.parse(deadline) - (now ?? Date.now())) / 1000))
   const countdown = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
   const messageLength = [...message.trim()].length
-  const canSend = messageLength > 0 && messageLength <= MESSAGE_MAX && !!status?.remaining && !busy
+  // The letter is free: it must stay sendable even when this take used the last
+  // daily attempt.
+  const canSend = messageLength > 0 && messageLength <= MESSAGE_MAX && !busy
   return <main className={styles.page}>
     <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div></header>
     {error && <p className={styles.alert} role="alert">{error}</p>}
+    {notice && <p className={styles.notice} role="status">{notice}</p>}
     <div className={styles.columns}>
       <section className={styles.panel} data-matching={busy === 'animation'}>
         <ShunMasterArt />
@@ -281,7 +361,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
             <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
           </dl>
-          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => setCompose('choose')}>
+          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => void attempt()}>
             {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
           </button>}
         </>}
@@ -342,46 +422,54 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         {list?.nextCursor && <button disabled={loading} onClick={() => void loadRecords(list.nextCursor!, list.windowAt)}>加载更多</button>}
       </section>}
     </div>
-    <dialog ref={dialog} className={styles.modal} aria-labelledby="shun-result-title" onCancel={() => setResult(undefined)}>
+    <dialog ref={dialog} className={styles.modal} aria-labelledby="shun-result-title"
+      onCancel={(event) => { event.preventDefault(); closeResult() }}>
       {result && <div className={styles.modalBody}>
-        <h2 id="shun-result-title">顺走啦！</h2>
-        <PersonLabel person={result.person} link />
-        <strong>+{result.amount} 挂号费</strong>
-        {result.hasLetter && <p className={styles.letterSent}>已为 TA 留下一封匿名信 ✉️</p>}
-        <div className={styles.tabs}>
-          <button type="button" autoFocus onClick={() => setResult(undefined)}>关闭</button>
-          <button type="button" className={styles.primary} disabled={!!busy || !status?.remaining || !status?.enabled}
-            onClick={() => { setResult(undefined); setCompose('choose') }}>{status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
-        </div>
-      </div>}
-    </dialog>
-    {compose && <div className={styles.compose} role="dialog" aria-modal="true" aria-labelledby="compose-title">
-      <div className={styles.composeCard}>
-        {compose === 'choose' ? <>
-          <h2 id="compose-title">要不要留一句匿名的话？</h2>
-          <p>你可以给幸运的 EF 留下一句话，也可以直接顺一手。</p>
-          <div className={styles.composeActions}>
-            <button type="button" className={`${styles.primary} ${styles.wide}`} onClick={() => setCompose('write')}>匿名留言</button>
-            <button type="button" disabled={!!busy} onClick={() => void attempt()}>直接顺一手</button>
-            <button type="button" onClick={() => setCompose(null)}>关闭</button>
+        {step === 'delivered' || step === 'expired' ? <>
+          <h2 id="shun-result-title">{step === 'delivered' ? '匿名信已送达 ✉️' : '本次通知已发送'}</h2>
+          <p className={styles.letterSent}>{step === 'delivered'
+            ? 'TA 会在收到挂号费被顺走的同时，读到只有 TA 能看到的这句话。'
+            : '普通通知已经送达，无法再补充匿名留言。'}</p>
+          <div className={styles.tabs}>
+            <button type="button" disabled={!!busy || !status?.remaining || !status?.enabled}
+              onClick={() => { setResult(undefined); void attempt() }}>{status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
+            <button type="button" autoFocus onClick={() => { setResult(undefined); setStep('result') }}>返回顺大师</button>
           </div>
         </> : <>
-          <h2 id="compose-title">给幸运的 EF 留一句话</h2>
-          <textarea aria-label="匿名留言内容" placeholder="写下一句只有 TA 才能看到的话……" value={message}
-            onChange={(event) => {
-              const next = event.target.value.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
-              setMessage([...next].slice(0, MESSAGE_MAX).join(''))
-            }} />
-          <div className={styles.composeMeta}><span>{messageLength}/{MESSAGE_MAX}</span><span>TA 不会知道是你</span></div>
-          <div className={styles.composeActions}>
-            <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSend}
-              onClick={() => void attempt(message.trim())}>{busy === 'attempt' ? '发送中…' : '发送并顺一手'}</button>
-            <button type="button" disabled={!!busy} onClick={() => setCompose('choose')}>返回</button>
-            <button type="button" disabled={!!busy} onClick={() => setCompose(null)}>关闭</button>
-          </div>
+          <h2 id="shun-result-title">{step === 'write' ? '给 TA 留一句匿名的话' : '顺走啦！'}</h2>
+          <PersonLabel person={result.person} link />
+          {result.person && <p className={styles.uid}>UID {formatUid(result.person.uid)}</p>}
+          {step === 'write' || step === 'sending' ? <>
+            <textarea aria-label="匿名留言内容" placeholder="写下一句只有 TA 才能看到的话……" value={message} autoFocus
+              onChange={(event) => {
+                const next = event.target.value.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
+                setMessage([...next].slice(0, MESSAGE_MAX).join(''))
+              }} />
+            <div className={styles.composeMeta}><span>{messageLength}/{MESSAGE_MAX}</span><span>TA 不会知道是你</span></div>
+            <div className={styles.composeActions}>
+              <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSend || step === 'sending'}
+                onClick={() => void sendLetter()}>{step === 'sending' ? '发送中…' : '发送留言'}</button>
+              <button type="button" disabled={!!busy || step === 'sending'} onClick={() => { setError(''); setStep('result') }}>返回</button>
+              <button type="button" disabled={!!busy || step === 'sending'} onClick={closeResult}>关闭</button>
+            </div>
+          </> : <>
+            <strong>+{result.amount} 挂号费</strong>
+            <p className={styles.letterSent}>要不要给 TA 留一句匿名的话？不留言也可以。</p>
+            <div className={styles.composeActions}>
+              <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
+                onClick={() => { setError(''); setStep('write') }}>匿名留言</button>
+              <button type="button" disabled={!!busy} onClick={() => void sendPlain()}>{busy === 'notify' ? '发送中…' : '不留言'}</button>
+              <button type="button" disabled={!!busy} onClick={closeResult}>关闭</button>
+            </div>
+          </>}
         </>}
-      </div>
-    </div>}
+      </div>}
+    </dialog>
+    {step === 'animate' && <SendAnonymousLetter message={message.trim()} onComplete={() => {
+      // The letter is already stored: the animation only reveals the result.
+      setStep('delivered')
+      setMessage('')
+    }} />}
     {letter && <AnonymousLetter letter={letter} busy={letterBusy} error={letterError} instant={letterInstant}
       onInvestigate={() => void investigate()} onClose={closeLetter}
       onShowRecord={() => showRecord(letter.roundId)} />}

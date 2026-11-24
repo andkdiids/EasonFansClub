@@ -92,3 +92,60 @@ export function isShunLetterNotification(item: ShunLetterNotificationLike): bool
 }
 
 export const ANONYMOUS_LETTER_ENTRY_LABEL = '打开神秘来信'
+export const SHUN_INVESTIGATE_ENTRY_LABEL = '前往调查'
+
+/**
+ * Canonical "go and investigate" link for one round.
+ *
+ * It always carries the round id *and* `side=in`, so the victim lands on
+ * 「谁顺了我」 with the matching record focused. A bare `/shun-master` would drop
+ * the victim on the default tab with no way to find the record.
+ */
+export function shunInvestigationLink(roundId: string) {
+  return `${ANONYMOUS_LETTER_PATH}?record=${encodeURIComponent(roundId)}&side=in`
+}
+
+const ROUND_KEY_PATTERN = /^shun:([a-z0-9]{1,40}):(taken|taken-letter)$/
+const INVESTIGATION_LINK_PATTERN = /^\/shun-master$/
+
+export type ShunRoundNotificationKind = 'taken' | 'taken-letter'
+
+/**
+ * Recognises a Shun round notification from server-written identifiers only:
+ * the key `shun:<roundId>:taken` / `shun:<roundId>:taken-letter`, or a
+ * `/shun-master?record=<roundId>` link. Titles and copy are never inspected, so
+ * an unrelated system notice can never be routed into the investigation flow.
+ */
+export function shunRoundNotification(item: ShunLetterNotificationLike):
+  { roundId: string; kind: ShunRoundNotificationKind } | null {
+  const key = (item.key || '').trim()
+  const fromKey = ROUND_KEY_PATTERN.exec(key)
+  if (fromKey) return { roundId: fromKey[1], kind: fromKey[2] as ShunRoundNotificationKind }
+  const raw = (item.link || item.targetUrl || '').trim()
+  if (!raw) return null
+  let url: URL
+  try {
+    url = new URL(raw, 'https://letter.invalid')
+  } catch {
+    return null
+  }
+  if (!INVESTIGATION_LINK_PATTERN.test(url.pathname)) return null
+  const record = url.searchParams.get('record')?.trim() || ''
+  if (!ROUND_ID_PATTERN.test(record)) return null
+  return { roundId: record, kind: url.searchParams.get('letter') ? 'taken-letter' : 'taken' }
+}
+
+/** Round id of any Shun round notification (plain or letter), or null. */
+export function shunRoundNotificationId(item: ShunLetterNotificationLike): string | null {
+  return shunRoundNotification(item)?.roundId ?? null
+}
+
+/**
+ * Investigation target for a Shun notification. Rebuilt from the trusted round
+ * id so historical rows with a bare `/shun-master?record=…` link (no `side`)
+ * still land on the right tab.
+ */
+export function shunInvestigationHref(item: ShunLetterNotificationLike): string | null {
+  const parsed = shunRoundNotification(item)
+  return parsed ? shunInvestigationLink(parsed.roundId) : null
+}

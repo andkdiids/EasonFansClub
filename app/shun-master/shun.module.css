@@ -52,4 +52,11 @@
 .composeActions .wide{grid-column:1/-1}
 .composeMeta{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#585049;font-variant-numeric:tabular-nums}
 .letterSent{margin:0;font-size:14px;color:#7b2233}
+/* Deferred-notification result dialog: the same editor styles the old compose
+   card used, plus a quiet UID line and a success notice. */
+.modal textarea{box-sizing:border-box;width:100%;min-height:96px;padding:10px;border:1px solid #9b7c52;background:#fbf6ea;color:#171717;font:inherit;line-height:1.7;resize:vertical}
+.modal .composeActions{width:100%}
+.modal .composeMeta{width:100%}
+.uid{margin:0;font-size:12px;color:#585049;font-variant-numeric:tabular-nums}
+.notice{margin:0 0 10px;padding:10px 11px;background:#e8f0e2;color:#2f441f}
 @media(max-width:420px){.composeActions{grid-template-columns:minmax(0,1fr)}}

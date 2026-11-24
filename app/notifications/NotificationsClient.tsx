@@ -19,7 +19,7 @@ import { parseNotificationCategory, type NotificationCategory } from '@/lib/noti
 import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 import { safeInternalPathOrNull } from '@/lib/url-safety'
-import { ANONYMOUS_LETTER_ENTRY_LABEL, isShunLetterNotification, shunLetterHref } from '@/lib/shun-letter-notification'
+import { ANONYMOUS_LETTER_ENTRY_LABEL, SHUN_INVESTIGATE_ENTRY_LABEL, isShunLetterNotification, shunInvestigationLink, shunLetterHref, shunRoundNotification } from '@/lib/shun-letter-notification'
 import type { FriendDockUser } from '@/lib/friend-types'
 import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 import { REPLY_MAX_LENGTH } from '@/lib/reply-length'
@@ -54,6 +54,9 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
   // 匿名信优先：即便它使用 SYSTEM 类型，也要给出「打开神秘来信」而不是通用系统详情。
   const letterHref = shunLetterHref(item)
   if (letterHref) return { label: ANONYMOUS_LETTER_ENTRY_LABEL, href: letterHref }
+  // 普通被顺通知必须能直接回到「谁顺了我」的对应记录，不能只落到顺大师首页。
+  const shunRound = shunRoundNotification(item)
+  if (shunRound) return { label: SHUN_INVESTIGATE_ENTRY_LABEL, href: shunInvestigationLink(shunRound.roundId) }
   if (item.category === 'review') {
     const target = getNotificationTarget(item)
     return target ? { label: '查看审核', href: target } : null
@@ -620,6 +623,30 @@ export function NotificationsClient({
     router.push(buildNotificationHref(1, category), { scroll: true })
   }
 
+  /**
+   * Buttons of the Shun notice detail.
+   *
+   * A plain "your fee was taken" notice gets one primary「前往调查」; a letter
+   * notice gets「打开神秘来信」first and「前往调查」next to it, because the
+   * victim must never be forced to read the letter before investigating.
+   */
+  function shunNotificationActions(item: UnifiedNotification) {
+    const round = shunRoundNotification(item)
+    if (!round) return undefined
+    const letter = shunLetterHref(item)
+    const investigate = shunInvestigationLink(round.roundId)
+    return [
+      ...(letter ? [{
+        label: ANONYMOUS_LETTER_ENTRY_LABEL,
+        onClick: () => { setSelectedSystemNotification(null); router.push(letter) },
+      }] : []),
+      {
+        label: SHUN_INVESTIGATE_ENTRY_LABEL,
+        onClick: () => { setSelectedSystemNotification(null); router.push(investigate) },
+      },
+    ]
+  }
+
   function openSystemNotification(item: UnifiedNotification) {
     // Open from the current row snapshot, while the existing markRead helper
     // keeps the shared unread summary and list state authoritative.
@@ -1018,6 +1045,7 @@ export function NotificationsClient({
     const category = (item.category || 'system') as NotificationCategory
     // 匿名信使用 SYSTEM 类型，但必须走独立入口（导航到顺大师自动开信）。
     const letterHref = shunLetterHref(item)
+    const shunRound = shunRoundNotification(item)
     const systemNotification = isSystemNotification(item)
     const target = systemNotification ? null : (letterHref || getNotificationTarget(item))
     const systemLike = isSystemLikeNotification(item)
@@ -1051,7 +1079,9 @@ export function NotificationsClient({
 
     // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
     function handleCardActivate() {
-      if (systemNotification) openSystemNotification(item)
+      // 顺大师两类通知（普通被顺 / 神秘来信）统一走带「前往调查」的详情弹窗，
+      // 卡片内的「打开神秘来信」智能入口仍然是一键直达信件。
+      if (shunRound || systemNotification) openSystemNotification(item)
       else if (target) void navigateToNotification(item, letterHref || target)
       else void markRead(item)
     }
@@ -1363,6 +1393,8 @@ export function NotificationsClient({
         <SystemNotificationDialog
           notification={selectedSystemNotification}
           actionHref={safeInternalPathOrNull(selectedSystemNotification.link)}
+          actions={shunNotificationActions(selectedSystemNotification)}
+          closeLabel={shunRoundNotification(selectedSystemNotification) ? '关闭' : undefined}
           onClose={() => setSelectedSystemNotification(null)}
           onAction={() => {
             const target = safeInternalPathOrNull(selectedSystemNotification.link)

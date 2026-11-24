@@ -20,11 +20,22 @@ export function SystemNotificationDialog({
   actionHref,
   onClose,
   onAction,
+  actions,
+  closeLabel = '知道了',
 }: Readonly<{
   notification: UnifiedNotification
   actionHref?: string | null
   onClose: () => void
   onAction?: () => void
+  /**
+   * Explicit action buttons, rendered before the close button.
+   *
+   * Shun Master needs two of them ("打开神秘来信" and "前往调查") on one notice,
+   * which the single `actionHref` slot cannot express. Callers that only have a
+   * destination keep using `actionHref`/`onAction` unchanged.
+   */
+  actions?: Array<{ label: string; onClick: () => void }>
+  closeLabel?: string
 }>) {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const restoreFocusRef = useRef<HTMLElement | null>(null)
@@ -58,7 +69,7 @@ export function SystemNotificationDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[100000] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4"
       role="presentation"
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose()
@@ -96,7 +107,18 @@ export function SystemNotificationDialog({
         </div>
 
         <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-sky-100 px-5 py-4 sm:px-7">
-          {actionHref && onAction ? (
+          {actions?.length ? actions.map((action, index) => (
+            <button
+              key={action.label}
+              type="button"
+              onClick={action.onClick}
+              className={index === 0
+                ? 'min-h-10 rounded-lg bg-brand-950 px-4 text-sm font-black text-white transition hover:bg-brand-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700'
+                : 'min-h-10 rounded-lg border border-brand-950/30 bg-white px-4 text-sm font-black text-brand-950 transition hover:bg-sky-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700'}
+            >
+              {action.label}
+            </button>
+          )) : actionHref && onAction ? (
             <button
               type="button"
               onClick={onAction}
@@ -110,7 +132,7 @@ export function SystemNotificationDialog({
             onClick={onClose}
             className="min-h-10 rounded-lg border border-sky-100 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-sky-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700"
           >
-            知道了
+            {closeLabel}
           </button>
         </footer>
       </section>

@@ -12,6 +12,22 @@ export const ACTIVITY_TIER_LABELS = ['极低', '低', '中', '高', '极高'] as
 export const ACTIVITY_WEIGHT_RANGE = { min: 1, max: 300 } as const
 export const FRIEND_CHANCE_DEFAULT = 20
 
+/**
+ * Deferred notification window.
+ *
+ * A take settles immediately, but the victim is only told once the actor picks
+ * "no letter", sends a letter, or this window expires. The server sweeper owns
+ * the expiry path, so closing the tab can never leave a victim unnotified.
+ * Fixed on purpose: reliability first, no extra administrator setting.
+ */
+export const SHUN_NOTIFY_WINDOW_MS = 120_000
+export const SHUN_NOTIFY_STATUS = {
+  pending: 'PENDING',
+  plain: 'SENT_PLAIN',
+  letter: 'SENT_LETTER',
+} as const
+export type ShunNotifyStatus = typeof SHUN_NOTIFY_STATUS[keyof typeof SHUN_NOTIFY_STATUS]
+
 export const defaultShunConfig = {
   enabled: false, attempts: 7, victimCap: 4, goldenMinutes: 10,
   probabilities: [25, 21, 17, 14, 10, 7, 6], weights: [130, 122, 115, 108, 100],

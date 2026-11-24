@@ -6,7 +6,7 @@ import test from 'node:test'
 import { chromium } from 'playwright'
 import { authCookieName, createSessionToken } from '../lib/auth'
 import { prisma } from '../lib/prisma'
-import { setShunEnabled, shunAttempt, updateShunConfig } from '../lib/shun-master'
+import { setShunEnabled, shunAttempt, shunSendNotification, updateShunConfig } from '../lib/shun-master'
 import { defaultShunConfig } from '../lib/shun-master-rules'
 
 /**
@@ -15,6 +15,8 @@ import { defaultShunConfig } from '../lib/shun-master-rules'
  *
  * Runs against an isolated MySQL fixture plus a real Next.js server, so it never
  * touches production data or a real user's registration fee.
+ * 运行方式：与其它浏览器/集成用例共享同一个隔离库（ecfc_shun_qa），需串行执行：
+ * `tsx --test --test-concurrency=1`。
  */
 test('notification center opens the anonymous letter and jumps straight into the capture picker', {
   skip: process.env.SHUN_LETTER_BROWSER_QA !== '1', timeout: 240000,
@@ -45,10 +47,14 @@ test('notification center opens the anonymous letter and jumps straight into the
   await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false })
   await setShunEnabled(admin.id, true)
 
-  const outcome = await shunAttempt(actor.id, randomUUID(), MESSAGE)
+  const outcome = await shunAttempt(actor.id, randomUUID())
   assert.equal(outcome.person?.uid, victim.uid, '本次顺取必须命中夹具收件人')
+  // The letter is a separate, later decision now: it is what actually notifies
+  // the victim and what starts the golden capture window.
+  await shunSendNotification(actor.id, outcome.id, MESSAGE)
   const round = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: outcome.id } })
   assert.equal(round.victimId, victim.id)
+  assert.equal(round.notifyStatus, 'SENT_LETTER')
 
   const notice = await prisma.notification.findFirstOrThrow({ where: { recipientId: victim.id, key: { contains: 'taken-letter' } } })
   assert.equal(notice.type, 'SYSTEM', '匿名信通知沿用 SYSTEM 类型（正是历史缺陷的触发条件）')
@@ -77,13 +83,24 @@ test('notification center opens the anonymous letter and jumps straight into the
     assert.equal(await tile.getAttribute('role'), 'link', '匿名信卡片必须是导航卡片，而不是普通系统通知按钮')
     await card.getByText('打开神秘来信', { exact: false }).waitFor()
 
-    // ---- click the notification itself -------------------------------------
+    // ---- click the notification itself: detail with both entries -----------
     await tile.click()
+    const detail = page.getByRole('dialog').filter({ hasText: '你收到一封神秘来信' })
+    await detail.waitFor()
+    // 本次升级的核心：带信的通知也必须同时给出「前往调查」。
+    await detail.getByRole('button', { name: '打开神秘来信' }).waitFor()
+    await detail.getByRole('button', { name: '前往调查' }).waitFor()
+    await detail.getByRole('button', { name: '关闭', exact: true }).waitFor()
+    // 打开详情触发的已读是一次独立请求，给它一个明确的完成窗口，而不是立刻断言。
+    const readDeadline = Date.now() + 15_000
+    let readAt = (await prisma.notification.findUniqueOrThrow({ where: { id: notice.id } })).readAt
+    while (!readAt && Date.now() < readDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      readAt = (await prisma.notification.findUniqueOrThrow({ where: { id: notice.id } })).readAt
+    }
+    assert.ok(readAt, '点击后通知必须落已读')
+    await detail.getByRole('button', { name: '打开神秘来信' }).click()
     await page.waitForURL(/\/shun-master\?record=[a-z0-9]+&side=in&letter=1/)
-    assert.equal(await page.getByRole('dialog', { name: '系统通知' }).count(), 0,
-      '不得被普通 SystemNotificationDialog 接管')
-    assert.equal((await prisma.notification.findUniqueOrThrow({ where: { id: notice.id } })).readAt !== null, true,
-      '点击后通知必须落已读')
 
     // ---- letter animation, then the real body ------------------------------
     const letterDialog = page.getByRole('dialog').filter({ hasText: '一封来自神秘 EF 的信' })
@@ -162,6 +179,13 @@ test('notification center opens the anonymous letter and jumps straight into the
     const phoneCard = phone.locator('#notification-' + notice.id)
     await phoneCard.waitFor()
     await phoneCard.locator('article').click()
+    const phoneDetail = phone.getByRole('dialog').filter({ hasText: '你收到一封神秘来信' })
+    await phoneDetail.waitFor()
+    // 小屏同样必须先给出两个入口，再进信件。
+    const phoneInvestigate = phoneDetail.getByRole('button', { name: '前往调查' })
+    const investBox = await phoneInvestigate.boundingBox()
+    assert.ok(investBox && investBox.y + investBox.height <= 844, '小屏不得遮挡「前往调查」按钮')
+    await phoneDetail.getByRole('button', { name: '打开神秘来信' }).click()
     await phone.waitForURL(/letter=1/)
     const phoneLetter = phone.getByRole('dialog').filter({ hasText: '一封来自神秘 EF 的信' })
     await phoneLetter.waitFor()
