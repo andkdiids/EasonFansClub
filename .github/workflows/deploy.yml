@@ -42,6 +42,7 @@ on:
       - 'scripts/android-beta22-release.json'
       - 'scripts/android-beta22-release.mjs'
       - 'scripts/android-beta23-release.json'
+      - 'scripts/android-internal-beta.json'
       - 'scripts/android-beta23-release.mjs'
       - 'scripts/android-rc14-release.json'
       - 'scripts/android-rc14-release.mjs'
