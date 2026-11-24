@@ -132,7 +132,7 @@ export async function shunStatus(userId: string) {
 
 export async function shunAttempt(actorId: string, requestId: string) {
   const result = await shunTransaction(async (tx) => {
-    const { state, config } = await settings(tx)
+    const { config } = await settings(tx)
     const previous = await tx.shunMasterRound.findUnique({ where: { actorId_requestId: { actorId, requestId } } })
     if (previous) return present(tx, previous, 'out')
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
@@ -143,9 +143,6 @@ export async function shunAttempt(actorId: string, requestId: string) {
     if (!actor) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
     const played = await tx.shunMasterRound.findMany({ where: { actorId, day }, select: { victimId: true } })
     if (played.length >= config.attempts) throw new ShunError('LIMIT', '今日收工，明天继续！')
-    if (state.reserved + state.compensated + 7 > config.budget) {
-      throw new ShunError('BUDGET', '顺大师暂时休息，已有记录仍可抓捕。')
-    }
     const blocks = await tx.block.findMany({ where: { OR: [{ blockerId: actorId }, { blockedId: actorId }] },
       select: { blockerId: true, blockedId: true } })
     const capped = await tx.shunMasterRound.groupBy({ by: ['victimId'], where: { day }, _count: { _all: true } })
@@ -313,7 +310,6 @@ export async function updateShunConfig(userId: string, draft: ShunConfig) {
   return shunTransaction(async (tx) => {
     const { state, config: old } = await settings(tx)
     const config = { ...draft, enabled: old.enabled }
-    if (config.budget < state.reserved + state.compensated) throw new ShunError('BUDGET', '预算不能低于已补偿金额与未结索赔准备金。')
     const rulesVersion = state.rulesVersion + Number(shunRulesChanged(old, config))
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config, rulesVersion } })
     await tx.userOperationLog.create({ data: { userId, operatorUserId: userId, category: 'SHUN_MASTER',
@@ -325,9 +321,6 @@ export async function updateShunConfig(userId: string, draft: ShunConfig) {
 export async function setShunEnabled(userId: string, enabled: boolean) {
   return shunTransaction(async (tx) => {
     const { state, config: old } = await settings(tx)
-    if (enabled && !old.enabled && old.budget - state.reserved - state.compensated < 7) {
-      throw new ShunError('BUDGET', '可用补偿预算不足，暂不能开放顺大师。')
-    }
     const config = { ...old, enabled }
     if (old.enabled !== enabled) {
       await tx.shunMasterSettings.update({ where: { id: 1 }, data: { config } })
