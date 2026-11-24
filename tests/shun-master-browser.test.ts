@@ -133,8 +133,10 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
       }
     })
     await page.getByRole('button', { name: '顺一手' }).click()
+    await page.getByRole('button', { name: '直接顺一手' }).click()
     await page.getByText('网络连接中断，请重试。', { exact: true }).waitFor()
     await page.getByRole('button', { name: '顺一手' }).click()
+    await page.getByRole('button', { name: '直接顺一手' }).click()
     await page.getByText('看看哪个 EF 这么幸运...', { exact: true }).waitFor()
     assert.notEqual(await page.locator('.shun-hands').evaluate((el) => getComputedStyle(el).animationName), 'none')
     const modal = page.getByRole('dialog', { name: '顺走啦！' })
@@ -151,6 +153,7 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
     if (output) await page.screenshot({ path: join(output, 'h5-result-modal.png') })
     const second = await create(1)
     await modal.getByRole('button', { name: '再顺一手' }).click()
+    await page.getByRole('button', { name: '直接顺一手' }).click()
     await modal.getByText(second.nickname, { exact: true }).waitFor()
     assert.equal(await page.getByRole('dialog', { name: '顺走啦！' }).count(), 1)
     await modal.getByRole('button', { name: '关闭' }).click()

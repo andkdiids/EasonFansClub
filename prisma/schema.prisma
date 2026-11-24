@@ -7067,6 +7067,27 @@ model ShunMasterRound {
   @@index([day])
 }
 
+/// An optional one-off note attached to a single Shun round. The anonymous
+/// payload is intentionally isolated from ShunMasterRound so that recording a
+/// letter can never alter amounts, probabilities or capture outcomes. Sender
+/// identity is stored only for authorisation and audit; it is never returned by
+/// a recipient-facing query.
+model ShunMasterAnonymousLetter {
+  id          String    @id @default(cuid())
+  roundId     String    @unique
+  senderId    String
+  recipientId String
+  content     String    @db.Text
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+  hiddenAt    DateTime?
+  hiddenById  String?
+
+  @@index([recipientId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([hiddenAt])
+}
+
 model TopicActivityLotteryAudit {
   id              String               @id @default(cuid())
   activityId      String

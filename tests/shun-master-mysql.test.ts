@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { prisma } from '../lib/prisma'
 import { getShunCandidateSummary, setShunEnabled, shunAttempt, shunCapture, shunRecords, shunStatus, shunTransaction, updateShunConfig } from '../lib/shun-master'
+import { readAnonymousLetter } from '../lib/shun-anonymous-letter'
 import { defaultShunConfig, shunDay } from '../lib/shun-master-rules'
 import { getShunLedgerDisplay } from '../lib/registration-fee'
 
@@ -272,5 +273,76 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     assert.equal(new Set([...firstPage.records, ...nextPage.records].map(({ id }) => id)).size, 21)
     assert.equal((await shunRecords(operator.id, 'out', undefined, undefined, { ...today, range: 'yesterday' })).records.length, 1)
     assert.equal((await shunRecords(operator.id, 'out', undefined, undefined, { ...today, range: 'week' })).records.length, 20)
+
+    // --- anonymous letter: atomic storage, idempotency, uniqueness, recipient-only reads ---
+    await publish({ ...config, enabled: true })
+    const [letterActor, letterTarget, stranger] = await Promise.all([createUser(60), createUser(60), createUser(60)])
+    // Pin the target pool so this fixture cannot silently skip the letter path.
+    const funded = await prisma.user.findMany({
+      where: { points: { gt: 0 }, id: { notIn: [letterActor.id, letterTarget.id] } }, select: { id: true },
+    })
+    await prisma.block.createMany({ data: funded.map(({ id }) => ({ blockerId: letterActor.id, blockedId: id })), skipDuplicates: true })
+    const letterRequestId = randomUUID()
+    const sent = await shunAttempt(letterActor.id, letterRequestId, '  范范Vanessa UID:11153  ')
+    assert.ok('hasLetter' in sent && sent.hasLetter === true, '带留言的顺取必须标记已送信')
+    const sentRound = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: sent.id } })
+    const sentLetter = await prisma.shunMasterAnonymousLetter.findUniqueOrThrow({ where: { roundId: sent.id } })
+    assert.equal(sentRound.victimId, letterTarget.id)
+    assert.equal(sentRound.actorId, letterActor.id)
+    assert.equal(sentLetter.recipientId, sentRound.victimId, '收件人必须是本次被顺用户')
+    assert.equal(sentLetter.senderId, sentRound.actorId, '发件人必须是本次顺取者')
+    assert.equal(sentLetter.content, '范范Vanessa UID:11153', '留言必须按规整后的内容落库')
+    const letterNotice = await prisma.notification.findFirstOrThrow({
+      where: { recipientId: sentRound.victimId, key: `shun:${sent.id}:taken-letter` },
+    })
+    assert.equal(letterNotice.title, '你收到一封神秘来信 ✉️')
+    assert.equal(letterNotice.link, `/shun-master?record=${sent.id}&side=in&letter=1`)
+    assert.equal(await prisma.notification.count({ where: { recipientId: sentRound.victimId, key: `shun:${sent.id}:taken` } }), 0,
+      '有留言时不得再生成普通被顺通知')
+
+    // Replaying the same request with a different body must not rewrite the letter.
+    const replay = await shunAttempt(letterActor.id, letterRequestId, '篡改后的第二封信')
+    assert.equal(replay.id, sent.id)
+    assert.equal((await prisma.shunMasterAnonymousLetter.findUniqueOrThrow({ where: { roundId: sent.id } })).content,
+      '范范Vanessa UID:11153')
+    assert.equal(await prisma.shunMasterRound.count({ where: { actorId: letterActor.id } }), 1)
+
+    // Concurrent retries of one request create exactly one round and one letter.
+    const concurrentActor = await createUser(60)
+    const concurrentId = randomUUID()
+    const letterOutcomes = await Promise.allSettled([
+      shunAttempt(concurrentActor.id, concurrentId, '并发第一封'),
+      shunAttempt(concurrentActor.id, concurrentId, '并发第二封'),
+    ])
+    const settled = letterOutcomes.filter((outcome) => outcome.status === 'fulfilled')
+    assert.ok(settled.length >= 1, '同一 requestId 的并发请求不得全部失败')
+    const concurrentRounds = await prisma.shunMasterRound.findMany({ where: { actorId: concurrentActor.id } })
+    assert.equal(concurrentRounds.length, 1, '并发重放只能产生一条顺取记录')
+    assert.equal(await prisma.shunMasterAnonymousLetter.count({ where: { senderId: concurrentActor.id } }), 1)
+
+    // A transfer without a message keeps the historical notification and writes no letter.
+    const plainActor = await createUser(60)
+    const plain = await shunAttempt(plainActor.id, randomUUID())
+    assert.ok(!('hasLetter' in plain), '无留言顺取不得带送信标记')
+    assert.equal(await prisma.shunMasterAnonymousLetter.count({ where: { roundId: plain.id } }), 0)
+    assert.equal(await prisma.notification.count({ where: { key: `shun:${plain.id}:taken` } }), 1, '无留言沿用原有通知')
+    assert.equal(await prisma.notification.count({ where: { key: `shun:${plain.id}:taken-letter` } }), 0)
+
+    // Reading is recipient-only, and the projection never carries the sender.
+    const recipientView = await readAnonymousLetter(sentRound.victimId, sent.id)
+    assert.ok(recipientView, '收件人必须能读取自己的信')
+    assert.equal(recipientView.content, '范范Vanessa UID:11153')
+    assert.equal('senderId' in recipientView, false, '收件人视图不得包含发送者')
+    assert.equal('actorId' in recipientView, false)
+    assert.equal(await readAnonymousLetter(stranger.id, sent.id), null, '非收件人不得读取')
+    assert.equal(await readAnonymousLetter(letterActor.id, sent.id), null, '发送者不得通过收件人接口回读')
+    assert.equal(await readAnonymousLetter(sentRound.victimId, 'nonexistentletter0000000000001'), null, '无效 id 不得返回内容')
+
+    // Hidden letters and duplicate roundIds are rejected by the storage layer.
+    await prisma.shunMasterAnonymousLetter.update({ where: { roundId: sent.id }, data: { hiddenAt: new Date() } })
+    assert.equal(await readAnonymousLetter(sentRound.victimId, sent.id), null, '被隐藏的信件不得返回内容')
+    await assert.rejects(prisma.shunMasterAnonymousLetter.create({ data: {
+      roundId: sent.id, senderId: letterActor.id, recipientId: sentRound.victimId, content: '重复信件',
+    } }), '一次顺取最多对应一条留言')
   } finally { await prisma.$disconnect() }
 })

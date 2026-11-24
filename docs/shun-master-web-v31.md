@@ -54,6 +54,7 @@ V3.2 延续 V3.1 账务规则，改用全站正常普通账号候选池。专属
 | 导航和后台 | `components/layout/Topbar.tsx`、`components/layout/MobileNavigation.tsx`、`components/games/GameCenter.tsx`、`lib/navigation-registry.ts`、`lib/admin-navigation.ts`、`lib/admin-permission-config.ts`、`app/admin/shun-master/` |
 | HTTP | `app/api/shun-master/`、`app/api/admin/shun-master/` |
 | 数据库和测试 | `prisma/schema.prisma`、`prisma/migrations/20261123133000_add_shun_master/`、`tests/shun-master-*.test.ts`、`tests/topic-activity-hotfix-v4.test.ts` |
+| 匿名留言与神秘信件（增量） | `lib/shun-anonymous-letter.ts`、`app/api/shun-master/letter/[id]/route.ts`、`components/shun-master/AnonymousLetter.tsx`、`prisma/migrations/20261124173000_add_shun_master_anonymous_letter/`、`tests/shun-master-anonymous-letter.test.ts` |
 
 规则单测可直接运行。数据库验收使用 `SHUN_MASTER_MYSQL_QA=1`，要求在 `127.0.0.1:33326/ecfc_shun_qa` 使用空白的合成数据库，并在已有主分支 Schema 基线上执行本次迁移。真实 HTTP 和浏览器验收使用 `SHUN_MASTER_BROWSER_QA=1`，需要从同一隔离数据库以 `127.0.0.1:3126` 启动 Web，并让测试进程使用与本地 Web 一致的测试 JWT 密钥。两项验收默认跳过，脚本会校验隔离数据库地址。
 
@@ -63,3 +64,35 @@ V3.2 延续 V3.1 账务规则，改用全站正常普通账号候选池。专属
 - 隔离 MySQL 验证了默认关闭、每日限额、固定候选、跨期拒绝、同时抓捕幂等、原额追回、补偿审计、余额截断和事务回滚。
 - 真实 HTTP 与 Edge 验证了角色权限、PC 和移动入口、顺取动画、匿名记录、黄金抓捕、后台高频请求拦截审计，以及 320／390／430px 和深色主题。
 - 全仓复跑 4,707 项通过、30 项默认跳过。唯一失败是 Windows CRLF 检出的历史迁移文件和预期 LF 字节不同。同一用例使用 Git 原始字节单独通过，历史迁移保持原样。
+
+## 匿名留言与神秘信件（增量）
+
+「顺一手」会先打开三选一窗口，而不是直接发起顺取：匿名留言 / 直接顺一手 / 关闭。结果弹窗里的「再顺一手」复用同一个窗口。
+
+- 直接顺一手：调用原有 `shunAttempt(actorId, requestId)`，不带附加字段，行为与历史版本一致。
+- 匿名留言：先写入 1–60 个字符（按码点计数、裁掉首尾空白、允许换行、纯空白不通过、走现有违禁词规则），随后在**同一个事务**内完成顺取与信件落库。
+- 关闭或返回：不发起顺取、不消耗次数、不写入任何留言。
+
+数据与安全：
+
+- `ShunMasterAnonymousLetter.roundId` 唯一，一次顺取最多一封信；收件人恒为本次 `victimId`，发件人恒为本次 `actorId`。
+- 同一 `requestId` 重放直接返回既有记录，即使重放携带不同正文也不会改写已创建的信件。
+- 信件写入与顺取同事务，任一步失败整体回滚，不会出现「扣了挂号费却没留下信」或「留下信却没扣费」。
+- `GET /api/shun-master/letter/[id]`（`id` 可以是信件 id 或顺取记录 id）只返回收件人可见字段：信件 id、记录 id、正文、创建时间、是否已读，以及抓捕状态所需的最少信息。`senderId`、昵称、头像、UID、邮箱、手机号一律不返回；无效 id、被隐藏的信件、非本人访问、记录不匹配统一 404，不可用于枚举发送者。
+
+通知与自动开信：
+
+- 有留言：标题「你收到一封神秘来信 ✉️」，链接 `/shun-master?record=<roundId>&side=in&letter=1`。
+- 无留言：完全保留原有「挂号费被顺走啦！」通知与普通记录跳转，绝不弹信。
+- 页面只有在 `letter` 标记与 `record` 同时存在时才请求信件；读取成功后立刻用 `history.replaceState` 移除标记，因此刷新、浏览器返回、React 重渲染都不会重放动画；读取失败静默降级为普通记录页，不出现空信封。
+
+信件内「前往调查」：
+
+- 复用 `POST /api/shun-master/capture/<roundId>/start`，也就是记录列表「抓捕追回」使用的同一接口，只打开抓捕选择，不提交答案。
+- 已抓捕的记录按钮改为「查看调查结果」，展示既有结果；不可抓捕的记录说明原因并保留「收下这封信」。
+- 黄金期 10 分钟、二选一/三选一、次数、追回、补偿与幂等全部沿用原实现。看信不会重置或延长黄金倒计时。
+
+复验入口：
+
+- 规则与契约：`npx tsx --test tests/shun-master-anonymous-letter.test.ts`
+- 数据库：`SHUN_MASTER_MYSQL_QA=1` 运行 `tests/shun-master-mysql.test.ts`（隔离 `127.0.0.1:33326/ecfc_shun_qa`）

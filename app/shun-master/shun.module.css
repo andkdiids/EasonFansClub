@@ -40,3 +40,16 @@
 @keyframes coin{50%{transform:translateY(-.2em)}}
 @media(max-width:700px){.columns{grid-template-columns:minmax(0,1fr)}}
 @media(prefers-reduced-motion:reduce){.panel[data-matching=true] :global(.shun-hands),.panel[data-matching=true] .coin{animation:none}}
+.compose{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:16px;background:#17171799}
+.composeCard{box-sizing:border-box;width:min(440px,100%);max-height:calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow-y:auto;background:#f1e7d5;color:#171717;border:1px solid #9b7c52;padding:20px 16px;display:grid;gap:14px}
+.composeCard h2{font-size:19px;font-weight:700;line-height:1.4}
+.composeCard p{margin:0;font-size:14px;line-height:1.7;color:#585049}
+.composeCard textarea{box-sizing:border-box;width:100%;min-height:104px;padding:10px;border:1px solid #9b7c52;background:#fbf6ea;color:#171717;font:inherit;line-height:1.7;resize:vertical}
+.composeActions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.composeActions button{min-height:44px;padding:8px;border:1px solid #9b7c52;background:transparent;color:#171717;font:inherit}
+.composeActions button:disabled{opacity:.55}
+.composeActions .primary{background:#171717;color:#f1e7d5;border-color:#171717;font-weight:650}
+.composeActions .wide{grid-column:1/-1}
+.composeMeta{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#585049;font-variant-numeric:tabular-nums}
+.letterSent{margin:0;font-size:14px;color:#7b2233}
+@media(max-width:420px){.composeActions{grid-template-columns:minmax(0,1fr)}}
