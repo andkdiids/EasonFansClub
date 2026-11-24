@@ -10,11 +10,14 @@ const read = (path: string) => readFileSync(path, 'utf8')
 const service = read('lib/shun-master.ts')
 const letterLib = read('lib/shun-anonymous-letter.ts')
 const attemptRoute = read('app/api/shun-master/[action]/route.ts')
+const notifyRoute = read('app/api/shun-master/round/[id]/[action]/route.ts')
 const letterRoute = read('app/api/shun-master/letter/[id]/route.ts')
 const page = read('app/shun-master/page.tsx')
 const client = read('app/shun-master/ShunMasterClient.tsx')
 const overlay = read('components/shun-master/AnonymousLetter.tsx')
 const overlayCss = read('components/shun-master/anonymous-letter.module.css')
+const sender = read('components/shun-master/SendAnonymousLetter.tsx')
+const senderCss = read('components/shun-master/send-anonymous-letter.module.css')
 
 // ---------------------------------------------------------------- content rules
 
@@ -128,48 +131,65 @@ test('a letter produces the mystery-letter notification linked to the round', ()
   assert.match(link, /letter=1/)
 })
 
-test('a transfer without a letter keeps the original notification', () => {
-  const branch = service.slice(service.indexOf('if (letterContent)'), service.indexOf('const view = await present'))
-  assert.match(branch, /\} else \{[\s\S]*挂号费被顺走啦！/, '无留言必须保留原有通知标题')
-  assert.match(branch, /'taken'\)/, '无留言通知的 key 必须保持原样')
-  assert.match(branch, /'taken-letter'/, '有留言通知使用独立 key，避免与普通通知冲突')
+test('the take settles first and only the notify step talks to the victim', () => {
+  const attempt = service.slice(service.indexOf('export async function shunAttempt'),
+    service.indexOf('export const SHUN_PLAIN_NOTIFICATION_TITLE'))
+  assert.match(attempt, /notifyStatus: SHUN_NOTIFY_STATUS\.pending/, '顺取后必须进入待通知')
+  assert.match(attempt, /notifyDueAt: new Date\(now\.getTime\(\) \+ SHUN_NOTIFY_WINDOW_MS\)/, '必须记录待通知过期时间')
+  assert.doesNotMatch(attempt, /createNotificationWithDb/, '顺取事务内不得发送任何通知')
+  assert.doesNotMatch(attempt, /shunMasterAnonymousLetter\.create/, '顺取事务内不得写入匿名信')
+  const notifyStep = service.slice(service.indexOf('export async function shunNotifyRound'))
+  assert.match(notifyStep, /SHUN_PLAIN_NOTIFICATION_TITLE/, '无留言必须发送普通被顺通知')
+  assert.match(notifyStep, /'taken', shunInvestigationLink\(round\.id\)/, '普通通知必须带 key 与被顺记录链接')
+  assert.match(notifyStep, /'taken-letter'/, '有留言使用独立 key，避免与普通通知冲突')
+  assert.match(notifyStep, /shunInvestigationLink\(round\.id\)/, '普通通知必须直达被顺记录')
+  assert.match(notifyStep, /ALREADY_NOTIFIED/, '通知已发送后不得补发匿名信')
+  assert.match(notifyStep, /goldenUntil = new Date\(now\.getTime\(\) \+ config\.goldenMinutes \* 60000\)/,
+    '黄金抓捕期必须从通知发送时刻开始')
+  assert.ok(service.includes('key: `shun:${id}:${kind}`'), '同一条顺取记录不会产生重复通知')
 })
 
-test('the notification key stays unique per round', () => {
-  assert.match(service, /key: `shun:\$\{id\}:\$\{kind\}`/, '同一条顺取记录不会产生重复通知')
+test('the plain notice keeps the documented copy', () => {
+  assert.match(service, /SHUN_PLAIN_NOTIFICATION_TITLE = '你的挂号费被顺走啦！'/)
+  assert.match(service, /`一位神秘 EF 顺走了你 \$\{amount\} 挂号费，快去调查是谁！`/)
 })
 
-// ------------------------------------------------------------------- entry flow
-
-test('the transfer route forwards the optional message and screens its content', () => {
-  assert.match(attemptRoute, /readAnonymousMessageField\(body\.anonymousMessage\)/, '接口必须读取可选留言字段')
-  assert.match(attemptRoute, /LETTER_INVALID/, '非法留言必须在顺取前被拒绝')
-  assert.match(attemptRoute, /findMatchedBannedWords\(message\.content, await getEnabledBannedWords\(\)\)/,
+test('the transfer route no longer accepts a message while the notify route screens it', () => {
+  assert.doesNotMatch(attemptRoute, /anonymousMessage/, '顺一手请求不再携带留言')
+  assert.match(attemptRoute, /shunAttempt\(guard\.user\.id, body\.requestId\)/, '顺一手只使用 requestId')
+  assert.match(notifyRoute, /action !== 'notify' && action !== 'letter'/, '只允许两种通知动作')
+  assert.match(notifyRoute, /findMatchedBannedWords\(body\.message, await getEnabledBannedWords\(\)\)/,
     '留言必须走现有违禁词校验')
-  assert.match(attemptRoute, /shunAttempt\(guard\.user\.id, body\.requestId, message\.provided \? message\.content : undefined\)/,
-    '未提供留言时必须保持原有调用签名')
+  assert.match(notifyRoute, /shunSendNotification\(guard\.user\.id, id, body\.message\)/)
+  assert.match(notifyRoute, /shunSendNotification\(guard\.user\.id, id, null\)/, '不留言必须调用普通通知')
 })
 
-test('the Shun button opens the choice sheet instead of transferring', () => {
-  assert.match(client, /className=\{styles\.primary\} disabled=\{!!busy \|\| !status\.remaining\} onClick=\{\(\) => setCompose\('choose'\)\}/,
-    '顺一手按钮必须先打开三选一窗口')
-  assert.doesNotMatch(client, /onClick=\{\(\) => void attempt\(\)\}>\{status\?\.remaining/, '顺一手按钮不得直接发起顺取')
-  const directLines = client.split('\n').filter((line) => line.includes('void attempt()'))
-  assert.equal(directLines.length, 1, '只有「直接顺一手」可以无留言发起顺取')
-  assert.match(directLines[0], /直接顺一手/)
+test('顺一手 executes the take directly and shows the target first', () => {
+  assert.match(client, /onClick=\{\(\) => void attempt\(\)\}/, '顺一手必须直接发起顺取')
+  assert.doesNotMatch(client, /setCompose/, '先选留言再顺取的旧流程必须彻底删除')
+  assert.match(client, /'给 TA 留一句匿名的话' : '顺走啦！'/, '结果弹窗标题固定为「顺走啦！」')
+  assert.match(client, /\+{result\.amount} 挂号费/, '结果弹窗必须展示本次顺走的挂号费')
+  assert.match(client, /UID \{formatUid\(result\.person\.uid\)\}/, '结果弹窗必须展示被顺用户 UID')
+  assert.match(client, /<PersonLabel person=\{result\.person\} link \/>/, '结果弹窗必须展示被顺用户头像与昵称')
 })
 
-test('the choice sheet exposes the three documented actions', () => {
-  assert.match(client, /要不要留一句匿名的话？/)
-  assert.match(client, /你可以给幸运的 EF 留下一句话，也可以直接顺一手。/)
-  assert.match(client, /匿名留言/)
-  assert.match(client, /直接顺一手/)
-  assert.match(client, /给幸运的 EF 留一句话/)
-  assert.match(client, /写下一句只有 TA 才能看到的话……/)
+test('the result dialog exposes exactly the three documented actions', () => {
+  assert.match(client, /setError\(''\); setStep\('write'\) \}\}>匿名留言</, '必须提供「匿名留言」')
+  assert.match(client, /busy === 'notify' \? '发送中…' : '不留言'/, '必须提供「不留言」')
+  assert.match(client, /onClick=\{closeResult\}>关闭</, '必须提供「关闭」')
+  assert.match(client, /给 TA 留一句匿名的话/, '编辑器标题按需求命名')
 })
 
-test('replaying from the result modal returns to the same choice sheet', () => {
-  assert.match(client, /setResult\(undefined\); setCompose\('choose'\)/, '再顺一手必须复用同一选择窗口')
+test('关闭 and ESC always fall back to the plain notice', () => {
+  assert.match(client, /function closeResult\(\) \{[\s\S]*void sendPlain\(\)/, '关闭必须按不留言处理')
+  assert.match(client, /event\.preventDefault\(\); closeResult\(\)/, 'ESC 同样不得静默丢弃通知')
+  assert.match(client, /await api<\{ status: string \}>\(`round\/\$\{round\.id\}\/notify`/, '不留言必须调用独立通知接口')
+})
+
+test('返回 goes back to the result step without another take', () => {
+  assert.match(client, /setError\(''\); setStep\('result'\) \}\}>返回</)
+  assert.doesNotMatch(client, /setStep\('result'\); void attempt\(\)\}>\u8fd4\u56de/, '返回不得重新顺取')
+  assert.match(client, /setStep\('result'\) \}\}>返回顺大师</, '送达后必须能回到顺大师')
 })
 
 test('the composer enforces the documented input rules', () => {
@@ -178,12 +198,38 @@ test('the composer enforces the documented input rules', () => {
   assert.match(client, /slice\(0, MESSAGE_MAX\)/, '必须限制到 60 个字符')
   assert.match(client, /const canSend = messageLength > 0/, '空白内容不可提交')
   assert.match(client, /<textarea/, '必须支持多行输入')
-  assert.match(client, /attempt\(message\.trim\(\)\)/, '提交前必须去除首尾空白')
+  assert.match(client, /const content = message\.trim\(\)/, '提交前必须去除首尾空白')
+  assert.match(client, /round\/\$\{round\.id\}\/letter/, '留言提交到独立的通知接口')
 })
 
-test('返回 and 关闭 never start a transfer', () => {
-  assert.match(client, /onClick=\{\(\) => setCompose\('choose'\)\}>返回</)
-  assert.match(client, /onClick=\{\(\) => setCompose\(null\)\}>关闭</)
+// ------------------------------------------------------------ sending animation
+
+test('the sending animation follows the six documented beats', () => {
+  for (const beat of ['paper', 'folding', 'inserting', 'sealing', 'wax', 'flying']) {
+    assert.match(sender, new RegExp(`'${beat}'`), `必须实现 ${beat} 分镜`)
+    assert.match(senderCss, new RegExp(`data-stage='${beat}'`), `样式必须覆盖 ${beat} 分镜`)
+  }
+  assert.match(senderCss, /#7b2233/, '火漆必须是深酒红色')
+  assert.match(senderCss, /@media \(prefers-reduced-motion: reduce\)/, '必须兼容减少动画偏好')
+  assert.match(sender, /跳过动画/, '必须支持跳过')
+  assert.doesNotMatch(sender, /fetch\(/, '动画不得自行调用任何接口')
+  assert.match(client, /\{step === 'animate' && <SendAnonymousLetter/)
+  assert.match(client, /onComplete=\{\(\) => \{[\s\S]{0,160}setStep\('delivered'\)/, '动画结束只切状态，不再调用接口')
+  assert.match(client, /匿名信已送达 ✉️/)
+})
+
+test('a letter refused after the notice went out never claims it was delivered', () => {
+  assert.match(client, /setStep\('expired'\)/, '已有通知时必须进入「本次通知已发送」终态')
+  assert.match(client, /'本次通知已发送'/, '必须如实告知通知已发送')
+  assert.match(client, /普通通知已经送达，无法再补充匿名留言。/)
+  assert.doesNotMatch(client, /setStep\('delivered'\)[\s\S]{0,120}ALREADY_NOTIFIED/,
+    'ALREADY_NOTIFIED 不得被当成发送成功')
+})
+
+test('the animation only starts after the server confirms the letter', () => {
+  assert.match(client, /if \(outcome\.status !== 'SENT_LETTER'\) throw new RequestError/,
+    '未确认送达不得播放已送达动画')
+  assert.match(client, /setStep\('animate'\)[\s\S]{0,80}await Promise\.all/, '先确认再播放')
 })
 
 // --------------------------------------------------------------- auto open gate

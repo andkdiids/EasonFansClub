@@ -113,8 +113,10 @@ test('通知中心：先写已读再导航，已读状态不被信件流程改�
 test('站内通知弹出层：匿名信入口同样可用（不落到通用通知页）', () => {
   const toast = read('components/NotificationToast.tsx')
   assert.match(toast, /const letterHref = shunLetterHref\(\{ key: toast\.key, link: toast\.link, targetUrl: toast\.targetUrl \}\)/)
-  assert.match(toast, /const targetUrl = letterHref \|\| normalizeActionUrl\(toast\.targetUrl\)/)
-  assert.match(toast, /\{letterHref \? ANONYMOUS_LETTER_ENTRY_LABEL : '查看详情'\}/)
+  // 普通被顺通知同样必须直连「谁顺了我」的记录，不能再落到通用通知页。
+  assert.match(toast, /const shunRound = shunRoundNotification\(\{ key: toast\.key, link: toast\.link, targetUrl: toast\.targetUrl \}\)/)
+  assert.match(toast, /shunRound \? shunInvestigationLink\(shunRound\.roundId\) : null/)
+  assert.match(toast, /\{actionLabel\}/, 'CTA 文案必须按通知类型给出「打开神秘来信」或「前往调查」')
 })
 
 test('信件内容来自真实接口，不在前端硬编码正文', () => {
@@ -207,15 +209,34 @@ test('信封动画支持移动端、减少动画与跳过，且层级正确', ()
   assert.match(letter, /event\.key === 'Escape'/, '必须支持键盘关闭')
 })
 
-test('匿名信通知写入与顺取同事务，且不影响金额/结算/补偿', () => {
+test('匿名信在独立通知事务中写入，且不影响金额/结算/补偿', () => {
   const shun = read('lib/shun-master.ts')
-  const block = shun.slice(shun.indexOf('if (letterContent) {'), shun.indexOf("return letterContent ? { ...view, hasLetter: true } : view"))
-  assert.match(block, /tx\.shunMasterAnonymousLetter\.create/, '留言必须在顺取事务内写入')
+  // 顺取先结算，留言是之后的选择：信件与通知必须落在通知步骤自己的事务里。
+  const block = shun.slice(shun.indexOf('export async function shunNotifyRound'),
+    shun.indexOf('export function shunSendNotification'))
+  assert.match(block, /tx\.shunMasterAnonymousLetter\.create/, '留言必须在通知事务内写入')
   assert.match(block, /anonymousLetterNotificationLink\(round\.id\)/, '通知链接必须由统一构造器生成')
   assert.match(block, /'taken-letter'/, 'key 必须带 taken-letter 后缀')
+  assert.match(block, /return shunTransaction\(async \(tx\)/, '通知与信件必须同一事务，避免半成品')
   // 经济逻辑未被触碰
   assert.match(shun, /const rolled = weightedIndex\(config\.probabilities\) \+ 1/, '金额概率规则必须保持')
   assert.match(shun, /const amount = Math\.min\(rolled, victimBalance\)/, '金额上限规则必须保持')
   assert.ok(!/anonymousLetter[\s\S]{0,200}(recovered|compensation|ledger)/.test(block),
     '匿名信不得介入追回、补偿或流水')
+})
+
+test('通知详情对两类顺大师通知都提供调查入口，关闭只关展示', () => {
+  const dialog = read('components/SystemNotificationDialog.tsx')
+  const center = read('app/notifications/NotificationsClient.tsx')
+  assert.match(dialog, /actions\?: Array<\{ label: string; onClick: \(\) => void \}>/, '弹窗必须支持多个动作按钮')
+  assert.match(dialog, /closeLabel = '知道了'/, '默认关闭文案保持不变')
+  assert.match(center, /function shunNotificationActions/, '顺大师通知必须有专属动作集')
+  assert.match(center, /label: ANONYMOUS_LETTER_ENTRY_LABEL/, '匿名信通知提供「打开神秘来信」')
+  assert.match(center, /label: SHUN_INVESTIGATE_ENTRY_LABEL/, '两类通知都必须提供「前往调查」')
+  assert.match(center, /shunRound \|\| systemNotification\) openSystemNotification/,
+    '卡片点击也必须进入带调查入口的详情，而不是直接吞掉')
+  assert.match(center, /closeLabel=\{shunRoundNotification\(selectedSystemNotification\) \? '关闭' : undefined\}/)
+  const actions = center.slice(center.indexOf('function shunNotificationActions'), center.indexOf('function openSystemNotification'))
+  assert.match(actions, /router\.push\(letter\)/)
+  assert.match(actions, /router\.push\(investigate\)/, '前往调查必须直达带 roundId 的记录地址')
 })

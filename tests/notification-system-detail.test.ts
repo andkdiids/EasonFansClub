@@ -11,7 +11,8 @@ test('system notifications open a detail dialog instead of the hash fallback', (
   assert.match(client, /const systemNotification = isSystemNotification\(item\)/)
   assert.match(client, /const target = systemNotification \? null : \(letterHref \|\| getNotificationTarget\(item\)\)/,
     '系统通知仍不跳转；匿名信链接优先于通用目标解析')
-  assert.match(client, /if \(systemNotification\) openSystemNotification\(item\)/)
+  assert.match(client, /if \(shunRound \|\| systemNotification\) openSystemNotification\(item\)/,
+    '系统通知与顺大师两类通知都进详情弹窗，而不是退化成 hash 兜底')
   assert.match(client, /void markRead\(item\)[\s\S]*setSelectedSystemNotification\(item\)/)
   assert.match(client, /<SystemNotificationDialog/)
   assert.match(dialog, /role="dialog"/)

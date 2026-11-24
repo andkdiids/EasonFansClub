@@ -8,6 +8,7 @@ import { getClientIpFromHeaders } from './lib/client-ip'
 import { hasValidRequestOrigin } from './lib/security'
 import { ensureRuntimeObservability } from './lib/runtime-observability'
 import { startGlobalPointsGrantWorker } from './lib/global-points-grant-worker'
+import { startShunNotifyWorker } from './lib/shun-notify-worker'
 import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from './lib/deployment-db-maintenance-hold'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
@@ -217,6 +218,11 @@ async function start() {
   await app.prepare()
   const stopGlobalPointsGrantWorker = process.env.NODE_ENV === 'production'
     ? startGlobalPointsGrantWorker()
+    : null
+  // Deliveries that were abandoned mid-choice are swept by the server, never by
+  // the browser: an actor closing the tab must still notify the victim.
+  const stopShunNotifyWorker = process.env.NODE_ENV === 'production'
+    ? startShunNotifyWorker()
     : null
 
   const server = createServer((request, response) => {
@@ -431,6 +437,7 @@ async function start() {
     clearInterval(heartbeat)
     if (productionActivityAutoCheckInHeartbeat) clearInterval(productionActivityAutoCheckInHeartbeat)
     stopGlobalPointsGrantWorker?.()
+    stopShunNotifyWorker?.()
     for (const socket of realtimeSockets) socket.close(1001, 'server shutdown')
     websocketServer.close()
     server.close()

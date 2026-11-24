@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test, { after } from 'node:test'
 import { prisma } from '../lib/prisma'
-import { getShunCandidateSummary, setShunEnabled, shunAttempt, shunCapture, shunRecords, shunStatus, updateShunConfig } from '../lib/shun-master'
+import { getShunCandidateSummary, setShunEnabled, shunAttempt, shunCapture, shunRecords, shunSendNotification, shunStatus, updateShunConfig } from '../lib/shun-master'
+import { runShunNotifySweepOnce } from '../lib/shun-notify-worker'
 import { readAnonymousLetter } from '../lib/shun-anonymous-letter'
 import { activityTier, defaultShunConfig, shunDay } from '../lib/shun-master-rules'
 
@@ -312,7 +313,8 @@ test('player-facing surfaces never expose the match source', {
   const friend = await createUser(120)
   await befriend(actor.id, friend.id)
   await pinFundedTo(friend.id)
-  const round = await shunAttempt(actor.id, randomUUID(), '不要泄露来源')
+  const round = await shunAttempt(actor.id, randomUUID())
+  await shunSendNotification(actor.id, round.id, '不要泄露来源')
   const status = await shunStatus(actor.id)
   assert.deepEqual(Object.keys(status).sort(), ['attempts', 'balance', 'enabled', 'goldenMinutes', 'received',
     'remaining', 'serverNow', 'victimCap'])
@@ -352,7 +354,8 @@ test('a settled letter reveals the real Shun actor, an open one never does', {
   const actor = await createUser()
   const stranger = await createUser()
   await pinFundedTo(victim.id)
-  const sent = await shunAttempt(actor.id, randomUUID(), '  第一封真正的信  ')
+  const sent = await shunAttempt(actor.id, randomUUID())
+  await shunSendNotification(actor.id, sent.id, '  第一封真正的信  ')
   const sentRound = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: sent.id } })
   assert.equal(sentRound.victimId, victim.id)
 
@@ -393,7 +396,8 @@ test('a settled letter reveals the real Shun actor, an open one never does', {
   const victim2 = await createUser(60)
   const actor2 = await createUser()
   await pinFundedTo(victim2.id)
-  const sent2 = await shunAttempt(actor2.id, randomUUID(), '第二封真正的信')
+  const sent2 = await shunAttempt(actor2.id, randomUUID())
+  await shunSendNotification(actor2.id, sent2.id, '第二封真正的信')
   const options2 = await shunCapture(victim2.id, sent2.id)
   const decoy = options2.candidates?.find((candidate) => candidate.uid !== actor2.uid)
   assert.ok(decoy, '黄金期必须给出一个真实的干扰项')
@@ -419,4 +423,111 @@ test('a settled letter reveals the real Shun actor, an open one never does', {
   // Hiding the letter still hides everything, including the settlement.
   await prisma.shunMasterAnonymousLetter.update({ where: { roundId: sent2.id }, data: { hiddenAt: new Date() } })
   assert.equal(await readAnonymousLetter(victim2.id, sent2.id), null, '被隐藏的信件不得返回内容')
+})
+
+test('deferred notification: plain, letter, sweep, scope and idempotency', {
+  skip: !qa, timeout: 240000,
+}, async () => {
+  assertIsolatedFixture()
+  await ensureSettings()
+  await publish({ friendChance: 0 })
+
+  // --- the take settles first, nobody is told yet -------------------------
+  const victim = await createUser(60)
+  const actor = await createUser()
+  await pinFundedTo(victim.id)
+  const take = await shunAttempt(actor.id, randomUUID())
+  const pending = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take.id } })
+  assert.equal(pending.notifyStatus, 'PENDING', '顺取后先进入待通知')
+  assert.ok(pending.notifyDueAt, '必须记录待通知过期时间')
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim.id } }), 0,
+    '玩家决定之前不得通知被顺者')
+
+  // --- only the original actor may complete it ----------------------------
+  const other = await createUser()
+  await assert.rejects(shunSendNotification(other.id, take.id, null),
+    (error: { code?: string }) => error.code === 'NOT_FOUND', '非发起者不得替别人发送通知')
+  await assert.rejects(shunSendNotification(other.id, take.id, '偷发'),
+    (error: { code?: string }) => error.code === 'NOT_FOUND')
+
+  // --- invalid letters are refused before anything is stored --------------
+  await assert.rejects(shunSendNotification(actor.id, take.id, '   '),
+    (error: { code?: string }) => error.code === 'LETTER_INVALID', '纯空白留言必须拒绝')
+  await assert.rejects(shunSendNotification(actor.id, take.id, 'x'.repeat(61)),
+    (error: { code?: string }) => error.code === 'LETTER_INVALID', '超过 60 字必须拒绝')
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim.id } }), 0)
+  assert.equal(await prisma.shunMasterAnonymousLetter.count({ where: { roundId: take.id } }), 0)
+
+  // --- no letter ----------------------------------------------------------
+  assert.equal((await shunSendNotification(actor.id, take.id, null)).status, 'SENT_PLAIN')
+  const notice = await prisma.notification.findFirstOrThrow({ where: { key: `shun:${take.id}:taken` } })
+  assert.equal(notice.title, '你的挂号费被顺走啦！')
+  assert.equal(notice.link, `/shun-master?record=${take.id}&side=in`, '普通通知必须直达被顺记录')
+  const settled = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take.id } })
+  assert.ok(settled.notifiedAt)
+  assert.equal(settled.goldenUntil.getTime() - settled.notifiedAt!.getTime(), baseConfig.goldenMinutes * 60_000,
+    '黄金抓捕期必须从通知发送时刻开始')
+  assert.equal(settled.notifyAuto, false)
+
+  // repeated plain requests are absorbed, and the letter can no longer follow
+  assert.equal((await shunSendNotification(actor.id, take.id, null)).status, 'SENT_PLAIN')
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim.id } }), 1, '重复提交不得重复通知')
+  await assert.rejects(shunSendNotification(actor.id, take.id, '迟到的信'),
+    (error: { code?: string }) => error.code === 'ALREADY_NOTIFIED', '普通通知后不得补发匿名信')
+  assert.equal(await prisma.shunMasterAnonymousLetter.count({ where: { roundId: take.id } }), 0)
+
+  // --- letter path --------------------------------------------------------
+  const victim2 = await createUser(60)
+  const actor2 = await createUser()
+  await pinFundedTo(victim2.id)
+  const take2 = await shunAttempt(actor2.id, randomUUID())
+  const letterOutcome = await shunSendNotification(actor2.id, take2.id, '  只有你能看到  ')
+  assert.equal(letterOutcome.status, 'SENT_LETTER')
+  const storedLetter = await prisma.shunMasterAnonymousLetter.findUniqueOrThrow({ where: { roundId: take2.id } })
+  assert.equal(storedLetter.content, '只有你能看到', '留言必须按规整后的内容落库')
+  assert.equal(storedLetter.senderId, actor2.id)
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim2.id, key: `shun:${take2.id}:taken` } }), 0,
+    '有留言时不得再发普通通知')
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim2.id, key: `shun:${take2.id}:taken-letter` } }), 1)
+  assert.equal((await shunSendNotification(actor2.id, take2.id, null)).status, 'SENT_LETTER',
+    '信已送达后普通通知请求必须被吸收')
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim2.id } }), 1)
+
+  // --- abandoned choice: the server delivers the plain notice -------------
+  const victim3 = await createUser(60)
+  const actor3 = await createUser()
+  await pinFundedTo(victim3.id)
+  const take3 = await shunAttempt(actor3.id, randomUUID())
+  await prisma.shunMasterRound.update({ where: { id: take3.id }, data: { notifyDueAt: new Date(Date.now() - 86_400_000) } })
+  const sweep = await runShunNotifySweepOnce()
+  assert.ok(sweep.delivered >= 1)
+  const auto = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take3.id } })
+  assert.equal(auto.notifyStatus, 'SENT_PLAIN', '超时必须自动发送普通通知')
+  assert.equal(auto.notifyAuto, true, '必须标记为超时自动发送')
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim3.id } }), 1)
+  // a second sweep is a no-op and never rewinds or extends the golden window
+  await prisma.shunMasterRound.update({ where: { id: take3.id }, data: { notifyDueAt: new Date(Date.now() - 86_400_000) } })
+  await runShunNotifySweepOnce()
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim3.id } }), 1, '重复执行超时任务不得重复通知')
+  assert.equal((await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take3.id } })).goldenUntil.getTime(),
+    auto.goldenUntil.getTime(), '重发通知不得延长黄金抓捕期')
+  await assert.rejects(shunSendNotification(actor3.id, take3.id, '超时补信'),
+    (error: { code?: string }) => error.code === 'ALREADY_NOTIFIED')
+
+  // --- a letter that wins the race is never followed by a plain notice ----
+  const victim4 = await createUser(60)
+  const actor4 = await createUser()
+  await pinFundedTo(victim4.id)
+  const take4 = await shunAttempt(actor4.id, randomUUID())
+  await prisma.shunMasterRound.update({ where: { id: take4.id }, data: { notifyDueAt: new Date(Date.now() - 86_400_000) } })
+  await shunSendNotification(actor4.id, take4.id, '抢先一步')
+  await runShunNotifySweepOnce()
+  assert.equal(await prisma.notification.count({ where: { recipientId: victim4.id } }), 1, '信已送达后不得再发普通通知')
+  assert.equal((await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take4.id } })).notifyStatus, 'SENT_LETTER')
+
+  // --- player surfaces never expose the state machine ---------------------
+  const rows = await shunRecords(victim4.id, 'in')
+  assert.equal(JSON.stringify(rows).includes('notifyStatus'), false)
+  assert.equal(JSON.stringify(rows).includes('notifyDueAt'), false)
+  assert.equal(JSON.stringify(await shunStatus(actor4.id)).includes('notify'), false)
 })

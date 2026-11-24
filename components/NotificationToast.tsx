@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { normalizeActionUrl } from '@/lib/url-safety'
-import { ANONYMOUS_LETTER_ENTRY_LABEL, shunLetterHref } from '@/lib/shun-letter-notification'
+import { ANONYMOUS_LETTER_ENTRY_LABEL, SHUN_INVESTIGATE_ENTRY_LABEL, shunInvestigationLink, shunLetterHref, shunRoundNotification } from '@/lib/shun-letter-notification'
 
 type ToastNotification = {
   id: string
@@ -79,7 +79,12 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
   const createdAt = new Date(toast.createdAt)
   // 匿名信通知若经弹出层出现，必须直连信件入口，而不是落到通用 /notifications。
   const letterHref = shunLetterHref({ key: toast.key, link: toast.link, targetUrl: toast.targetUrl })
-  const targetUrl = letterHref || normalizeActionUrl(toast.targetUrl) || normalizeActionUrl(toast.link) || '/notifications'
+  // 普通被顺通知同样必须直连「谁顺了我」的对应记录，而不是只给一个通用详情。
+  const shunRound = shunRoundNotification({ key: toast.key, link: toast.link, targetUrl: toast.targetUrl })
+  const targetUrl = letterHref || (shunRound ? shunInvestigationLink(shunRound.roundId) : null)
+    || normalizeActionUrl(toast.targetUrl) || normalizeActionUrl(toast.link) || '/notifications'
+  const actionLabel = letterHref ? ANONYMOUS_LETTER_ENTRY_LABEL
+    : shunRound ? SHUN_INVESTIGATE_ENTRY_LABEL : '查看详情'
 
   return (
     <div className="notification-toast fixed inset-x-4 md:inset-x-auto md:right-6 md:w-96">
@@ -98,7 +103,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
           </button>
         </div>
         <Link href={targetUrl} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white shadow-sm">
-          {letterHref ? ANONYMOUS_LETTER_ENTRY_LABEL : '查看详情'}
+          {actionLabel}
         </Link>
       </div>
     </div>

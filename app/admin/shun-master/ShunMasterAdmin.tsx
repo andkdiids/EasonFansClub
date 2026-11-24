@@ -20,6 +20,7 @@ type Summary = {
   refusalAudit: { id: string; userId: string; action: 'LEAVE' | 'PROTECT' | 'UNPROTECT' | 'REJOIN'; occurredAt: string }[]
   matchStats: { day: string; total: number; friendHits: number; friendRate: number; unknownTier: number
     tiers: { tier: number; label: string; count: number }[] }
+  notifyStats: { day: string; pending: number; plain: number; letter: number; auto: number; retryAttempts: number }
 }
 const refusalLabels = { LEAVE: '旧版明确退出', PROTECT: '旧版开启保护', UNPROTECT: '旧版关闭保护', REJOIN: '旧版重新参与' }
 const integerFields = [
@@ -142,6 +143,16 @@ export function ShunMasterAdmin() {
       </section>
       <details><summary>实际金额分布</summary><ul>{data.amounts.map((row) =>
         <li key={row.rolled + ':' + row.amount}>抽中 {row.rolled} · 实付 {row.amount} · {row._count._all} 笔</li>)}</ul></details>
+      <details open><summary>通知发送统计 · {data.notifyStats.day}</summary>
+        <ul>
+          <li>匿名留言通知 {data.notifyStats.letter} 笔</li>
+          <li>普通被顺通知 {data.notifyStats.plain} 笔</li>
+          <li>待通知 {data.notifyStats.pending} 笔</li>
+          <li>超时自动发送普通通知 {data.notifyStats.auto} 笔</li>
+          <li>发送失败重试 {data.notifyStats.retryAttempts} 次</li>
+        </ul>
+        <p className="text-sm text-[var(--foreground-muted)]">待通知为玩家仍可选择是否留言的顺取；超过 120 秒未选择由服务端自动发送普通通知。</p>
+      </details>
       <details open><summary>匹配来源与活跃度命中分布 · {data.matchStats.day}</summary>
         <p>好友池命中 {data.matchStats.friendHits} 笔 / 全部 {data.matchStats.total} 笔 · 实际好友命中比例 {data.matchStats.friendRate}%</p>
         <p>配置的好友命中概率为 {data.config.friendChance}%，实际比例会因好友池为空或无合格好友而低于该值。</p>

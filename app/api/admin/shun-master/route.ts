@@ -38,6 +38,22 @@ export async function GET(request: Request) {
     // came from the friend pool and which activity tier they were drawn from.
     prisma.shunMasterRound.groupBy({ by: ['friendHit', 'victimTier'], where: { day }, _count: { _all: true } }),
   ])
+  // Admin-only notification audit of the deferred send flow. Players never see
+  // pending state, pool sources or retry pressure.
+  const [notifyGroups, notifyAuto, notifyRetry] = await Promise.all([
+    prisma.shunMasterRound.groupBy({ by: ['notifyStatus'], where: { day }, _count: { _all: true } }),
+    prisma.shunMasterRound.count({ where: { day, notifyAuto: true } }),
+    prisma.shunMasterRound.aggregate({ where: { day }, _sum: { notifyAttempts: true } }),
+  ])
+  const notifyCounts = new Map(notifyGroups.map((row) => [row.notifyStatus, row._count._all]))
+  const notifyStats = {
+    day,
+    pending: notifyCounts.get('PENDING') ?? 0,
+    plain: notifyCounts.get('SENT_PLAIN') ?? 0,
+    letter: notifyCounts.get('SENT_LETTER') ?? 0,
+    auto: notifyAuto,
+    retryAttempts: notifyRetry._sum.notifyAttempts ?? 0,
+  }
   const config = validateShunConfig(settings?.config) || defaultShunConfig
   const reserved = settings?.reserved || 0
   const compensated = settings?.compensated || 0
@@ -65,7 +81,7 @@ export async function GET(request: Request) {
   return json({ config, effectiveEnabled: config.enabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated,
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
     outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit,
-    matchStats })
+    matchStats, notifyStats })
 }
 
 export async function PATCH(request: Request) {

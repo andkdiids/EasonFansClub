@@ -4,7 +4,9 @@
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  /* Above the fixed mobile bottom nav (--layer-mobile-nav: 99999); otherwise a
+     phone would intercept taps on the letter buttons. */
+  z-index: 100000;
   display: grid;
   place-items: center;
   padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));

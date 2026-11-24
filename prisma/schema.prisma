@@ -7063,6 +7063,17 @@ model ShunMasterRound {
   // players, notifications, letters or any public endpoint.
   friendHit Boolean @default(false)
   victimTier Int?
+  // Deferred notification state machine.
+  // PENDING    → the take is settled but the victim has not been told yet
+  // SENT_PLAIN → an ordinary "your fee was taken" notification was sent
+  // SENT_LETTER→ the anonymous letter notification was sent (one letter max)
+  // Historical rows predate the order change and already notified their victim,
+  // so the column default is SENT_PLAIN instead of PENDING.
+  notifyStatus String @default("SENT_PLAIN") @db.VarChar(16)
+  notifyDueAt DateTime?
+  notifiedAt DateTime?
+  notifyAttempts Int @default(0)
+  notifyAuto Boolean @default(false)
 
   @@unique([actorId, requestId])
   @@unique([actorId, day, victimId])
@@ -7070,6 +7081,7 @@ model ShunMasterRound {
   @@index([victimId, createdAt, id])
   @@index([actorId, createdAt, id])
   @@index([day])
+  @@index([notifyStatus, notifyDueAt])
 }
 
 /// An optional one-off note attached to a single Shun round. The anonymous
