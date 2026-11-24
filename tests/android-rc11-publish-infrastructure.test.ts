@@ -1325,7 +1325,7 @@ test('Beta24 metadata publication retains full signature checks and code36 CAS',
   assert.equal(workflow.concurrency.group, 'production-deploy')
   const baseline = workflow.jobs.configure.steps.find(step => step.id === 'beta24-baseline')
   assert.ok(baseline)
-  assert.equal(baseline.if, "inputs.release_candidate == 'beta24'")
+  assert.equal(baseline.if, "inputs.release_candidate == 'beta24' && inputs.verify_only != true")
   assert.match(baseline.run || '', /verify_apk.*37.*1\.0\.0-beta\.24/)
   assert.match(baseline.run || '', /beta24_apk="\$\{RUNNER_TEMP\}\/ecfc-beta21-beta24\.apk"/)
   assert.match(baseline.run || '', /CODE36_ROLLBACK_SOURCE_VERIFIED=YES/)
