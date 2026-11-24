@@ -19,6 +19,7 @@ on:
           - rc14
           - beta22
           - beta23
+          - internal-beta
         default: rc11
 
 permissions:
@@ -112,7 +113,7 @@ jobs:
         run: node scripts/android-rc11-cos-publish.mjs verify-cos-readonly
 
   ingress:
-    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false && inputs.release_candidate != 'internal-beta'
     name: Verify and stage the fixed local Android release APK
     runs-on: [self-hosted, Windows, X64, rc11-artifact-ingress]
     environment:
@@ -765,3 +766,65 @@ jobs:
             echo "- verified public CDN URL: ${RC11_CDN_URL}"
             echo '- Version API: unchanged by this workflow'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  internal_beta:
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false && inputs.release_candidate == 'internal-beta'
+    runs-on: [self-hosted, Windows, X64, rc11-artifact-ingress]
+    environment: Production
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          run_install: false
+      - run: pnpm install --prod --frozen-lockfile --ignore-scripts
+      - name: Verify reviewed APK and publish immutable candidate
+        shell: powershell
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/assert-release-main.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'MAIN_VERIFICATION_FAILED' }
+          $pin = Get-Content scripts/android-internal-beta.json -Raw | ConvertFrom-Json
+          if ($pin.sourceFile -notmatch '^ECFC-[A-Za-z0-9.-]+\.apk$') { throw 'APK_FILENAME_INVALID' }
+          $path = Join-Path $env:RUNNER_TEMP "ecfc-internal-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.apk"
+          Copy-Item -LiteralPath (Join-Path 'E:/ECFC-Release-Artifacts' $pin.sourceFile) -Destination $path
+          if ((Get-Item -LiteralPath $path).Length -ne $pin.size -or (Get-FileHash -LiteralPath $path).Hash -ne $pin.sha256) { throw 'APK_INTEGRITY_MISMATCH' }
+          $sdk = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { 'C:/Users/Eason/AppData/Local/Android/Sdk' }
+          $tools = Get-ChildItem (Join-Path $sdk 'build-tools') -Directory | Sort-Object Name -Descending | Where-Object { (Test-Path (Join-Path $_.FullName 'aapt.exe')) -and (Test-Path (Join-Path $_.FullName 'apksigner.bat')) } | Select-Object -First 1
+          if (-not $tools) { throw 'ANDROID_BUILD_TOOLS_NOT_FOUND' }
+          node scripts/verify-android-apk-signature.mjs (Join-Path $tools.FullName 'apksigner.bat') $path '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          if ($LASTEXITCODE -ne 0) { throw 'APK_SIGNATURE_FAILED' }
+          $badging = & (Join-Path $tools.FullName 'aapt.exe') dump badging $path
+          if ($LASTEXITCODE -ne 0 -or -not ($badging -like "package: name='fans.ecfc.app' versionCode='$($pin.versionCode)' versionName='$($pin.versionName)'*")) { throw 'APK_VERSION_METADATA_MISMATCH' }
+          $env:INTERNAL_BETA_VERIFIED_APK = $path
+          node scripts/android-rc11-cos-publish.mjs publish-internal-beta
+          if ($LASTEXITCODE -ne 0) { throw 'APK_COS_PUBLISH_FAILED' }
+      - name: Report verified download
+        shell: powershell
+        env:
+          APK_URL: ${{ steps.publish.outputs.APK_DOWNLOAD_URL }}
+          APK_KEY: ${{ steps.publish.outputs.COS_OBJECT_KEY }}
+          APK_SHA: ${{ steps.publish.outputs.APK_SHA256 }}
+          APK_BYTES: ${{ steps.publish.outputs.APK_SIZE }}
+          MOBILE_SHA: ${{ steps.publish.outputs.SOURCE_SHA }}
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Value @(
+            "Download: $env:APK_URL", "Object: $env:APK_KEY", "SHA-256: $env:APK_SHA",
+            "Bytes: $env:APK_BYTES", "Mobile source: $env:MOBILE_SHA", "Signature and full CDN readback: verified"
+          )
