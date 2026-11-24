@@ -1335,6 +1335,7 @@ test('Beta24 metadata publication retains full signature checks and code36 CAS',
   assert.match(allRuns, /ANDROID_BETA24_ARTIFACT_PIN_B64/)
   assert.match(allRuns, /expected_version_code=37/)
   assert.match(allRuns, /LIVE_BETA24_DOWNLOAD=VERIFIED/)
+  assert.match(allRuns, /expectedCode === '37' \? '1\.0\.0-beta\.24'/)
   assert.match(allRuns, /flock -n/)
   const pin = JSON.parse(read('scripts/android-internal-beta.json'))
   assert.equal(pin.versionCode, 37)
