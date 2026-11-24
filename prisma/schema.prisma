@@ -7058,6 +7058,11 @@ model ShunMasterRound {
   recovered Int @default(0)
   compensation Int @default(0)
   capturedAt DateTime?
+  // Admin-only match-source audit: whether the friend pool produced this
+  // transfer, and the activity tier the target was drawn from. Never exposed to
+  // players, notifications, letters or any public endpoint.
+  friendHit Boolean @default(false)
+  victimTier Int?
 
   @@unique([actorId, requestId])
   @@unique([actorId, day, victimId])

@@ -230,7 +230,10 @@ test('前往调查 reuses the existing capture preparation call', () => {
 test('the letter footer exposes the primary action and a secondary close', () => {
   assert.match(overlay, /'立即调查'/, '主按钮文案为「立即调查」')
   assert.match(overlay, /前往调查中…/, '提交中必须有进行态文案')
-  assert.match(overlay, /查看调查结果/, '已抓捕记录改为查看结果')
+  // A settled letter renders its verdict inline, so the old no-feedback
+  // "查看调查结果" action must be gone; only the record shortcut remains.
+  assert.doesNotMatch(overlay, /查看调查结果/, '已结算状态不得保留无反馈按钮')
+  assert.match(overlay, /查看顺取记录/, '已结算状态提供记录跳转')
   assert.match(overlay, /收下这封信/, '关闭信件不得自动进入抓捕')
 })
 

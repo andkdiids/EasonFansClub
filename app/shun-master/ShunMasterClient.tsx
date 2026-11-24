@@ -69,6 +69,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const [letterError, setLetterError] = useState('')
   // Re-opening a letter from the record list skips the delivery animation.
   const [letterInstant, setLetterInstant] = useState(false)
+  // Visible landing spot after an overlay closes: the capture picker, the
+  // settlement panel or one record row. Without it the state changes but the
+  // user sees nothing, which was the reported "no feedback" bug.
+  const [pendingFocus, setPendingFocus] = useState<string[] | null>(null)
   const lock = useRef(false)
   const requestId = useRef<string | null>(null)
   const sequence = useRef(0)
@@ -146,6 +150,19 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
     if (result && modal && !modal.open) modal.showModal()
     if (!result && modal?.open) modal.close()
   }, [result])
+  // Scrolls the first candidate target that exists, so a click that closes an
+  // overlay always ends on something the user can see and act on.
+  useEffect(() => {
+    if (!pendingFocus?.length) return
+    const node = pendingFocus
+      .map((id) => document.getElementById(id))
+      .find((element): element is HTMLElement => element !== null)
+    if (!node) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    node.scrollIntoView?.({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })
+    node.focus({ preventScroll: true })
+    setPendingFocus(null)
+  }, [pendingFocus, list, capture, caught, letter])
 
   async function perform(name: string, action: () => Promise<void>) {
     if (lock.current) return
@@ -204,7 +221,11 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
     setLetterError('')
     try {
       await openCapture(letter.roundId)
-      setLetter(undefined)
+      closeLetter()
+      // The picker lives in the records column, which can sit below the fold on
+      // a phone; land on it (or on the settlement panel for an already settled
+      // round) so the click has a visible outcome.
+      setPendingFocus(['shun-capture', 'shun-caught'])
     } catch (error) {
       if (error instanceof RequestError && (error.code === 'UNAVAILABLE' || error.code === 'NOT_FOUND')) {
         setLetter((current) => current && { ...current, capturable: false })
@@ -216,6 +237,12 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       setLetterBusy(false)
     }
   }
+  /** Closes the settled letter and lands on its row in the record list. */
+  function showRecord(roundId: string) {
+    closeLetter()
+    setSide('in')
+    setPendingFocus([side === 'in' ? `shun-record-${roundId}` : 'shun-records', 'shun-records'])
+  }
   function confirmCapture() {
     if (!capture || selected === undefined) return
     return perform('capture', async () => {
@@ -223,7 +250,11 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         const outcome = await api<{ record: Round }>(`capture/${capture.id}/guess`, { uid: selected, mode: capture.data.mode })
         setCaught(outcome.record)
         setCapture(undefined)
+        setPendingFocus(['shun-caught'])
         await Promise.all([loadStatus(), loadRecords()])
+        // A letter opened earlier in this session must reflect the settlement
+        // instead of keeping the pre-investigation anonymous heading.
+        if (letter) await openLetter(letter.id, true)
       } catch (error) {
         if (error instanceof RequestError && error.code === 'MODE_CHANGED') await openCapture(capture.id)
         throw error
@@ -265,7 +296,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <p>每日机会于北京时间 00:00 重置。</p>
         </details>
       </section>
-      {status && <section className={styles.panel} aria-label="历史记录">
+      {status && <section className={styles.panel} aria-label="历史记录" id="shun-records" tabIndex={-1}>
         <div className={styles.tabs} aria-label="记录类别">
           <button aria-pressed={side === 'out'} onClick={() => { setSide('out'); setCapture(undefined); setCaught(undefined) }}>我顺了谁</button>
           <button aria-pressed={side === 'in'} onClick={() => { setSide('in'); setCapture(undefined); setCaught(undefined) }}>谁顺了我</button>
@@ -277,7 +308,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           </select></label>
           {range === 'date' && <input type="date" aria-label="选择北京时间日期" value={dateKey} onChange={(event) => setDateKey(event.target.value)} />}
         </div>
-        {capture && <section className={styles.capture} aria-label="抓捕追回">
+        {capture && <section className={styles.capture} aria-label="抓捕追回" id="shun-capture" tabIndex={-1}>
           <h2>{capture.data.mode === 2 ? `黄金抓捕期 · ${countdown(remaining(capture.data.goldenUntil))}` : '三选一抓捕'}</h2>
           <fieldset><legend>选择一位 EF</legend>{capture.data.candidates.map((person) => <label key={person.uid}>
             <input type="radio" name="suspect" checked={person.uid === selected} onChange={() => setSelected(person.uid)} />
@@ -286,10 +317,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <button disabled={!!busy || selected === undefined} onClick={() => void confirmCapture()}>确认抓捕</button>
           <button disabled={!!busy} onClick={() => setCapture(undefined)}>返回记录</button>
         </section>}
-        {caught && <div className={styles.result} role="status"><strong>{caught.result === 'SUCCESS' ? '抓到你啦！' : '让 TA 溜了！'}</strong>
+        {caught && <div className={styles.result} role="status" id="shun-caught" tabIndex={-1}><strong>{caught.result === 'SUCCESS' ? '抓到你啦！' : '让 TA 溜了！'}</strong>
           <PersonLabel person={caught.person} link /><p>{caught.result === 'SUCCESS' ? `追回 ${caught.recovered} 挂号费` : `${caught.amount} 挂号费未追回`}</p>
           <button onClick={() => setCaught(undefined)}>返回记录</button></div>}
-        {rows.map((row) => <article className={styles.record} key={row.id}>
+        {rows.map((row) => <article className={styles.record} key={row.id} id={`shun-record-${row.id}`} tabIndex={-1}>
           <PersonLabel person={row.person} link />
           <p>{myTime.format(new Date(row.createdAt))} · {side === 'in' ? '−' : '+'}{row.amount} 挂号费</p>
           {row.result && <p>{row.result === 'SUCCESS' ? `已追回 ${row.recovered} 挂号费` : '抓捕失败 · 未追回'}</p>}
@@ -352,6 +383,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       </div>
     </div>}
     {letter && <AnonymousLetter letter={letter} busy={letterBusy} error={letterError} instant={letterInstant}
-      onInvestigate={() => void investigate()} onClose={closeLetter} />}
+      onInvestigate={() => void investigate()} onClose={closeLetter}
+      onShowRecord={() => showRecord(letter.roundId)} />}
   </main>
 }

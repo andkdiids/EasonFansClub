@@ -155,11 +155,14 @@ test('「立即调查」复用现有抓捕准备接口，只开选择不提交�
 
 test('已抓捕 / 不可抓捕状态正确，绝不重复抓捕', () => {
   const letter = read('components/shun-master/AnonymousLetter.tsx')
-  assert.match(letter, /letter\.captured \? '查看调查结果' : '立即调查'/, '已抓捕显示查看调查结果')
-  assert.match(letter, /letter\.capturable \|\| letter\.captured/, '不可抓捕时不渲染可操作抓捕按钮')
+  // 已结算信件直接在信纸内展示结果，不再保留会点空的主按钮
+  assert.match(letter, /const primary = result \? null : letter\.capturable/, '已结算时不渲染抓捕主按钮')
+  assert.match(letter, /抓到你啦！/, '成功必须直接展示结果')
+  assert.match(letter, /让 TA 溜了！/, '失败也必须直接展示结果')
+  assert.doesNotMatch(letter, /查看调查结果/, '已抓捕不得再显示无反馈按钮')
   assert.match(letter, /本次记录已不可抓捕/, '不可抓捕必须给出真实原因')
   const service = read('lib/shun-anonymous-letter.ts')
-  assert.match(service, /captured: round\.result !== null/, '抓捕状态必须取自真实记录')
+  assert.match(service, /captured: outcome !== null/, '抓捕状态必须取自真实记录')
   // 读取路径唯一允许的写入是首次已读时间；不得有删除、隐藏或改判定的写操作
   assert.match(service, /updateMany\(\{\s*where: \{ id: letter\.id, readAt: null \}, data: \{ readAt: new Date\(\) \},?\s*\}\)/,
     '唯一允许的写入是条件式 readAt')

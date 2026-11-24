@@ -2,10 +2,13 @@ import { Prisma } from '@prisma/client'
 import { randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { createNotificationWithDb } from '@/lib/notification-write'
-import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { awardRegistrationFee, consumeRegistrationFee, getRegistrationFeeHistoryWindow, type RegistrationFeeHistoryRange } from '@/lib/registration-fee'
-import { captureMode, defaultShunConfig, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, type ShunConfig } from './shun-master-rules'
+import { activityTier, captureMode, defaultShunConfig, friendPoolDraw, pickStratified, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, type ShunConfig } from './shun-master-rules'
 import { ANONYMOUS_LETTER_NOTIFICATION, anonymousLetterNotificationLink, readAnonymousMessageField } from './shun-anonymous-letter'
+import { shunPerson } from './shun-person'
+
+// Re-exported for callers that historically imported it from the service.
+export { shunPerson } from './shun-person'
 
 type Tx = Prisma.TransactionClient
 type Round = Prisma.ShunMasterRoundGetPayload<Record<string, never>>
@@ -47,7 +50,48 @@ export async function getShunCandidateSummary(tx: Tx, day: string, victimCap: nu
       balance: counts.get('balance') ?? 0, dailyCap: counts.get('dailyCap') ?? 0 },
   }
 }
-const personFields = { uid: true, nickname: true, avatarUrl: true, nicknameModerationStatus: true, nicknameViolationDisplay: true } as const
+/** One eligible target, already reduced to the activity tier the lottery needs. */
+type TargetCandidate = { id: string; uid: number; tier: number }
+
+/**
+ * Read-only snapshot of every account that may be drawn as a target.
+ *
+ * It is deliberately taken OUTSIDE the settlement transaction: the two-stage
+ * lottery needs the whole eligible population (a 128-row sample would let
+ * headcount dominate again), and doing that scan while holding the settings row
+ * lock made concurrent transfers time out. Nothing here is authoritative — the
+ * chosen victim is re-verified under `FOR UPDATE` before any amount moves.
+ */
+async function loadTargetPopulation(rangeStart: Date, day: string, now: Date): Promise<TargetCandidate[]> {
+  const pool = await prisma.$queryRaw<{ id: string; uid: number; lastActiveAt: Date | null; lastLoginAt: Date | null }[]>`
+    SELECT u.id, u.uid, u.lastActiveAt, u.lastLoginAt FROM User u
+    WHERE ${candidateAccount} AND NOT ${hasRefusedDebit} AND ${hasSpendableBalance}`
+  if (!pool.length) return []
+  const checkins = await prisma.checkIn.findMany({ where: { userId: { in: pool.map(({ id }) => id) },
+    checkinDateKey: { gte: shunDay(rangeStart), lte: day }, isMakeUp: false }, select: { userId: true, checkinDateKey: true } })
+  const activeDays = new Map<string, Set<string>>()
+  for (const checkin of checkins) {
+    const days = activeDays.get(checkin.userId) || new Set<string>()
+    days.add(checkin.checkinDateKey)
+    activeDays.set(checkin.userId, days)
+  }
+  // Same activity definition as before: distinct days in the window, plus the
+  // days of the last activity and login when they fall inside it.
+  return pool.map((user) => {
+    const days = activeDays.get(user.id) || new Set<string>()
+    for (const date of [user.lastActiveAt, user.lastLoginAt]) if (date && date >= rangeStart && date <= now) days.add(shunDay(date))
+    return { id: user.id, uid: user.uid, tier: activityTier(days.size) }
+  })
+}
+
+/** Accepted, undirected friendships of one account. Pending requests and follows never appear here. */
+async function loadFriendIds(actorId: string) {
+  const links = await prisma.friendship.findMany({
+    where: { OR: [{ userAId: actorId }, { userBId: actorId }] },
+    select: { userAId: true, userBId: true },
+  })
+  return new Set(links.map((link) => link.userAId === actorId ? link.userBId : link.userAId))
+}
 
 export class ShunError extends Error {
   constructor(public code: string, message: string, public status = 409) { super(message) }
@@ -102,11 +146,6 @@ function notify(tx: Tx, id: string, recipientId: string, title: string, content:
   } })
 }
 
-export async function shunPerson(tx: Tx, id: string) {
-  const user = await tx.user.findFirst({ where: { id, isDeleted: false, status: 'ACTIVE' }, select: personFields })
-  return user && { uid: user.uid, nickname: getPublicUserDisplayName(user), avatarUrl: user.avatarUrl }
-}
-
 async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = false) {
   const visible = side === 'out' || round.result !== null
   return {
@@ -136,6 +175,16 @@ export async function shunStatus(userId: string) {
 }
 
 export async function shunAttempt(actorId: string, requestId: string, anonymousMessage?: string | null) {
+  const now = new Date()
+  const day = shunDay(now)
+  const rangeStart = new Date(`${shunDay(new Date(now.getTime() - 6 * 86_400_000))}T00:00:00+08:00`)
+  // Read-only snapshot, taken before the settlement transaction so that the
+  // serialised section (settings lock, account locks, ledger) stays short even
+  // when many players click at once.
+  const [population, friendIds] = await Promise.all([
+    loadTargetPopulation(rangeStart, day, now),
+    loadFriendIds(actorId),
+  ])
   const result = await shunTransaction(async (tx) => {
     const { config } = await settings(tx)
     const previous = await tx.shunMasterRound.findUnique({ where: { actorId_requestId: { actorId, requestId } } })
@@ -146,8 +195,6 @@ export async function shunAttempt(actorId: string, requestId: string, anonymousM
     if (letter.provided && letter.error) throw new ShunError('LETTER_INVALID', letter.error, 400)
     const letterContent = letter.provided && !letter.error ? letter.content : null
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
-    const now = new Date()
-    const day = shunDay(now)
     const actor = await tx.user.findFirst({ where: { id: actorId, ...transactionAccount },
       select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } })
     if (!actor) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
@@ -163,26 +210,14 @@ export async function shunAttempt(actorId: string, requestId: string, anonymousM
       ...(actor.email && actor.emailVerifiedAt ? [{ email: actor.email, emailVerifiedAt: { not: null } }] : []),
       ...(actor.phone && actor.phoneVerifiedAt ? [{ phone: actor.phone, phoneVerifiedAt: { not: null } }] : []),
     ]
-    const rangeStart = new Date(`${shunDay(new Date(now.getTime() - 6 * 86_400_000))}T00:00:00+08:00`)
     const relatedAccounts = linked.length
       ? (await tx.user.findMany({ where: { OR: linked }, select: { id: true } })).map(({ id }) => id)
       : []
-    const targetExclusions = [...new Set([...excluded, ...relatedAccounts])]
-    // Probe uniformly random UID slots through the unique index. Fall back to
-    // the full filtered pool for sparse matches, so sampling never rejects a valid target.
-    const { _max: { uid: maxUid } } = await tx.user.aggregate({ _max: { uid: true } })
-    const slots = new Set<number>()
-    if (maxUid && maxUid > 512) while (slots.size < 512) slots.add(randomInt(1, maxUid + 1))
-    const indexedSample = slots.size ? Prisma.sql`AND u.uid IN (${Prisma.join([...slots])})` : Prisma.empty
-    const targetFilter = Prisma.sql`${candidateFilter} AND ${hasSpendableBalance} AND u.id NOT IN (${Prisma.join(targetExclusions)})`
-    type Target = { id: string; lastActiveAt: Date | null; lastLoginAt: Date | null }
-    const indexedTargets = slots.size ? await tx.$queryRaw<Target[]>`
-      SELECT u.id, u.lastActiveAt, u.lastLoginAt FROM User u WHERE ${targetFilter} ${indexedSample}`
-      : []
-    const pool = indexedTargets.length ? shuffle(indexedTargets).slice(0, 128) : await tx.$queryRaw<Target[]>`
-      SELECT u.id, u.lastActiveAt, u.lastLoginAt FROM User u WHERE ${targetFilter}
-      ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 128`
-    if (!pool.length) {
+    const targetExclusions = new Set([...excluded, ...relatedAccounts])
+    // The population and its activity tiers were read before the transaction;
+    // only the per-actor exclusions and the victim verification stay serialised.
+    const eligibleTargets = population.filter((target) => !targetExclusions.has(target.id))
+    if (!eligibleTargets.length) {
       const [funded, protectedFunded] = await Promise.all([
         tx.user.count({ where: { ...transactionAccount, points: { gt: 0 } } }),
         tx.$queryRaw<{ count: bigint }[]>`
@@ -196,19 +231,21 @@ export async function shunAttempt(actorId: string, requestId: string, anonymousM
           blocked: blocks.length, linked: relatedAccounts.length, previouslyMatched: played.length } } })
       return null
     }
-    const checkins = await tx.checkIn.findMany({ where: { userId: { in: pool.map(({ id }) => id) },
-      checkinDateKey: { gte: shunDay(rangeStart), lte: day }, isMakeUp: false }, select: { userId: true, checkinDateKey: true } })
-    const activeDays = new Map<string, Set<string>>()
-    for (const checkin of checkins) {
-      const days = activeDays.get(checkin.userId) || new Set<string>()
-      days.add(checkin.checkinDateKey)
-      activeDays.set(checkin.userId, days)
+    // Friend-first pool: a subset of the very same eligible set, so balance,
+    // daily cap, blocks, related accounts, already-hit targets and every other
+    // existing rule keep applying. Only the draw order changes, and the pool is
+    // silently abandoned when it holds nobody.
+    const friendPool = config.friendChance > 0 && friendIds.size
+      ? eligibleTargets.filter((target) => friendIds.has(target.id))
+      : []
+    const friendPoolUsed = friendPool.length > 0 && friendPoolDraw(config.friendChance, randomInt)
+    const victim = pickStratified(friendPoolUsed ? friendPool : eligibleTargets, config.weights, randomInt)
+    if (!victim) {
+      await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
+        summary: '没有符合条件的顺取目标', source: 'WEB', operatorType: 'USER',
+        metadata: { reason: 'NO_ELIGIBLE_TIER', eligible: eligibleTargets.length } } })
+      return null
     }
-    const victim = pool[weightedIndex(pool.map((user) => {
-      const days = activeDays.get(user.id) || new Set<string>()
-      for (const date of [user.lastActiveAt, user.lastLoginAt]) if (date && date >= rangeStart && date <= now) days.add(shunDay(date))
-      return config.weights[Math.min(4, Math.floor(days.size * 5 / 8))]
-    }))]
     const accounts = await lockAccounts(tx, [actorId, victim.id])
     const actorBalance = accounts.get(actorId)
     const victimBalance = accounts.get(victim.id)
@@ -219,9 +256,7 @@ export async function shunAttempt(actorId: string, requestId: string, anonymousM
     const rolled = weightedIndex(config.probabilities) + 1
     const amount = Math.min(rolled, victimBalance)
     const decoyFilter = Prisma.sql`${candidateFilter} AND u.id NOT IN (${actorId}, ${victim.id})`
-    const indexedDecoys = slots.size ? await tx.$queryRaw<{ id: string }[]>`
-      SELECT u.id FROM User u WHERE ${decoyFilter} ${indexedSample}` : []
-    const decoys = indexedDecoys.length >= 2 ? shuffle(indexedDecoys).slice(0, 2) : await tx.$queryRaw<{ id: string }[]>`
+    const decoys = await tx.$queryRaw<{ id: string }[]>`
       SELECT u.id FROM User u WHERE ${decoyFilter}
       ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 2
     `
@@ -236,6 +271,9 @@ export async function shunAttempt(actorId: string, requestId: string, anonymousM
       actorId, victimId: victim.id, requestId, day, rolled, amount, createdAt: now,
       goldenUntil: new Date(now.getTime() + config.goldenMinutes * 60000), candidates,
       goldenDecoyId: selectedDecoys[0],
+      // Match-source audit for the admin-only statistics. Never exposed to a
+      // player, never part of a notification or a letter.
+      friendHit: friendPoolUsed, victimTier: victim.tier,
     } })
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { reserved: { increment: amount } } })
     await ledger(tx, round.id, actorId, actorBalance, amount, 'take')
