@@ -860,6 +860,27 @@ export async function publishBeta23Artifact({ env = process.env, fetchImpl = fet
   return { key, cdnUrl: createCdnObjectUrl(key).toString() }
 }
 
+async function publishReviewedBeta(env = process.env) {
+  const pin = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./android-internal-beta.json', import.meta.url), 'utf8'))
+  if (!/^1\.0\.0-beta\.[1-9]\d*$/.test(pin.versionName) || !Number.isSafeInteger(pin.versionCode) || pin.versionCode < 1 ||
+      !/^[a-f0-9]{40}$/.test(pin.mobileCommit) || !/^[A-F0-9]{64}$/.test(pin.sha256) ||
+      !Number.isSafeInteger(pin.size) || pin.size < 10000000 || pin.size > 500000000) throw new Error('INTERNAL_BETA_PIN_INVALID')
+  const filePath = env.INTERNAL_BETA_VERIFIED_APK
+  if (!filePath) throw new Error('INTERNAL_BETA_VERIFIED_APK_MISSING')
+  const actual = await hashFile(filePath)
+  assertSize(actual.size, pin.size, 'INTERNAL_BETA_SIZE_MISMATCH')
+  assertSha(actual.sha256, pin.sha256, 'INTERNAL_BETA_SHA_MISMATCH')
+  const { runId, runAttempt } = runIdentifiers(env)
+  const key = 'android/releases/ECFC-' + pin.versionName + '-internal-code' + pin.versionCode + '-' + pin.mobileCommit + '-run' + runId + '-attempt' + runAttempt + '.apk'
+  const { cos, credentialsExpiredTime } = await getCos(env, fetch)
+  await uploadImmutableObject({ cos, env, key, filePath, expected: pin, stage: 'INTERNAL_BETA', credentialsExpiredTime })
+  const url = createCdnObjectUrl(key).toString()
+  for (const [name, value] of Object.entries({ COS_OBJECT_KEY: key, APK_DOWNLOAD_URL: url, APK_SHA256: pin.sha256, APK_SIZE: pin.size, SOURCE_SHA: pin.mobileCommit })) {
+    await writeOutput(name, value, env)
+  }
+  console.log('INTERNAL_BETA_CDN_VERIFIED=YES')
+}
+
 async function main() {
   const command = process.argv[2]
   if (command === 'verify-oidc') {
@@ -902,6 +923,7 @@ async function main() {
     console.log('BETA22_CDN_VERIFIED=YES\nBETA22_OBJECT_KEY=' + result.key)
     return
   }
+  if (command === 'publish-internal-beta') return publishReviewedBeta()
   if (command === 'publish-beta23') {
     const result = await publishBeta23Artifact()
     console.log('BETA23_CDN_VERIFIED=YES\nBETA23_OBJECT_KEY=' + result.key)
