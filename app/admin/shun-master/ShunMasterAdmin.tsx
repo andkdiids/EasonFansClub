@@ -6,7 +6,7 @@ import type { ShunConfig } from '@/lib/shun-master-rules'
 type Summary = {
   rulesVersion: number
   effectiveEnabled: boolean
-  config: ShunConfig; day: string; reserved: number; compensated: number; budgetWarning: boolean; activePlayers: number; hasMore: boolean
+  config: ShunConfig; day: string; reserved: number; compensated: number; activePlayers: number; hasMore: boolean
   totals: { _count: number; _sum: { amount: number | null; recovered: number | null; compensation: number | null } }
   amounts: { rolled: number; amount: number; _count: { _all: number } }[]
   records: { id: string; actorId: string; victimId: string; rolled: number; amount: number; result: string | null;
@@ -21,7 +21,7 @@ type Summary = {
 }
 const refusalLabels = { LEAVE: '旧版明确退出', PROTECT: '旧版开启保护', UNPROTECT: '旧版关闭保护', REJOIN: '旧版重新参与' }
 const integerFields = [
-  ['attempts', '每日顺取次数'], ['victimCap', '每日被顺上限'], ['goldenMinutes', '黄金抓捕分钟'], ['budget', '平台补偿总预算'],
+  ['attempts', '每日顺取次数'], ['victimCap', '每日被顺上限'], ['goldenMinutes', '黄金抓捕分钟'],
 ] as const
 
 export function ShunMasterAdmin() {
@@ -84,7 +84,7 @@ export function ShunMasterAdmin() {
     {config && <form className="grid min-w-0 gap-4 border p-3 sm:p-4" onSubmit={(event) => void save(event)}>
       <section className="grid gap-2 border-b pb-4" aria-label="游戏状态">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="font-semibold">游戏状态</h2><p className="text-sm text-[var(--foreground-muted)]">启用使用已保存的规则和预算。保存配置不会改变启停状态。</p></div>
+          <div><h2 className="font-semibold">游戏状态</h2><p className="text-sm text-[var(--foreground-muted)]">启用使用已保存的规则。保存配置不会改变启停状态。</p></div>
           <strong aria-live="polite">{effectiveEnabled ? '已开启' : '已关闭'}</strong>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -93,7 +93,7 @@ export function ShunMasterAdmin() {
         </div>
       </section>
       <div className="grid gap-2 sm:grid-cols-2">{integerFields.map(([key, title]) => <label className="flex min-w-0 flex-wrap items-center justify-between gap-2" key={key}>{title}
-        <input className="w-28 max-w-full border p-2" type="number" min={key === 'budget' ? 0 : 1} step={1} required value={config[key]}
+        <input className="w-28 max-w-full border p-2" type="number" min={1} step={1} required value={config[key]}
           onChange={(event) => setConfig({ ...config, [key]: Number(event.target.value) })} />
       </label>)}</div>
       {(['probabilities', 'weights'] as const).map((key) => <fieldset className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap" key={key}>
@@ -107,7 +107,6 @@ export function ShunMasterAdmin() {
     </form>}
     <label className="flex max-w-full flex-wrap items-center gap-2">顺取日（北京时间） <input className="max-w-full" type="date" value={day || data?.day || ''} onChange={(event) => { setDay(event.target.value); setPage(1) }} /></label>
     {data && <>
-      {data.budgetWarning && <p role="alert">补偿预算余量不足，新的顺取会暂停。</p>}
       <p>活跃顺取者 {data.activePlayers} 人 · {data.totals._count} 笔 · 顺取 {data.totals._sum.amount ?? 0} · 追回 {data.totals._sum.recovered ?? 0} · 当日记录补偿 {data.totals._sum.compensation ?? 0}</p>
       <p>已占用准备金 {data.reserved} · 累计平台补偿 {data.compensated}</p>
       <p>待抓捕记录 {data.outstanding.count} 笔{data.outstanding.oldest &&

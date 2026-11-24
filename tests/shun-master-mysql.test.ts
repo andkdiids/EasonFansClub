@@ -26,7 +26,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     const [operator, victim, ...actors] = await Promise.all([
       createUser(), createUser(40, undefined, 0), ...Array.from({ length: 8 }, () => createUser()),
     ])
-    const config = { ...defaultShunConfig, enabled: false, budget: 500 }
+    const config = { ...defaultShunConfig, enabled: false }
     await updateShunConfig(operator.id, config)
     assert.equal((await shunStatus(operator.id)).enabled, false)
     const beforeNoticeId = (await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId
@@ -131,21 +131,33 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     assert.equal(state.reserved, expired.amount)
     assert.equal(state.compensated, compensated.amount)
     assert.ok(await prisma.user.count({ where: { points: { lt: 0 } } }) === 0)
-    await assert.rejects(updateShunConfig(operator.id, { ...config, budget: 0 }), { code: 'BUDGET' })
-    await prisma.shunMasterRound.update({ where: { id: expired.id }, data: { createdAt: new Date(Date.now() - 90 * 86400000) } })
-    await updateShunConfig(operator.id, { ...config, budget: state.reserved + state.compensated })
-    await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'BUDGET' })
-    assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved, expired.amount)
-    await updateShunConfig(operator.id, { ...config, budget: state.reserved + state.compensated })
+    // Legacy stored configs may still carry a tiny budget. It is ignored on
+    // read and must never stop a new take; saving writes a budget-free config.
+    await prisma.shunMasterSettings.update({ where: { id: 1 }, data: {
+      config: { ...config, enabled: true, budget: 0 },
+    } })
+    assert.equal((await shunStatus(owner.id)).enabled, true)
+    const lowBudgetTarget = await createUser(20)
+    const lowBudgetAttempt = await shunAttempt(owner.id, randomUUID())
+    assert.ok(lowBudgetAttempt.amount >= 1 && lowBudgetAttempt.amount <= 7)
+    await seedRefusal(lowBudgetTarget.id)
+    assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved,
+      expired.amount + lowBudgetAttempt.amount)
+    await updateShunConfig(operator.id, config)
+    assert.deepEqual((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).config, { ...config, enabled: true })
+    assert.equal((await shunStatus(owner.id)).enabled, true)
+    const reopened = await setShunEnabled(operator.id, true)
+    assert.equal(reopened.effectiveEnabled, true)
     const beforeClose = await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } })
     const closes = await Promise.all(Array.from({ length: 8 }, () => setShunEnabled(operator.id, false)))
     assert.ok(closes.every((result) => !result.effectiveEnabled))
     assert.equal((await shunStatus(operator.id)).enabled, false)
     assert.equal(await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } }), beforeClose + 1)
-    await assert.rejects(setShunEnabled(operator.id, true), { code: 'BUDGET' })
     await assert.rejects(shunAttempt(owner.id, randomUUID()), { code: 'DISABLED' })
     assert.equal((await shunCapture(victim.id, expired.id, { mode: 3, uid: expiredOwner.uid })).record?.result, 'SUCCESS')
-    assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved, 0)
+    const afterCapture = await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })
+    assert.equal(afterCapture.reserved, lowBudgetAttempt.amount)
+    assert.equal(afterCapture.compensated, compensated.amount)
 
     const [limitActor, ...targets] = await Promise.all([createUser(), ...Array.from({ length: 10 }, () => createUser(1))])
     await publish(config)

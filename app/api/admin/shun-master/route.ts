@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
-import { defaultShunConfig, shunDay, validateShunConfig } from '@/lib/shun-master-rules'
+import { defaultShunConfig, shunConfigError, shunDay, validateShunConfig } from '@/lib/shun-master-rules'
 import { getShunCandidateSummary, setShunEnabled, ShunError, updateShunConfig } from '@/lib/shun-master'
 
 export const dynamic = 'force-dynamic'
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     prisma.shunMasterProtection.findMany({ where: { protected: true }, orderBy: [{ updatedAt: 'desc' }, { userId: 'asc' }],
       take: 50, select: { userId: true, updatedAt: true } }),
   ])
-  return json({ config, effectiveEnabled: config.enabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated, budgetWarning: config.budget - reserved - compensated < 7,
+  return json({ config, effectiveEnabled: config.enabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated,
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
     outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit })
 }
@@ -60,8 +60,9 @@ export async function PATCH(request: Request) {
       return json(await setShunEnabled(guard.user.id, body.operation === 'enable'))
     }
     if (body?.operation !== undefined) return json({ message: '不支持的配置操作。' }, 400)
-    const config = validateShunConfig({ ...body, enabled: false })
-    if (!config) return json({ message: '检查次数、预算、活跃权重及递减概率。概率必须合计 100%。' }, 400)
+    const draft = { ...body, enabled: false }
+    const config = validateShunConfig(draft)
+    if (!config) return json({ message: shunConfigError(draft) ?? '配置无效。' }, 400)
     return json(await updateShunConfig(guard.user.id, config))
   } catch (error) {
     if (error instanceof ShunError) return json({ code: error.code, message: error.message }, error.status)
