@@ -4,5 +4,13 @@
   "mobileCommit": "972f771e51da95a1a5f38c891c164145d9dd8f3c",
   "sha256": "BEC3821A6157BE0B299FCB71A3376AFCAE6B2F4C6F8EF03577DF90BD962B8402",
   "size": 183971204,
-  "sourceFile": "ECFC-1.0.0-beta.24-release-shun-972f771-20261124-121300.apk"
+  "sourceFile": "ECFC-1.0.0-beta.24-release-shun-972f771-20261124-121300.apk",
+  "releaseNotes": [
+    "支持 EasMUSIC 在线修复播放问题",
+    "支持 EasMUSIC 本地导入音乐",
+    "完善后台播放与锁屏通知",
+    "划掉应用后停止播放",
+    "补充隐私时长统计",
+    "Beta.24 内测版本"
+  ]
 }
