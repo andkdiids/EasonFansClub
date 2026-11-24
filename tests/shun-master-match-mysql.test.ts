@@ -508,7 +508,7 @@ test('deferred notification: plain, letter, sweep, scope and idempotency', {
   // a second sweep is a no-op and never rewinds or extends the golden window
   await prisma.shunMasterRound.update({ where: { id: take3.id }, data: { notifyDueAt: new Date(Date.now() - 86_400_000) } })
   await runShunNotifySweepOnce()
-  assert.equal(await prisma.notification.count({ where: { recipientId: victim3.id } }), 1, '重复执行超时任务不得重复通知')
+  assert.equal(await prisma.notification.count({ where: { key: `shun:${take3.id}:taken` } }), 1, '重复执行超时任务不得重复通知')
   assert.equal((await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take3.id } })).goldenUntil.getTime(),
     auto.goldenUntil.getTime(), '重发通知不得延长黄金抓捕期')
   await assert.rejects(shunSendNotification(actor3.id, take3.id, '超时补信'),
@@ -522,7 +522,8 @@ test('deferred notification: plain, letter, sweep, scope and idempotency', {
   await prisma.shunMasterRound.update({ where: { id: take4.id }, data: { notifyDueAt: new Date(Date.now() - 86_400_000) } })
   await shunSendNotification(actor4.id, take4.id, '抢先一步')
   await runShunNotifySweepOnce()
-  assert.equal(await prisma.notification.count({ where: { recipientId: victim4.id } }), 1, '信已送达后不得再发普通通知')
+  assert.equal(await prisma.notification.count({ where: { key: `shun:${take4.id}:taken` } }), 0, '信已送达后不得再发普通通知')
+  assert.equal(await prisma.notification.count({ where: { key: `shun:${take4.id}:taken-letter` } }), 1)
   assert.equal((await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take4.id } })).notifyStatus, 'SENT_LETTER')
 
   // --- player surfaces never expose the state machine ---------------------

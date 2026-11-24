@@ -386,7 +386,8 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     // Re-running the sweep is a no-op: no second notification, no golden rewind.
     await prisma.shunMasterRound.update({ where: { id: abandoned.id }, data: { notifyDueAt: new Date(Date.now() - 1000) } })
     await runShunNotifySweepOnce()
-    assert.equal(await prisma.notification.count({ where: { recipientId: abandonedRound.victimId } }), 1, '重复执行超时任务不得重复通知')
+    assert.equal(await prisma.notification.count({ where: { key: `shun:${abandoned.id}:taken` } }), 1,
+      '重复执行超时任务不得重复通知')
     const afterSecondSweep = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: abandoned.id } })
     assert.equal(afterSecondSweep.goldenUntil.getTime(), abandonedRound.goldenUntil.getTime(), '重复执行不得延长黄金期')
     await assert.rejects(shunSendNotification(abandonedActor.id, abandoned.id, '超时后补信'),
@@ -398,9 +399,9 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     await prisma.shunMasterRound.update({ where: { id: raced.id }, data: { notifyDueAt: new Date(Date.now() - 1000) } })
     await shunSendNotification(raceActor.id, raced.id, '抢先一步的信')
     await runShunNotifySweepOnce()
-    const racedRound = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: raced.id } })
-    assert.equal(await prisma.notification.count({ where: { recipientId: racedRound.victimId } }), 1,
+    assert.equal(await prisma.notification.count({ where: { key: `shun:${raced.id}:taken` } }), 0,
       '信已送达后不得再发普通通知')
+    assert.equal(await prisma.notification.count({ where: { key: `shun:${raced.id}:taken-letter` } }), 1)
     assert.equal((await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: raced.id } })).notifyStatus, 'SENT_LETTER')
     assert.equal(await prisma.shunMasterAnonymousLetter.count({ where: { roundId: raced.id } }), 1)
 
