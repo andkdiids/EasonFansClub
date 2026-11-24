@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { ShunError, shunAttempt, shunRecords, shunStatus } from '@/lib/shun-master'
+import { readAnonymousMessageField } from '@/lib/shun-anonymous-letter'
+import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, findMatchedBannedWords, getEnabledBannedWords } from '@/lib/content-moderation'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -62,7 +64,12 @@ export async function POST(request: Request, { params }: Context) {
   try {
     if (action === 'attempt' && typeof body?.requestId === 'string'
       && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(body.requestId)) {
-      return json(await shunAttempt(guard.user.id, body.requestId))
+      const message = readAnonymousMessageField(body.anonymousMessage)
+      if (message.provided && message.error) return json({ code: 'LETTER_INVALID', message: message.error }, 400)
+      if (message.provided && findMatchedBannedWords(message.content, await getEnabledBannedWords()).length) {
+        return json({ code: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, 400)
+      }
+      return json(await shunAttempt(guard.user.id, body.requestId, message.provided ? message.content : undefined))
     }
     return json({ message: '请求参数无效。' }, 400)
   } catch (error) { return handleShunError(error) }

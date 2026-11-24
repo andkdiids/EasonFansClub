@@ -5,6 +5,7 @@ import { createNotificationWithDb } from '@/lib/notification-write'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { awardRegistrationFee, consumeRegistrationFee, getRegistrationFeeHistoryWindow, type RegistrationFeeHistoryRange } from '@/lib/registration-fee'
 import { captureMode, defaultShunConfig, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, type ShunConfig } from './shun-master-rules'
+import { ANONYMOUS_LETTER_NOTIFICATION, anonymousLetterNotificationLink, readAnonymousMessageField } from './shun-anonymous-letter'
 
 type Tx = Prisma.TransactionClient
 type Round = Prisma.ShunMasterRoundGetPayload<Record<string, never>>
@@ -93,10 +94,11 @@ async function ledger(tx: Tx, id: string, userId: string, before: number, delta:
   if (posted.duplicate || posted.totalPoints !== after) throw new Error('SHUN_LEDGER_CONFLICT')
 }
 
-function notify(tx: Tx, id: string, recipientId: string, title: string, content: string, kind: string) {
+function notify(tx: Tx, id: string, recipientId: string, title: string, content: string, kind: string, link?: string) {
   return createNotificationWithDb(tx, { data: {
     type: 'SYSTEM', recipientId, title, content,
-    link: `/shun-master?record=${id}${kind === 'recover-actor' ? '&side=out' : ''}`, key: `shun:${id}:${kind}`,
+    link: link ?? `/shun-master?record=${id}${kind === 'recover-actor' ? '&side=out' : ''}`,
+    key: `shun:${id}:${kind}`,
   } })
 }
 
@@ -130,11 +132,16 @@ export async function shunStatus(userId: string) {
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes, serverNow }
 }
 
-export async function shunAttempt(actorId: string, requestId: string) {
+export async function shunAttempt(actorId: string, requestId: string, anonymousMessage?: string | null) {
   const result = await shunTransaction(async (tx) => {
     const { config } = await settings(tx)
     const previous = await tx.shunMasterRound.findUnique({ where: { actorId_requestId: { actorId, requestId } } })
+    // A replay of a completed request must never rewrite an existing letter,
+    // even when the retry carries a different message body.
     if (previous) return present(tx, previous, 'out')
+    const letter = readAnonymousMessageField(anonymousMessage)
+    if (letter.provided && letter.error) throw new ShunError('LETTER_INVALID', letter.error, 400)
+    const letterContent = letter.provided && !letter.error ? letter.content : null
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
     const now = new Date()
     const day = shunDay(now)
@@ -230,9 +237,21 @@ export async function shunAttempt(actorId: string, requestId: string) {
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { reserved: { increment: amount } } })
     await ledger(tx, round.id, actorId, actorBalance, amount, 'take')
     await ledger(tx, round.id, victim.id, victimBalance, -amount, 'take')
-    await notify(tx, round.id, victim.id, '挂号费被顺走啦！',
-      `一位神秘 EF 顺走了你 ${amount} 挂号费！黄金抓捕期已开启，现在抓捕只需二选一！`, 'taken')
-    return present(tx, round, 'out')
+    if (letterContent) {
+      // Written inside the same transaction as the round: if the letter cannot
+      // be stored the transfer rolls back, so a failed send can never leave an
+      // orphan envelope behind.
+      await tx.shunMasterAnonymousLetter.create({ data: {
+        roundId: round.id, senderId: actorId, recipientId: victim.id, content: letterContent,
+      } })
+      await notify(tx, round.id, victim.id, ANONYMOUS_LETTER_NOTIFICATION.title,
+        ANONYMOUS_LETTER_NOTIFICATION.content, 'taken-letter', anonymousLetterNotificationLink(round.id))
+    } else {
+      await notify(tx, round.id, victim.id, '挂号费被顺走啦！',
+        `一位神秘 EF 顺走了你 ${amount} 挂号费！黄金抓捕期已开启，现在抓捕只需二选一！`, 'taken')
+    }
+    const view = await present(tx, round, 'out')
+    return letterContent ? { ...view, hasLetter: true } : view
   })
   if (!result) throw new ShunError('NO_TARGET', '暂时没有可顺取的 EF，今日次数不会扣除。')
   return result

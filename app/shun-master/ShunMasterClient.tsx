@@ -4,13 +4,16 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ShunMasterArt } from '@/components/ShunMasterArt'
 import { ShunMasterLogo } from '@/components/ShunMasterLogo'
+import { AnonymousLetter, type AnonymousLetterData } from '@/components/shun-master/AnonymousLetter'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import styles from './shun.module.css'
 
+const MESSAGE_MAX = 60
+
 type Person = { uid: number; nickname: string; avatarUrl: string | null }
 type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' | 'FAILED' | null
-  createdAt: string; goldenUntil: string; person: Person | null; canCapture: boolean }
+  createdAt: string; goldenUntil: string; person: Person | null; canCapture: boolean; hasLetter?: boolean }
 type Status = { enabled: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null; windowAt: string }
 type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
@@ -40,7 +43,9 @@ function PersonLabel({ person, link = false }: { person: Person | null; link?: b
     : <span className={styles.person}>{content}</span>
 }
 
-export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: { focusedRecord?: string; initialSide: Side; initialGuest: boolean }) {
+export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId }: {
+  focusedRecord?: string; initialSide: Side; initialGuest: boolean; autoLetterId?: string
+}) {
   const [status, setStatus] = useState<Status>()
   const [side, setSide] = useState<Side>(initialSide)
   const [range, setRange] = useState('all')
@@ -57,10 +62,18 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
   const [busy, setBusy] = useState('')
   const [loading, setLoading] = useState(false)
   const [recordError, setRecordError] = useState('')
+  const [compose, setCompose] = useState<'choose' | 'write' | null>(null)
+  const [message, setMessage] = useState('')
+  const [letter, setLetter] = useState<AnonymousLetterData>()
+  const [letterBusy, setLetterBusy] = useState(false)
+  const [letterError, setLetterError] = useState('')
   const lock = useRef(false)
   const requestId = useRef<string | null>(null)
   const sequence = useRef(0)
   const dialog = useRef<HTMLDialogElement>(null)
+  // One notification click may only open one envelope: guards against React
+  // re-renders and StrictMode double effects replaying the animation.
+  const letterRequested = useRef(false)
   const loadStatus = useCallback(async () => {
     try {
       const response = await api<Status>('status')
@@ -97,6 +110,28 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
   useEffect(() => { if (!initialGuest) void loadStatus() }, [initialGuest, loadStatus])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
+  const openLetter = useCallback(async (id: string) => {
+    try {
+      setLetter(await api<AnonymousLetterData>('letter/' + encodeURIComponent(id)))
+      setLetterError('')
+    } catch {
+      // Missing, hidden, expired or foreign letters degrade silently: no empty
+      // envelope and no error banner, the record list behaves as before.
+      setLetter(undefined)
+    }
+  }, [])
+  useEffect(() => {
+    if (!autoLetterId || !signedIn || letterRequested.current) return
+    letterRequested.current = true
+    // Drop the one-shot flag from the address bar so a refresh, a back
+    // navigation or a re-render can never replay the delivery animation.
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('letter')) {
+      url.searchParams.delete('letter')
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+    }
+    void openLetter(autoLetterId)
+  }, [autoLetterId, signedIn, openLetter])
   useEffect(() => {
     const update = () => setNow(Date.now() + clockOffset)
     update()
@@ -121,12 +156,15 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
       setBusy('')
     }
   }
-  function attempt() {
+  function attempt(anonymousMessage?: string) {
     return perform('attempt', async () => {
       setResult(undefined)
+      setCompose(null)
       requestId.current ||= crypto.randomUUID()
       try {
-        const round = await api<Round>('attempt', { requestId: requestId.current })
+        const round = await api<Round>('attempt', {
+          requestId: requestId.current, ...(anonymousMessage ? { anonymousMessage } : {}),
+        })
         setBusy('animation')
         const wait = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1600
         await Promise.all([
@@ -134,6 +172,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
           new Promise((resolve) => window.setTimeout(resolve, wait)),
         ])
         requestId.current = null
+        setMessage('')
         setResult(round)
       } catch (error) {
         if (error instanceof RequestError && error.status && error.status < 500 && error.status !== 429) requestId.current = null
@@ -141,12 +180,38 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
       }
     })
   }
-  async function openCapture(id: string) {
-    const response = await api<Capture | { record: Round }>(`capture/${id}/start`, {})
+  async function openCapture(id: string) {    const response = await api<Capture | { record: Round }>(`capture/${id}/start`, {})
     setSelected(undefined)
     if ('record' in response) { setCaught(response.record); setCapture(undefined); return }
     setClockOffset(Date.parse(response.serverNow) - Date.now())
     setCapture({ id, data: response })
+  }
+  function closeLetter() {
+    setLetter(undefined)
+    setLetterError('')
+  }
+  /**
+   * "前往调查" reuses the exact capture-preparation call the record list uses.
+   * It only opens the suspect picker — never submits an answer — so the golden
+   * window, attempt rules, ledger and idempotency stay untouched.
+   */
+  async function investigate() {
+    if (!letter || letterBusy) return
+    setLetterBusy(true)
+    setLetterError('')
+    try {
+      await openCapture(letter.roundId)
+      setLetter(undefined)
+    } catch (error) {
+      if (error instanceof RequestError && (error.code === 'UNAVAILABLE' || error.code === 'NOT_FOUND')) {
+        setLetter((current) => current && { ...current, capturable: false })
+        setLetterError(error.message)
+      } else {
+        setLetterError(error instanceof Error ? error.message : '暂时无法打开调查，请重试。')
+      }
+    } finally {
+      setLetterBusy(false)
+    }
   }
   function confirmCapture() {
     if (!capture || selected === undefined) return
@@ -167,6 +232,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
   const myTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Shanghai' })
   const remaining = (deadline: string) => Math.max(0, Math.ceil((Date.parse(deadline) - (now ?? Date.now())) / 1000))
   const countdown = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const messageLength = [...message.trim()].length
+  const canSend = messageLength > 0 && messageLength <= MESSAGE_MAX && !!status?.remaining && !busy
   return <main className={styles.page}>
     <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div></header>
     {error && <p className={styles.alert} role="alert">{error}</p>}
@@ -180,7 +247,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
             <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
             <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
           </dl>
-          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => void attempt()}>
+          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => setCompose('choose')}>
             {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
           </button>}
         </>}
@@ -240,12 +307,42 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest }: {
         <h2 id="shun-result-title">顺走啦！</h2>
         <PersonLabel person={result.person} link />
         <strong>+{result.amount} 挂号费</strong>
+        {result.hasLetter && <p className={styles.letterSent}>已为 TA 留下一封匿名信 ✉️</p>}
         <div className={styles.tabs}>
           <button type="button" autoFocus onClick={() => setResult(undefined)}>关闭</button>
           <button type="button" className={styles.primary} disabled={!!busy || !status?.remaining || !status?.enabled}
-            onClick={() => void attempt()}>{status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
+            onClick={() => { setResult(undefined); setCompose('choose') }}>{status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
         </div>
       </div>}
     </dialog>
+    {compose && <div className={styles.compose} role="dialog" aria-modal="true" aria-labelledby="compose-title">
+      <div className={styles.composeCard}>
+        {compose === 'choose' ? <>
+          <h2 id="compose-title">要不要留一句匿名的话？</h2>
+          <p>你可以给幸运的 EF 留下一句话，也可以直接顺一手。</p>
+          <div className={styles.composeActions}>
+            <button type="button" className={`${styles.primary} ${styles.wide}`} onClick={() => setCompose('write')}>匿名留言</button>
+            <button type="button" disabled={!!busy} onClick={() => void attempt()}>直接顺一手</button>
+            <button type="button" onClick={() => setCompose(null)}>关闭</button>
+          </div>
+        </> : <>
+          <h2 id="compose-title">给幸运的 EF 留一句话</h2>
+          <textarea aria-label="匿名留言内容" placeholder="写下一句只有 TA 才能看到的话……" value={message}
+            onChange={(event) => {
+              const next = event.target.value.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
+              setMessage([...next].slice(0, MESSAGE_MAX).join(''))
+            }} />
+          <div className={styles.composeMeta}><span>{messageLength}/{MESSAGE_MAX}</span><span>TA 不会知道是你</span></div>
+          <div className={styles.composeActions}>
+            <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSend}
+              onClick={() => void attempt(message.trim())}>{busy === 'attempt' ? '发送中…' : '发送并顺一手'}</button>
+            <button type="button" disabled={!!busy} onClick={() => setCompose('choose')}>返回</button>
+            <button type="button" disabled={!!busy} onClick={() => setCompose(null)}>关闭</button>
+          </div>
+        </>}
+      </div>
+    </div>}
+    {letter && <AnonymousLetter letter={letter} busy={letterBusy} error={letterError}
+      onInvestigate={() => void investigate()} onClose={closeLetter} />}
   </main>
 }
