@@ -39,6 +39,11 @@ on:
         description: Exact APK size in bytes
         required: true
         type: string
+      verify_only:
+        description: Reload and verify metadata that is already written; never changes production config
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -509,7 +514,7 @@ jobs:
           echo 'CODE35_ROLLBACK_SOURCE_VERIFIED=YES'
 
       - name: Validate BETA24 signer and the immutable code36 rollback source
-        if: inputs.release_candidate == 'beta24'
+        if: inputs.release_candidate == 'beta24' && inputs.verify_only != true
         id: beta24-baseline
         env:
           EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
@@ -601,7 +606,7 @@ jobs:
           retention-days: 90
 
       - name: Preserve Beta24 release baseline snapshot
-        if: inputs.release_candidate == 'beta24'
+        if: inputs.release_candidate == 'beta24' && inputs.verify_only != true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-beta24-release-baseline
@@ -684,6 +689,7 @@ jobs:
           echo 'PRODUCTION_SSH_HOST_PIN=VERIFIED'
 
       - name: Update only Android version variables in production shared env
+        if: inputs.verify_only != true
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -941,7 +947,7 @@ jobs:
               const version = await fetch('http://127.0.0.1:3000/api/app/version?platform=android', { signal: AbortSignal.timeout(3000) });
               const versionBody = await version.json();
               if (health.ok && healthBody.release === expectedSha && version.ok
-                && versionBody.versionName === (expectedCode === '36' ? '1.0.0-beta.23' : expectedCode === '35' ? '1.0.0-beta.22' : '1.0.0-beta.21')
+                && versionBody.versionName === (expectedCode === '37' ? '1.0.0-beta.24' : expectedCode === '36' ? '1.0.0-beta.23' : expectedCode === '35' ? '1.0.0-beta.22' : '1.0.0-beta.21')
                 && String(versionBody.versionCode) === expectedCode
                 && Number(versionBody.minimumVersionCode) === 19
                 && versionBody.forceUpdate === false
