@@ -767,8 +767,39 @@ jobs:
             echo '- Version API: unchanged by this workflow'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  internal_beta_source:
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false && inputs.release_candidate == 'internal-beta'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.bundle.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Archive tracked publisher sources for this run
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git archive --format=zip --output="$RUNNER_TEMP/internal-beta-source.zip" "$GITHUB_SHA" scripts package.json pnpm-lock.yaml pnpm-workspace.yaml
+          printf 'sha256=%s\n' "$(sha256sum "$RUNNER_TEMP/internal-beta-source.zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: internal-beta-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/internal-beta-source.zip
+          if-no-files-found: error
+          retention-days: 1
+
   internal_beta:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false && inputs.release_candidate == 'internal-beta'
+    needs: internal_beta_source
+    defaults:
+      run:
+        working-directory: internal-beta-src-${{ github.run_id }}-${{ github.run_attempt }}
     runs-on: [self-hosted, Windows, X64, rc11-artifact-ingress]
     environment: Production
     timeout-minutes: 45
@@ -776,23 +807,29 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        timeout-minutes: 5
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          sparse-checkout: |
-            /scripts/
-            /package.json
-            /pnpm-lock.yaml
-            /pnpm-workspace.yaml
-            /.npmrc
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+          name: internal-beta-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/internal-beta-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify same-run archive before extracting
+        shell: powershell
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_ARCHIVE_HASH: ${{ needs.internal_beta_source.outputs.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP "internal-beta-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/internal-beta-source.zip"
+          if ($env:SOURCE_ARCHIVE_HASH -notmatch '^[a-f0-9]{64}$' -or (Get-FileHash -LiteralPath $archive).Hash -ne $env:SOURCE_ARCHIVE_HASH) { throw 'PUBLISHER_ARCHIVE_DIGEST_MISMATCH' }
+          if (Test-Path -LiteralPath "internal-beta-src-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT") { throw 'PUBLISHER_SOURCE_PATH_ALREADY_EXISTS' }
+          Expand-Archive -LiteralPath $archive -DestinationPath "internal-beta-src-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           run_install: false
+          package_json_file: internal-beta-src-${{ github.run_id }}-${{ github.run_attempt }}/package.json
       - run: pnpm install --prod --frozen-lockfile --ignore-scripts
       - name: Verify reviewed APK and publish immutable candidate
         shell: powershell
