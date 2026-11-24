@@ -28,27 +28,32 @@ function prefersReducedMotion() {
  * authorised letter and reports intent back to the caller. Animation is CSS
  * transform/opacity only, is skippable, honours `prefers-reduced-motion` and
  * never blocks the actions underneath once open.
+ *
+ * `instant` skips the fly-in entirely so re-opening the letter from a record
+ * shows the paper straight away instead of replaying the entrance.
  */
-export function AnonymousLetter({ letter, busy, error, onInvestigate, onClose, onRetry }: {
+export function AnonymousLetter({ letter, busy, error, instant = false, onInvestigate, onClose, onRetry }: {
   letter: AnonymousLetterData
   busy: boolean
   error?: string
+  instant?: boolean
   onInvestigate: () => void
   onClose: () => void
   onRetry?: () => void
 }) {
-  const [stage, setStage] = useState<Stage>(() => (prefersReducedMotion() ? 'open' : 'flying'))
+  const [stage, setStage] = useState<Stage>(() => (instant || prefersReducedMotion() ? 'open' : 'flying'))
   const closeRef = useRef<HTMLButtonElement>(null)
   const timers = useRef<number[]>([])
 
   useEffect(() => {
+    if (instant) return
     const sequence: Array<[Stage, number]> = [['hovering', TIMING.flying], ['opening', TIMING.flying + TIMING.hovering],
       ['open', TIMING.flying + TIMING.hovering + TIMING.opening]]
     for (const [next, delay] of sequence) {
       timers.current.push(window.setTimeout(() => setStage(next), delay))
     }
     return () => { timers.current.forEach(window.clearTimeout); timers.current = [] }
-  }, [])
+  }, [instant])
 
   useEffect(() => {
     if (stage === 'open') closeRef.current?.focus()
@@ -90,7 +95,7 @@ export function AnonymousLetter({ letter, busy, error, onInvestigate, onClose, o
             ? <button type="button" className={styles.primary} disabled={stage !== 'open'} onClick={onRetry}>重试</button>
             : letter.capturable || letter.captured
               ? <button type="button" className={styles.primary} disabled={busy || stage !== 'open'} onClick={onInvestigate}>
-                {busy ? '前往调查中…' : letter.captured ? '查看调查结果' : '前往调查'}
+                {busy ? '前往调查中…' : letter.captured ? '查看调查结果' : '立即调查'}
               </button>
               : null}
           <button type="button" ref={closeRef} disabled={stage !== 'open'} onClick={onClose}>收下这封信</button>

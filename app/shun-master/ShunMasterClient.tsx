@@ -67,6 +67,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const [letter, setLetter] = useState<AnonymousLetterData>()
   const [letterBusy, setLetterBusy] = useState(false)
   const [letterError, setLetterError] = useState('')
+  // Re-opening a letter from the record list skips the delivery animation.
+  const [letterInstant, setLetterInstant] = useState(false)
   const lock = useRef(false)
   const requestId = useRef<string | null>(null)
   const sequence = useRef(0)
@@ -110,7 +112,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   useEffect(() => { if (!initialGuest) void loadStatus() }, [initialGuest, loadStatus])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
-  const openLetter = useCallback(async (id: string) => {
+  const openLetter = useCallback(async (id: string, instant = false) => {
+    setLetterInstant(instant)
     try {
       setLetter(await api<AnonymousLetterData>('letter/' + encodeURIComponent(id)))
       setLetterError('')
@@ -290,6 +293,12 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <PersonLabel person={row.person} link />
           <p>{myTime.format(new Date(row.createdAt))} · {side === 'in' ? '−' : '+'}{row.amount} 挂号费</p>
           {row.result && <p>{row.result === 'SUCCESS' ? `已追回 ${row.recovered} 挂号费` : '抓捕失败 · 未追回'}</p>}
+          {side === 'in' && row.hasLetter && (
+            // Re-read entry: the letter is fetched again from the recipient-only
+            // endpoint, so it stays available without replaying the delivery
+            // animation and without depending on the notification row.
+            <button disabled={!!busy} onClick={() => void perform('letter', () => openLetter(row.id, true))}>查看神秘来信</button>
+          )}
           {side === 'in' && !row.result && (row.canCapture ? <>
             {remaining(row.goldenUntil) > 0 && <span>黄金抓捕期 · {countdown(remaining(row.goldenUntil))}</span>}
             <button disabled={!!busy} onClick={() => void perform('start', () => openCapture(row.id))}>抓捕追回</button>
@@ -342,7 +351,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         </>}
       </div>
     </div>}
-    {letter && <AnonymousLetter letter={letter} busy={letterBusy} error={letterError}
+    {letter && <AnonymousLetter letter={letter} busy={letterBusy} error={letterError} instant={letterInstant}
       onInvestigate={() => void investigate()} onClose={closeLetter} />}
   </main>
 }

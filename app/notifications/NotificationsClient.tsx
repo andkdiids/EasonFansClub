@@ -19,6 +19,7 @@ import { parseNotificationCategory, type NotificationCategory } from '@/lib/noti
 import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 import { safeInternalPathOrNull } from '@/lib/url-safety'
+import { ANONYMOUS_LETTER_ENTRY_LABEL, isShunLetterNotification, shunLetterHref } from '@/lib/shun-letter-notification'
 import type { FriendDockUser } from '@/lib/friend-types'
 import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 import { REPLY_MAX_LENGTH } from '@/lib/reply-length'
@@ -33,6 +34,8 @@ function isSystemLikeNotification(item: UnifiedNotification) {
 
 function isSystemNotification(item: UnifiedNotification) {
   // UnifiedNotification 用 source 标记 SystemNotification，用 type 标记个人系统通知。
+  // 顺大师匿名信也使用 SYSTEM 类型，但它有独立入口，必须先排除，否则会被通用弹窗接管。
+  if (isShunLetterNotification(item)) return false
   return item.source === 'system' || item.type === 'SYSTEM'
 }
 
@@ -48,6 +51,9 @@ function isBirthdayNotification(item: UnifiedNotification) {
  * - 返回 null 时该通知不展示智能入口（如无任何跳转目标的系统公告，仅可标记已读 / 清除）。
  */
 function getSmartEntry(item: UnifiedNotification): { label: string; href?: string; action?: 'dock' } | null {
+  // 匿名信优先：即便它使用 SYSTEM 类型，也要给出「打开神秘来信」而不是通用系统详情。
+  const letterHref = shunLetterHref(item)
+  if (letterHref) return { label: ANONYMOUS_LETTER_ENTRY_LABEL, href: letterHref }
   if (item.category === 'review') {
     const target = getNotificationTarget(item)
     return target ? { label: '查看审核', href: target } : null
@@ -748,8 +754,10 @@ export function NotificationsClient({
   }
 
   // 进入通知目标页：标记已读 + 记录返回状态 + 跳转。返回 false 表示该通知无跳转目标（仅标记已读）。
-  async function navigateToNotification(item: UnifiedNotification): Promise<boolean> {
-    const target = getNotificationTarget(item)
+  async function navigateToNotification(item: UnifiedNotification, resolvedTarget?: string | null): Promise<boolean> {
+    // The caller may already have resolved a letter target (including a link
+    // rebuilt from the trusted notification key), so prefer it when present.
+    const target = resolvedTarget || getNotificationTarget(item)
     await markRead(item)
     if (!target) return false
     window.sessionStorage.setItem('notifications:return-state', JSON.stringify({
@@ -762,7 +770,7 @@ export function NotificationsClient({
 
   async function openNotification(event: MouseEvent<HTMLAnchorElement>, item: UnifiedNotification) {
     event.preventDefault()
-    await navigateToNotification(item)
+    await navigateToNotification(item, shunLetterHref(item))
   }
 
   async function sendDirectReply(item: UnifiedNotification, payload: NotificationReplyPayload) {
@@ -1008,8 +1016,10 @@ export function NotificationsClient({
   function renderNotification(item: UnifiedNotification) {
     const itemKey = `${item.source}:${item.id}`
     const category = (item.category || 'system') as NotificationCategory
+    // 匿名信使用 SYSTEM 类型，但必须走独立入口（导航到顺大师自动开信）。
+    const letterHref = shunLetterHref(item)
     const systemNotification = isSystemNotification(item)
-    const target = systemNotification ? null : getNotificationTarget(item)
+    const target = systemNotification ? null : (letterHref || getNotificationTarget(item))
     const systemLike = isSystemLikeNotification(item)
     const actorCardFriend = !systemLike ? getNotificationActorCardFriend(item) : null
     const isBirthday = isBirthdayNotification(item)
@@ -1042,7 +1052,7 @@ export function NotificationsClient({
     // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
     function handleCardActivate() {
       if (systemNotification) openSystemNotification(item)
-      else if (target) void navigateToNotification(item)
+      else if (target) void navigateToNotification(item, letterHref || target)
       else void markRead(item)
     }
 
