@@ -854,7 +854,11 @@ jobs:
           $sdk = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { 'C:/Users/Eason/AppData/Local/Android/Sdk' }
           $tools = Get-ChildItem (Join-Path $sdk 'build-tools') -Directory | Sort-Object Name -Descending | Where-Object { (Test-Path (Join-Path $_.FullName 'aapt.exe')) -and (Test-Path (Join-Path $_.FullName 'apksigner.bat')) } | Select-Object -First 1
           if (-not $tools) { throw 'ANDROID_BUILD_TOOLS_NOT_FOUND' }
-          node scripts/verify-android-apk-signature.mjs (Join-Path $tools.FullName 'apksigner.bat') $path '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          $signatureOutput = & (Join-Path $tools.FullName 'apksigner.bat') verify --verbose --print-certs $path 2>&1
+          if ($LASTEXITCODE -ne 0) { throw 'APK_SIGNATURE_INVALID' }
+          $signatureFile = Join-Path $env:RUNNER_TEMP "internal-beta-apksigner-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.txt"
+          [IO.File]::WriteAllText($signatureFile, [string]::Join("`n", $signatureOutput), [Text.UTF8Encoding]::new($false))
+          node scripts/verify-android-apk-signature.mjs --parse-output-file $signatureFile '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
           if ($LASTEXITCODE -ne 0) { throw 'APK_SIGNATURE_FAILED' }
           $badging = & (Join-Path $tools.FullName 'aapt.exe') dump badging $path
           if ($LASTEXITCODE -ne 0 -or -not ($badging -like "package: name='fans.ecfc.app' versionCode='$($pin.versionCode)' versionName='$($pin.versionName)'*")) { throw 'APK_VERSION_METADATA_MISMATCH' }
