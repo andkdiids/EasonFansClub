@@ -26,7 +26,7 @@ test('通知卡片和单条已读按钮先乐观移除未读样式，失败恢�
   assert.match(client, /data\?\.readAt === null[\s\S]*data\?\.readAt[\s\S]*new Date\(data\.readAt\)/)
   assert.match(client, /row\.readAt === optimisticReadAt[\s\S]*item\.isRead, read: item\.read, readAt: item\.readAt/)
   assert.match(client, /fetch\(`\/api\/notifications\/\$\{item\.id\}\/read`[\s\S]*keepalive: true/)
-  assert.match(client, /async function navigateToNotification\(item: UnifiedNotification\)[\s\S]*await markRead\(item\)[\s\S]*router\.push\(target\)/)
+  assert.match(client, /async function navigateToNotification\(item: UnifiedNotification, resolvedTarget\?: string \| null\)[\s\S]*await markRead\(item\)[\s\S]*router\.push\(target\)/)
   assert.match(client, /onClick=\{\(event\) => \{[\s\S]*void markRead\(item\)/)
   assert.match(client, /!isNotificationRead\(item\) \? \([\s\S]*>\s*已读\s*</)
   assert.match(client, /emphasisClass = isBirthday && !isNotificationRead\(item\)/)

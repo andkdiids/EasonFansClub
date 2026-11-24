@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { normalizeActionUrl } from '@/lib/url-safety'
+import { ANONYMOUS_LETTER_ENTRY_LABEL, shunLetterHref } from '@/lib/shun-letter-notification'
 
 type ToastNotification = {
   id: string
@@ -11,6 +12,7 @@ type ToastNotification = {
   content: string | null
   link: string | null
   targetUrl?: string | null
+  key?: string | null
   createdAt: string | Date
 }
 
@@ -75,7 +77,9 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
 
   if (!enabled || !toast) return null
   const createdAt = new Date(toast.createdAt)
-  const targetUrl = normalizeActionUrl(toast.targetUrl) || normalizeActionUrl(toast.link) || '/notifications'
+  // 匿名信通知若经弹出层出现，必须直连信件入口，而不是落到通用 /notifications。
+  const letterHref = shunLetterHref({ key: toast.key, link: toast.link, targetUrl: toast.targetUrl })
+  const targetUrl = letterHref || normalizeActionUrl(toast.targetUrl) || normalizeActionUrl(toast.link) || '/notifications'
 
   return (
     <div className="notification-toast fixed inset-x-4 md:inset-x-auto md:right-6 md:w-96">
@@ -94,7 +98,7 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
           </button>
         </div>
         <Link href={targetUrl} className="mt-3 inline-flex rounded-full bg-brand-950 px-4 py-2 text-xs font-black text-white shadow-sm">
-          查看详情
+          {letterHref ? ANONYMOUS_LETTER_ENTRY_LABEL : '查看详情'}
         </Link>
       </div>
     </div>

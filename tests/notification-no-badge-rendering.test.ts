@@ -60,6 +60,7 @@ test('通知头像资料卡与正文目标交互仍保留', () => {
 
   assert.match(client, /event\.stopPropagation\(\)/)
   assert.match(client, /setSelectedActor\(\{[\s\S]*?friend: actorCardFriend,[\s\S]*?unavailable: item\.actorUnavailable/)
-  assert.match(client, /const target = systemNotification \? null : getNotificationTarget\(item\)/)
-  assert.match(client, /await navigateToNotification\(item\)/)
+  assert.match(client, /const target = systemNotification \? null : \(letterHref \|\| getNotificationTarget\(item\)\)/,
+    '系统通知不跳转；匿名信链接优先，其余仍走通用目标解析')
+  assert.match(client, /await navigateToNotification\(item, [^)]*\)/)
 })

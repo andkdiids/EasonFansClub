@@ -96,3 +96,26 @@ V3.2 延续 V3.1 账务规则，改用全站正常普通账号候选池。专属
 
 - 规则与契约：`npx tsx --test tests/shun-master-anonymous-letter.test.ts`
 - 数据库：`SHUN_MASTER_MYSQL_QA=1` 运行 `tests/shun-master-mysql.test.ts`（隔离 `127.0.0.1:33326/ecfc_shun_qa`）
+
+## 通知入口修复：点击通知真正开信（增量）
+
+线上验收发现：匿名信通知使用 `SYSTEM` 类型，通知中心把 `type === 'SYSTEM'` 的个人通知一律交给通用系统通知弹窗，于是点击后只有「关闭」，没有信封动画、没有留言正文，也没有调查入口。
+
+识别规则（`lib/shun-letter-notification.ts`，无 Prisma 依赖，可安全用于客户端）：
+
+- 只认服务端写入的可信标识：key 前缀 `shun:` + 后缀 `:taken-letter`，或结构化链接 `/shun-master?record=<roundId>&letter=…`。
+- 绝不按中文标题识别，也不猜测 roundId；两者都缺失时不产生任何跳转。
+- 链接缺失但 key 存在时，用 key 里的 roundId 重建链接，因此 #159 之后已生成的历史通知同样可用。
+- 普通顺大师通知（`shun:<id>:taken` / `:captured` / `:recover-actor`，或不带 `letter` 参数的记录链接）不匹配，行为完全不变。
+
+入口改动：
+
+- 通知中心：`isSystemNotification` 先排除匿名信；卡片目标以信件链接优先，智能入口显示「打开神秘来信」；点击卡片或智能入口都先落已读再跳转。
+- 站内弹出层：若匿名信经 `/api/notifications/popup` 出现，CTA 改为「打开神秘来信」并直达信件，不会落到通用通知页（个人通知按设计不进 popup 队列，此处为防御性一致）。
+- 记录页：被顺记录新增「查看神秘来信」，使用同一 `AnonymousLetter` 组件但以 `instant` 模式直接展示信纸，不重播飞入动画；已抓捕/不可抓捕/删除留言的语义不变。
+- 信件组件：主按钮文案改为「立即调查」（已抓捕仍为「查看调查结果」）。
+
+复验入口：
+
+- 契约与源码级回归：`npx tsx --test tests/shun-letter-notification-entry.test.ts`
+- 真实点击（隔离 MySQL + 真实 Next 服务 + Chrome）：`SHUN_LETTER_BROWSER_QA=1` 运行 `tests/shun-letter-notification-browser.test.ts`

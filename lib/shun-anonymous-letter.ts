@@ -106,6 +106,8 @@ export const ANONYMOUS_LETTER_NOTIFICATION = {
   content: '有位神秘的 EF，在顺走挂号费后给你留下了一封信。',
 } as const
 
-export function anonymousLetterNotificationLink(roundId: string) {
-  return `/shun-master?record=${roundId}&side=in&letter=1`
-}
+/**
+ * The link builder lives in the dependency-free notification module so both the
+ * server writer and the client notification surfaces share one definition.
+ */
+export { anonymousLetterNotificationLink } from './shun-letter-notification'

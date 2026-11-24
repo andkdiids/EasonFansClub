@@ -107,12 +107,15 @@ export async function shunPerson(tx: Tx, id: string) {
   return user && { uid: user.uid, nickname: getPublicUserDisplayName(user), avatarUrl: user.avatarUrl }
 }
 
-async function present(tx: Tx, round: Round, side: 'out' | 'in') {
+async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = false) {
   const visible = side === 'out' || round.result !== null
   return {
     id: round.id, amount: round.amount, recovered: round.recovered, result: round.result,
     createdAt: round.createdAt, goldenUntil: round.goldenUntil, canCapture: (round.candidates as string[]).length === 3,
     person: visible ? await shunPerson(tx, side === 'out' ? round.victimId : round.actorId) : null,
+    // Recipient-side flag only: the sender never learns whether a letter exists
+    // from anybody else's view, and it is derived from an ownership-scoped query.
+    ...(side === 'in' ? { hasLetter } : {}),
   }
 }
 
@@ -268,9 +271,19 @@ export async function shunRecords(userId: string, side: 'out' | 'in', cursor?: s
   const rows = await prisma.shunMasterRound.findMany({ where: own, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: 21, ...(anchor ? { cursor: anchor, skip: 1 } : {}) })
   const focused = focus ? await prisma.shunMasterRound.findFirst({ where: { ...own, id: focus } }) : null
-  return { records: await Promise.all(rows.slice(0, 20).map((row) => present(prisma, row, side))),
-    focused: focused && await present(prisma, focused, side), nextCursor: rows.length > 20 ? rows[19].id : null,
-    windowAt: now.toISOString() }
+  const pageRows = rows.slice(0, 20)
+  // One extra ownership-scoped query instead of one per row, and only for the
+  // recipient side: this drives the "read the letter again" entry.
+  const letterRoundIds = side === 'in' && (pageRows.length || focused)
+    ? new Set((await prisma.shunMasterAnonymousLetter.findMany({
+        where: { recipientId: userId, hiddenAt: null,
+          roundId: { in: [...pageRows.map((row) => row.id), ...(focused ? [focused.id] : [])] } },
+        select: { roundId: true },
+      })).map((row) => row.roundId))
+    : new Set<string>()
+  return { records: await Promise.all(pageRows.map((row) => present(prisma, row, side, letterRoundIds.has(row.id)))),
+    focused: focused && await present(prisma, focused, side, letterRoundIds.has(focused.id)),
+    nextCursor: rows.length > 20 ? rows[19].id : null, windowAt: now.toISOString() }
 }
 
 export function shunCapture(userId: string, id: string, guess?: { mode: number; uid: number }) {
