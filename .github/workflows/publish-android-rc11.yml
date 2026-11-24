@@ -799,6 +799,7 @@ jobs:
     needs: internal_beta_source
     defaults:
       run:
+        shell: 'powershell -NoProfile -ExecutionPolicy Bypass -Command ". ''{0}''"'
         working-directory: internal-beta-src-${{ github.run_id }}-${{ github.run_attempt }}
     runs-on: [self-hosted, Windows, X64, rc11-artifact-ingress]
     environment: Production
@@ -813,7 +814,6 @@ jobs:
           name: internal-beta-source-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/internal-beta-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Verify same-run archive before extracting
-        shell: powershell
         working-directory: ${{ github.workspace }}
         env:
           SOURCE_ARCHIVE_HASH: ${{ needs.internal_beta_source.outputs.sha256 }}
@@ -832,7 +832,6 @@ jobs:
           package_json_file: internal-beta-src-${{ github.run_id }}-${{ github.run_attempt }}/package.json
       - run: pnpm install --prod --frozen-lockfile --ignore-scripts
       - name: Verify reviewed APK and publish immutable candidate
-        shell: powershell
         id: publish
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -863,7 +862,6 @@ jobs:
           node scripts/android-rc11-cos-publish.mjs publish-internal-beta
           if ($LASTEXITCODE -ne 0) { throw 'APK_COS_PUBLISH_FAILED' }
       - name: Report verified download
-        shell: powershell
         env:
           APK_URL: ${{ steps.publish.outputs.APK_DOWNLOAD_URL }}
           APK_KEY: ${{ steps.publish.outputs.COS_OBJECT_KEY }}
