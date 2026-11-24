@@ -62,7 +62,7 @@ test('通知头像阻止冒泡，正文仍保留原跳转行为', () => {
 
   assert.match(client, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/)
   assert.match(client, /event\.preventDefault\(\)\n\s+event\.stopPropagation\(\)/)
-  assert.match(client, /else if \(target\) void navigateToNotification\(item\)/)
+  assert.match(client, /else if \(target\) void navigateToNotification\(item, letterHref \|\| target\)/)
 })
 
 test('资料卡主页文案统一为查看主页并保持关系按钮规则', () => {

@@ -9,7 +9,8 @@ test('system notifications open a detail dialog instead of the hash fallback', (
   const dialog = read('components/SystemNotificationDialog.tsx')
 
   assert.match(client, /const systemNotification = isSystemNotification\(item\)/)
-  assert.match(client, /const target = systemNotification \? null : getNotificationTarget\(item\)/)
+  assert.match(client, /const target = systemNotification \? null : \(letterHref \|\| getNotificationTarget\(item\)\)/,
+    '系统通知仍不跳转；匿名信链接优先于通用目标解析')
   assert.match(client, /if \(systemNotification\) openSystemNotification\(item\)/)
   assert.match(client, /void markRead\(item\)[\s\S]*setSelectedSystemNotification\(item\)/)
   assert.match(client, /<SystemNotificationDialog/)
@@ -40,8 +41,9 @@ test('system notification details preserve full multiline text and support safe 
 test('ordinary notification navigation remains separate from system notification details', () => {
   const client = read('app/notifications/NotificationsClient.tsx')
 
-  assert.match(client, /else if \(target\) void navigateToNotification\(item\)/)
-  assert.match(client, /async function navigateToNotification\(item: UnifiedNotification\)[\s\S]*await markRead\(item\)[\s\S]*router\.push\(target\)/)
+  assert.match(client, /else if \(target\) void navigateToNotification\(item, letterHref \|\| target\)/,
+    '普通通知仍走导航；匿名信目标随导航一起下传')
+  assert.match(client, /async function navigateToNotification\(item: UnifiedNotification, resolvedTarget\?: string \| null\)[\s\S]*await markRead\(item\)[\s\S]*router\.push\(target\)/)
   assert.match(client, /if \(isSystemNotification\(item\)\) return null/)
 })
 
