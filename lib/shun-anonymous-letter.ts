@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { shunPerson, type ShunPerson } from './shun-person'
 
 /**
  * Anonymous letters attach one short note to a single Shun round.
@@ -47,6 +48,24 @@ export function anonymousLetterLength(content: string) {
   return [...content].length
 }
 
+export type AnonymousLetterOutcome = 'SUCCESS' | 'FAILED'
+
+/**
+ * Settlement shown inside the letter once the round is decided.
+ *
+ * `person` is the real Shun actor, projected by the very same `shunPerson`
+ * helper the record list uses, and only present when the round is settled. It
+ * is `null` when the account can no longer be shown publicly (deleted or
+ * disabled), in which case the client keeps the anonymous heading instead of
+ * inventing an identity.
+ */
+export type AnonymousLetterResult = {
+  outcome: AnonymousLetterOutcome
+  recovered: number
+  amount: number
+  person: ShunPerson | null
+}
+
 export type AnonymousLetterView = {
   id: string
   roundId: string
@@ -57,6 +76,8 @@ export type AnonymousLetterView = {
   captured: boolean
   /** The round can still be investigated right now. */
   capturable: boolean
+  /** `null` until the round is settled, so identity can never leak early. */
+  result: AnonymousLetterResult | null
   goldenUntil: string
   amount: number
 }
@@ -68,6 +89,10 @@ export type AnonymousLetterView = {
  * answer a uniform 404: an unknown id, a letter addressed to somebody else, a
  * hidden letter and a letter whose round no longer belongs to the caller are
  * indistinguishable to the client. `senderId` is never part of the projection.
+ *
+ * Identity is unlocked by settlement alone: while `result` is still `null` the
+ * payload carries nothing that could reveal who took the fee, and the actor is
+ * only resolved for a settled round — the same rule the record list applies.
  */
 export async function readAnonymousLetter(userId: string, id: string): Promise<AnonymousLetterView | null> {
   if (!/^[a-z0-9]{1,40}$/.test(id)) return null
@@ -78,7 +103,10 @@ export async function readAnonymousLetter(userId: string, id: string): Promise<A
   if (!letter) return null
   const round = await prisma.shunMasterRound.findFirst({
     where: { id: letter.roundId, victimId: userId },
-    select: { id: true, victimId: true, result: true, candidates: true, goldenUntil: true, amount: true },
+    select: {
+      id: true, victimId: true, actorId: true, result: true, recovered: true,
+      candidates: true, goldenUntil: true, amount: true,
+    },
   })
   if (!round || round.victimId !== userId) return null
   if (!letter.readAt) {
@@ -87,14 +115,18 @@ export async function readAnonymousLetter(userId: string, id: string): Promise<A
       where: { id: letter.id, readAt: null }, data: { readAt: new Date() },
     })
   }
+  const outcome: AnonymousLetterOutcome | null = round.result === 'SUCCESS' || round.result === 'FAILED' ? round.result : null
   return {
     id: letter.id,
     roundId: letter.roundId,
     content: letter.content,
     createdAt: letter.createdAt.toISOString(),
     isRead: true,
-    captured: round.result !== null,
-    capturable: round.result === null && (round.candidates as string[]).length === 3,
+    captured: outcome !== null,
+    capturable: outcome === null && (round.candidates as string[]).length === 3,
+    // Resolved only after settlement: the account projection is the shared one,
+    // so the letter and the record list can never disagree about the nickname.
+    result: outcome && { outcome, recovered: round.recovered, amount: round.amount, person: await shunPerson(prisma, round.actorId) },
     goldenUntil: round.goldenUntil.toISOString(),
     amount: round.amount,
   }

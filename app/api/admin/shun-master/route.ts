@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { defaultShunConfig, shunConfigError, shunDay, validateShunConfig } from '@/lib/shun-master-rules'
+import { ACTIVITY_TIER_LABELS, SHUN_ACTIVITY_TIERS } from '@/lib/shun-config'
 import { getShunCandidateSummary, setShunEnabled, ShunError, updateShunConfig } from '@/lib/shun-master'
 
 export const dynamic = 'force-dynamic'
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
   const day = query.get('day') || shunDay(new Date())
   const page = Number(query.get('page') || '1')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isSafeInteger(page) || page < 1 || page > 200) return json({ message: '查询参数无效。' }, 400)
-  const [settings, records, amounts, totals, actors, audit, abuse, [outstanding], refusalAudit] = await Promise.all([
+  const [settings, records, amounts, totals, actors, audit, abuse, [outstanding], refusalAudit, matchSources] = await Promise.all([
     prisma.shunMasterSettings.findUnique({ where: { id: 1 } }),
     prisma.shunMasterRound.findMany({ where: { day }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 50, take: 51,
       select: { id: true, actorId: true, victimId: true, rolled: true, amount: true, createdAt: true,
@@ -33,10 +34,28 @@ export async function GET(request: Request) {
     prisma.userOperationLog.findMany({ where: { category: 'SHUN_MASTER', action: { in: ['LEAVE', 'PROTECT', 'UNPROTECT', 'REJOIN'] } },
       orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 50,
       select: { id: true, userId: true, action: true, occurredAt: true } }),
+    // Admin-only match-source audit of the two-stage lottery: how many transfers
+    // came from the friend pool and which activity tier they were drawn from.
+    prisma.shunMasterRound.groupBy({ by: ['friendHit', 'victimTier'], where: { day }, _count: { _all: true } }),
   ])
   const config = validateShunConfig(settings?.config) || defaultShunConfig
   const reserved = settings?.reserved || 0
   const compensated = settings?.compensated || 0
+  const totalTransfers = matchSources.reduce((sum, row) => sum + row._count._all, 0)
+  const friendHits = matchSources.filter((row) => row.friendHit).reduce((sum, row) => sum + row._count._all, 0)
+  const tiers = Array.from({ length: SHUN_ACTIVITY_TIERS }, (_, tier) => ({
+    tier, label: ACTIVITY_TIER_LABELS[tier],
+    count: matchSources.filter((row) => row.victimTier === tier).reduce((sum, row) => sum + row._count._all, 0),
+  }))
+  const matchStats = {
+    day,
+    total: totalTransfers,
+    friendHits,
+    friendRate: totalTransfers ? Math.round(friendHits / totalTransfers * 1000) / 10 : 0,
+    tiers,
+    // Rounds created before the audit columns existed carry no recorded tier.
+    unknownTier: matchSources.filter((row) => row.victimTier === null).reduce((sum, row) => sum + row._count._all, 0),
+  }
   const [candidatePool, refusalCount, activeRefusals] = await Promise.all([
     getShunCandidateSummary(prisma, shunDay(new Date()), config.victimCap),
     prisma.shunMasterProtection.count({ where: { protected: true } }),
@@ -45,7 +64,8 @@ export async function GET(request: Request) {
   ])
   return json({ config, effectiveEnabled: config.enabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated,
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
-    outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit })
+    outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit,
+    matchStats })
 }
 
 export async function PATCH(request: Request) {

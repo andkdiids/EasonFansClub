@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, type FormEvent } from 'react'
-import type { ShunConfig } from '@/lib/shun-master-rules'
+import { ACTIVITY_TIER_LABELS, shunConfigError, type ShunConfig } from '@/lib/shun-config'
 
 type Summary = {
   rulesVersion: number
@@ -18,6 +18,8 @@ type Summary = {
   refusalCount: number
   activeRefusals: { userId: string; updatedAt: string }[]
   refusalAudit: { id: string; userId: string; action: 'LEAVE' | 'PROTECT' | 'UNPROTECT' | 'REJOIN'; occurredAt: string }[]
+  matchStats: { day: string; total: number; friendHits: number; friendRate: number; unknownTier: number
+    tiers: { tier: number; label: string; count: number }[] }
 }
 const refusalLabels = { LEAVE: '旧版明确退出', PROTECT: '旧版开启保护', UNPROTECT: '旧版关闭保护', REJOIN: '旧版重新参与' }
 const integerFields = [
@@ -49,6 +51,10 @@ export function ShunMasterAdmin() {
   async function save(event: FormEvent) {
     event.preventDefault()
     if (!config || saving) return
+    // The form and the API validate with the same function, so a rejected value
+    // is explained here before the request is even sent.
+    const invalid = shunConfigError(config)
+    if (invalid) { setMessage(invalid); return }
     setSaving(true)
     setMessage('')
     try {
@@ -95,13 +101,24 @@ export function ShunMasterAdmin() {
       <div className="grid gap-2 sm:grid-cols-2">{integerFields.map(([key, title]) => <label className="flex min-w-0 flex-wrap items-center justify-between gap-2" key={key}>{title}
         <input className="w-28 max-w-full border p-2" type="number" min={1} step={1} required value={config[key]}
           onChange={(event) => setConfig({ ...config, [key]: Number(event.target.value) })} />
-      </label>)}</div>
+      </label>)}
+        {/* 后台隐藏机制：只改目标池优先级，不改任何顺取规则 */}
+        <label className="flex min-w-0 flex-wrap items-center justify-between gap-2">好友命中概率（%）
+          <input className="w-28 max-w-full border p-2" aria-label="好友命中概率" type="number" min={0} max={100} step={1} required
+            value={config.friendChance}
+            onChange={(event) => setConfig({ ...config, friendChance: Number(event.target.value) })} />
+        </label>
+      </div>
       {(['probabilities', 'weights'] as const).map((key) => <fieldset className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap" key={key}>
-        <legend>{key === 'probabilities' ? '金额概率（%）' : '活跃度权重（极低到极高，100 = 1.00）'}</legend>
-        {config[key].map((value, index) => <label className="flex min-w-0 items-center gap-2" key={index}>{key === 'probabilities' ? index + 1 : ['极低', '低', '中', '高', '极高'][index]}
-          <input className="w-20 min-w-0 max-w-full border p-2" type="number" step={1} required value={value}
+        <legend>{key === 'probabilities' ? '金额概率（%）' : '活跃度权重（极低到极高，1–300，只表示相对倾向）'}</legend>
+        {config[key].map((value, index) => <label className="flex min-w-0 items-center gap-2" key={index}>{key === 'probabilities' ? index + 1 : ACTIVITY_TIER_LABELS[index]}
+          <input className="w-20 min-w-0 max-w-full border p-2" type="number" step={1} required
+            min={key === 'probabilities' ? 0 : 1} max={key === 'probabilities' ? 100 : 300} value={value}
             onChange={(event) => setConfig({ ...config, [key]: config[key].map((item, position) => position === index ? Number(event.target.value) : item) })} />
         </label>)}
+        <p className="basis-full text-sm text-[var(--foreground-muted)]">{key === 'probabilities'
+          ? '七档任意顺序均可，单档可为 0%，合计必须等于 100%。'
+          : '五档权重互不排序、允许相同，空群体不参与抽取，其余群体按权重重新归一。'}</p>
       </fieldset>)}
       <button className="flat-button-primary w-fit" disabled={saving}>保存配置</button>
     </form>}
@@ -125,6 +142,13 @@ export function ShunMasterAdmin() {
       </section>
       <details><summary>实际金额分布</summary><ul>{data.amounts.map((row) =>
         <li key={row.rolled + ':' + row.amount}>抽中 {row.rolled} · 实付 {row.amount} · {row._count._all} 笔</li>)}</ul></details>
+      <details open><summary>匹配来源与活跃度命中分布 · {data.matchStats.day}</summary>
+        <p>好友池命中 {data.matchStats.friendHits} 笔 / 全部 {data.matchStats.total} 笔 · 实际好友命中比例 {data.matchStats.friendRate}%</p>
+        <p>配置的好友命中概率为 {data.config.friendChance}%，实际比例会因好友池为空或无合格好友而低于该值。</p>
+        <ul>{data.matchStats.tiers.map((row) => <li key={row.tier}>{row.label} · {row.count} 笔</li>)}</ul>
+        {data.matchStats.unknownTier > 0 && <p>另有 {data.matchStats.unknownTier} 笔发生在本次统计上线前的记录，未记录活跃度档位。</p>}
+        <p className="text-sm text-[var(--foreground-muted)]">该统计仅管理员可见，前台不展示好友概率、目标池来源或活跃度抽样细节。</p>
+      </details>
       <div className="min-w-0 overflow-x-auto"><table className="w-full border text-left">
         <thead><tr>{['记录', '顺走入账方', '被顺扣款方', '顺取时间', '抽中 / 实付', '结果', '原额追回 / 平台补偿'].map((title) => <th className="p-2" key={title}>{title}</th>)}</tr></thead>
         <tbody>{data.records.map((row) => <tr key={row.id} className="border-t">
