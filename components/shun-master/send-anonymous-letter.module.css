@@ -1,14 +1,35 @@
-/* Sending animation — same paper/ink/wax language as the reading animation.
-   Only transform/opacity animate, so it stays smooth on low-end phones and in
-   the Android WebView. The paper really folds (3D rotation around the crease)
-   and really slides behind the envelope pocket, and the seal is stamped down by
-   a separate stamp element that then lifts off. */
+/* Sending animation — V4.2: ONE shared 1500ms clock.
+ *
+ * Every beat is a percentage of --clock (1500ms), so the six actions overlap
+ * seamlessly: paper 0–120, fold 100–380, insert 300–700, flap 620–900,
+ * stamp 850–1120, fly 1080–1500. No per-stage CSS transitions are stacked and
+ * no element is unmounted mid-flight. Only transform/opacity animate, so it
+ * stays smooth on low-end phones and in the Android WebView. The paper really
+ * folds in 3D around the crease, really slides behind the V-shaped pocket, and
+ * the seal is pressed by a stamp that comes down, recoils and lifts away. */
 
 .overlay {
+  /* Single source of truth for the timeline, in one place. */
+  --clock: 1500ms;
+  --paper: 0%;        /* 0ms */
+  --paper-end: 8%;    /* 120ms */
+  --fold: 6.667%;     /* 100ms */
+  --fold-end: 25.333%;/* 380ms */
+  --insert: 20%;      /* 300ms */
+  --insert-end: 46.667%; /* 700ms */
+  --seal: 41.333%;    /* 620ms */
+  --seal-end: 60%;    /* 900ms */
+  --stamp: 56.667%;   /* 850ms */
+  --stamp-end: 74.667%; /* 1120ms */
+  --fly: 72%;         /* 1080ms */
+  --fly-end: 100%;    /* 1500ms */
+
   position: fixed;
   inset: 0;
-  /* Above the fixed mobile bottom nav (--layer-mobile-nav: 99999). */
-  z-index: 100000;
+  /* Above the fixed mobile bottom nav and every app layer (friend window,
+     dialog, profile). The portal puts this on <body>, outside any transform
+     stacking context, so z-index is honoured against the whole page. */
+  z-index: 2147483000;
   display: grid;
   place-items: center;
   align-content: center;
@@ -28,7 +49,7 @@
   position: absolute;
   inset: 0;
   background: #1b1a1799;
-  animation: fadeIn .28s ease both;
+  animation: scrimIn 150ms ease-out both;
 }
 
 /* ---------- stage ---------- */
@@ -45,10 +66,9 @@
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
-}
-
-.desk[data-stage='flying'] .envelope {
-  animation: flyOut .7s cubic-bezier(.34, .06, .5, 1) both;
+  transform: translate3d(0, 0, 0);
+  opacity: 1;
+  animation: flyOut var(--clock) linear both;
 }
 
 /* ---------- envelope body ---------- */
@@ -61,7 +81,6 @@
   border: 1.5px solid #1b1a17;
   box-shadow: 0 18px 42px -24px #1b1a17b8;
   opacity: 1;
-  transition: opacity .3s ease;
 }
 
 /* The V-shaped front: everything below the fold line hides the paper. */
@@ -72,22 +91,8 @@
   background: linear-gradient(#f3ecdb, #ece2cf);
   clip-path: polygon(0 0, 50% 42%, 100% 0, 100% 100%, 0 100%);
   opacity: 0;
-  transition: opacity .3s ease;
+  animation: pocketIn var(--clock) linear both;
 }
-
-/* The envelope waits behind the paper from the first beat; only its pocket
-   front is withheld, so the paper is uncovered while it is still outside. */
-.desk[data-stage='paper'] .pocket,
-.desk[data-stage='folding'] .pocket { opacity: 0; }
-
-.desk[data-stage='inserting'] .envBack,
-.desk[data-stage='sealing'] .envBack,
-.desk[data-stage='stamping'] .envBack,
-.desk[data-stage='flying'] .envBack,
-.desk[data-stage='inserting'] .pocket,
-.desk[data-stage='sealing'] .pocket,
-.desk[data-stage='stamping'] .pocket,
-.desk[data-stage='flying'] .pocket { opacity: 1; }
 
 /* ---------- letter paper ---------- */
 
@@ -99,9 +104,9 @@
   width: min(228px, 66vw);
   height: 160px;
   margin-bottom: 10px;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
   transform-style: preserve-3d;
-  transition: transform .65s cubic-bezier(.42, .05, .35, 1), opacity .3s ease;
+  animation: paperJourney var(--clock) linear both;
 }
 
 .sheetUpper,
@@ -124,14 +129,16 @@
   box-shadow: 0 14px 30px -22px #1b1a17aa;
 }
 
-/* The crease stays visible after the fold, so the result still reads as paper. */
+/* The crease stays visible after the fold, so the result still reads as paper.
+   One 3D rotation on the shared clock; hold the open state until the fold starts. */
 .sheetLower {
   top: 50%;
   height: 50%;
   border-top: 1.5px dashed #b8ab95;
   transform-origin: top center;
   backface-visibility: visible;
-  transition: transform .65s cubic-bezier(.5, .02, .3, 1);
+  transform: rotateX(0deg);
+  animation: creaseFold var(--clock) linear both;
 }
 
 .ink {
@@ -141,30 +148,8 @@
   line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  animation: inkIn .34s ease both;
+  animation: inkIn 200ms ease-out both;
 }
-
-/* Stage 1 → 2: the blank lower half lifts over the written half. */
-.desk[data-stage='folding'] .sheetLower,
-.desk[data-stage='inserting'] .sheetLower,
-.desk[data-stage='sealing'] .sheetLower,
-.desk[data-stage='stamping'] .sheetLower,
-.desk[data-stage='flying'] .sheetLower { transform: rotateX(-176deg); }
-
-.desk[data-stage='paper'] .sheet { animation: sheetIn .5s cubic-bezier(.22, .68, .32, 1) both; }
-
-/* Stage 3: the folded paper slides down behind the pocket and is covered. */
-.desk[data-stage='inserting'] .sheet,
-.desk[data-stage='sealing'] .sheet,
-.desk[data-stage='stamping'] .sheet,
-.desk[data-stage='flying'] .sheet {
-  /* Slides down until it is fully behind the envelope pocket. */
-  transform: translateX(-50%) translateY(calc(100% + 24px));
-}
-
-.desk[data-stage='sealing'] .sheet,
-.desk[data-stage='stamping'] .sheet,
-.desk[data-stage='flying'] .sheet { opacity: 0; }
 
 /* ---------- flap ---------- */
 
@@ -182,13 +167,8 @@
   transform: rotateX(-172deg);
   opacity: 0;
   backface-visibility: visible;
-  transition: transform .5s cubic-bezier(.45, .05, .3, 1), opacity .3s ease;
+  animation: flapClose var(--clock) linear both;
 }
-
-.desk[data-stage='inserting'] .flap { opacity: 1; }
-.desk[data-stage='sealing'] .flap,
-.desk[data-stage='stamping'] .flap,
-.desk[data-stage='flying'] .flap { opacity: 1; transform: rotateX(0deg); }
 
 /* ---------- wax seal ---------- */
 
@@ -215,11 +195,8 @@
     0 3px 8px -2px #00000066;
   opacity: 0;
   transform: scale(.5);
+  animation: waxSet var(--clock) linear both;
 }
-
-/* Appears while the stamp is pressing and stays for the flight. */
-.desk[data-stage='stamping'] .wax { animation: waxSet .7s ease-out both; }
-.desk[data-stage='flying'] .wax { opacity: 1; transform: scale(1); }
 
 /* ---------- stamp ---------- */
 
@@ -240,10 +217,9 @@
   background: radial-gradient(circle at 36% 28%, #b8485c 0%, #8a2939 52%, #5f1a28 100%);
   box-shadow: inset 0 0 0 3px #f7f1e3cc, 0 10px 18px -8px #00000099, 0 0 0 1px #4b111d;
   opacity: 0;
-  transform: translateY(-180%) scale(1.35);
+  transform: translate3d(0, -180%, 0) scale(1.35);
+  animation: stampPress var(--clock) linear both;
 }
-
-.desk[data-stage='stamping'] .stamp { animation: stampPress .7s cubic-bezier(.3, .7, .4, 1) both; }
 
 /* ---------- chrome ---------- */
 
@@ -259,54 +235,111 @@
   white-space: nowrap;
 }
 
+/* Fixed to the top-right of the portal layer, separate from the envelope:
+   never rotates, scales or flies with it. ≥44×44px, safe-area aware, opaque
+   high-contrast background, and above every other element in the overlay. */
 .skip {
-  min-height: 32px;
-  padding: 5px 18px;
-  border: 1px solid #efe5cf66;
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  right: calc(10px + env(safe-area-inset-right, 0px));
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #efe5cf;
   border-radius: 999px;
-  background: #1b1a1799;
-  color: #efe5cf;
+  background: #1b1a17f2;
+  color: #fffaf0;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.2;
   cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* ---------- motion ---------- */
+/* ---------- one shared timeline (percentages of --clock) ---------- */
 
-@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes scrimIn { from { opacity: 0 } to { opacity: 1 } }
+
 @keyframes inkIn { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
 
-@keyframes sheetIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(.94) }
-  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) }
+/* Paper appears (0–120), holds, then slides down behind the pocket (300–700)
+   and stays behind it for the rest of the timeline (no residue: it is covered,
+   then flies with the envelope as one object). */
+@keyframes paperJourney {
+  0% { opacity: 0; transform: translate3d(-50%, -12px, 0) scale(.94); }
+  8% { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
+  20% { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
+  46.667% { opacity: 1; transform: translate3d(-50%, calc(100% + 24px), 0) scale(1); }
+  100% { opacity: 1; transform: translate3d(-50%, calc(100% + 24px), 0) scale(1); }
 }
 
-/* The wax grows out of the stamp print: soft, slight overshoot, then crisp. */
+/* Fold is fully done by 380ms — before the pocket starts covering it at 300ms
+   the paper is still outside the envelope, and by the time the pocket is opaque
+   (700ms) the fold has long finished, so no "fold hidden mid-way" artifact. */
+@keyframes creaseFold {
+  0%, 6.667% { transform: rotateX(0deg); }
+  25.333%, 100% { transform: rotateX(-176deg); }
+}
+
+/* Pocket front fades in only AFTER the fold is complete (380ms), so a paper
+   still unfolding can never be covered; it then genuinely occludes (not fades
+   out) the folded sheet as it slides in 380→700ms. */
+@keyframes pocketIn {
+  0%, 25.333% { opacity: 0; }
+  46.667%, 100% { opacity: 1; }
+}
+
+/* Flap opens (visible, tilted back) while the paper inserts, then closes
+   620–900ms — before any wax appears at 850ms+. */
+@keyframes flapClose {
+  0% { opacity: 0; transform: rotateX(-172deg); }
+  20%, 41.333% { opacity: 1; transform: rotateX(-172deg); }
+  60%, 100% { opacity: 1; transform: rotateX(0deg); }
+}
+
+/* Wax grows out of the stamp print only after the flap is closed (620–900ms):
+   it appears as the stamp presses (~1020ms), overshoots, then settles by 1120ms
+   so it is fully formed before the envelope flies away. */
 @keyframes waxSet {
-  0% { opacity: 0; transform: scale(.55); }
-  35% { opacity: 1; transform: scale(1.08); }
-  60% { opacity: 1; transform: scale(.97); }
-  100% { opacity: 1; transform: scale(1); }
+  0%, 62% { opacity: 0; transform: scale(.55); }
+  68% { opacity: 1; transform: scale(1.08); }
+  71% { opacity: 1; transform: scale(.97); }
+  74.667%, 100% { opacity: 1; transform: scale(1); }
 }
 
-/* Down, press, short recoil, lift away — the seal stays behind on the paper. */
+/* Down, press, short recoil, lift away — all inside 850–1120ms. The seal is
+   left behind on the paper; the stamp is gone before the fly-out takes over. */
 @keyframes stampPress {
-  0% { opacity: 0; transform: translateY(-190%) scale(1.4); }
-  30% { opacity: 1; transform: translateY(-18%) scale(1.12); }
-  46% { opacity: 1; transform: translateY(0) scale(1); }
-  58% { opacity: 1; transform: translateY(0) scale(.94); }
-  72% { opacity: 1; transform: translateY(-8%) scale(1.02); }
+  0%, 56.667% { opacity: 0; transform: translateY(-190%) scale(1.4); }
+  62% { opacity: 1; transform: translateY(-18%) scale(1.12); }
+  68% { opacity: 1; transform: translateY(0) scale(1); }
+  71% { opacity: 1; transform: translateY(0) scale(.94); }
+  74.667% { opacity: 0; transform: translateY(-150%) scale(1.08); }
   100% { opacity: 0; transform: translateY(-150%) scale(1.08); }
 }
 
+/* The sealed envelope (wax already set at 1120ms) flies out 1080→1500ms. */
 @keyframes flyOut {
-  0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
-  26% { transform: translate(4px, -14px) rotate(-3deg) scale(1.03); opacity: 1; }
-  100% { transform: translate(72%, -96%) rotate(20deg) scale(.2); opacity: 0; }
+  0%, 72% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: 1; }
+  82% { transform: translate3d(4px, -14px, 0) rotate(-3deg) scale(1.03); opacity: 1; }
+  100% { transform: translate3d(72%, -96%, 0) rotate(20deg) scale(.2); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sheet, .sheetLower, .flap, .pocket, .envBack, .wax, .stamp, .scrim, .ink { animation: none !important; transition: none !important; }
-  .desk[data-stage] .wax { opacity: 1; transform: scale(1); }
-  .desk[data-stage] .flap { transform: rotateX(0deg); opacity: 1; }
+  .sheet, .sheetLower, .flap, .pocket, .envBack, .wax, .stamp, .scrim, .ink, .envelope {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* Show the settled, sealed envelope with no motion at all. */
+  .sheet { opacity: 0; }
+  .sheetLower { transform: rotateX(-176deg); }
+  .pocket { opacity: 1; }
+  .flap { transform: rotateX(0deg); opacity: 1; }
+  .wax { opacity: 1; transform: scale(1); }
+  .envelope { transform: none; opacity: 1; }
 }

@@ -205,9 +205,12 @@ test('the composer enforces the documented input rules', () => {
 // ------------------------------------------------------------ sending animation
 
 test('the sending animation follows the six documented beats', () => {
+  // V4.2: beats are windows on one shared TIMELINE clock, not staged transitions.
   for (const beat of ['paper', 'folding', 'inserting', 'sealing', 'stamping', 'flying']) {
-    assert.match(sender, new RegExp(`'${beat}'`), `必须实现 ${beat} 分镜`)
-    assert.match(senderCss, new RegExp(`data-stage='${beat}'`), `样式必须覆盖 ${beat} 分镜`)
+    assert.match(sender, new RegExp(`${beat}: \\{ start: \\d+, end:`), `必须实现 ${beat} 分镜`)
+  }
+  for (const keyframe of ['paperJourney', 'creaseFold', 'pocketIn', 'flapClose', 'waxSet', 'stampPress', 'flyOut']) {
+    assert.match(senderCss, new RegExp(`@keyframes ${keyframe} \\{`), `样式必须覆盖 ${keyframe} 关键帧`)
   }
   assert.match(senderCss, /#7b2233/, '火漆必须是深酒红色')
   assert.match(senderCss, /@media \(prefers-reduced-motion: reduce\)/, '必须兼容减少动画偏好')

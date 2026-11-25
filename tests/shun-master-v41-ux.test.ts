@@ -98,13 +98,16 @@ test('a saved sort order actually reorders the merged navigation list', () => {
 })
 
 // ------------------------------------------------------------- animation
+// V4.2 moved the motion onto one shared 1500ms CSS keyframe clock. The detailed
+// timeline/seamlessness/skip contracts live in shun-master-v42-animation.test.ts;
+// these keep the original V4.1 invariants expressed against the new architecture.
 
 test('the sending animation folds the paper in 3D instead of squashing it', () => {
   assert.match(sendCss, /\.sheetLower \{[\s\S]{0,240}?transform-origin: top center/, '必须以折痕为轴翻转')
-  assert.match(sendCss, /\.desk\[data-stage='folding'\] \.sheetLower[^{]*\{[^}]*rotateX\(-176deg\)/,
+  assert.match(sendCss, /@keyframes creaseFold[\s\S]*?rotateX\(-176deg\)/,
     '折叠必须是真实的 3D 旋转，而不是 scaleY 压扁')
   assert.match(sendCss, /perspective: 900px/, '必须提供真实透视')
-  assert.doesNotMatch(sendCss, /\.desk\[data-stage='folding'\] \.sheet \{[^}]*scaleY\(/, '不得用压扁伪装折叠')
+  assert.doesNotMatch(sendCss, /@keyframes creaseFold[\s\S]*?scaleY\(/, '不得用压扁伪装折叠')
 })
 
 test('the paper really slides behind the envelope pocket', () => {
@@ -113,30 +116,30 @@ test('the paper really slides behind the envelope pocket', () => {
   assert.ok(zIndexOf('.sheet') < zIndexOf('.pocket'), '信纸必须在信封口袋之后，才会被真正遮住')
   assert.ok(zIndexOf('.pocket') < zIndexOf('.flap'), '翻盖必须盖住袋口')
   assert.match(sendCss, /\.pocket \{[^}]*clip-path: polygon\(0 0, 50% 42%/, '口袋必须是 V 形开口')
-  assert.match(sendCss, /\.desk\[data-stage='inserting'\] \.sheet,[\s\S]{0,200}?transform: translateX\(-50%\) translateY\(calc\(100% \+ 24px\)\)/,
-    '装入阶段必须真的向下滑入口袋')
-  assert.doesNotMatch(sendCss, /\.desk\[data-stage='inserting'\] \.sheet \{[^}]*opacity: 0/,
-    '装入过程中不得直接淡出假装装入')
+  assert.match(sendCss, /@keyframes paperJourney[\s\S]*?translate3d\(-50%, calc\(100% \+ 24px\), 0\)/,
+    '装入阶段必须真的向下滑入口袋后方')
+  const journey = /@keyframes paperJourney \{([\s\S]*?)\n\}/.exec(sendCss)?.[1] ?? ''
+  // Insert window is 20%→46.667%: opacity must be 1 at both ends (slides, not fades).
+  assert.match(journey, /20% \{ opacity: 1;/, '装入起点必须不透明')
+  assert.match(journey, /46\.667% \{ opacity: 1;/, '装入终点必须不透明，不得淡出假装装入')
 })
 
 test('the flap closes, a stamp presses and leaves wax behind', () => {
-  assert.match(sendCss, /\.desk\[data-stage='sealing'\] \.flap[^{]*\{[^}]*rotateX\(0deg\)/, '翻盖必须真的转下来')
-  assert.match(sendCss, /\.desk\[data-stage='stamping'\] \.stamp \{ animation: stampPress/, '必须有独立的印章下落动作')
-  assert.match(sendCss, /@keyframes stampPress \{[\s\S]*?translateY\(0\) scale\(\.94\)[\s\S]*?opacity: 0;/,
+  assert.match(sendCss, /@keyframes flapClose[\s\S]*?rotateX\(0deg\)/, '翻盖必须真的转下来')
+  assert.match(sendCss, /@keyframes stampPress[\s\S]*?translateY\(0\) scale\(\.94\)[\s\S]*?opacity: 0;/,
     '印章必须压下后抬起离场')
-  assert.match(sendCss, /\.desk\[data-stage='stamping'\] \.wax \{ animation: waxSet/, '印章落下后必须留下火漆')
+  assert.match(sendCss, /@keyframes waxSet[\s\S]*?scale\(1\.08\)/, '印章落下后必须留下火漆')
   assert.match(sendCss, /\.wax \{[\s\S]*?radial-gradient\(circle at 34% 30%, #a33a4c/, '火漆必须是深酒红渐变')
   assert.match(sendTsx, /<div className=\{styles\.wax\}[^>]*><span>E<\/span>/, '封蜡中央必须有 E 标识')
 })
 
-test('the sealed envelope flies away and the timeline stays skippable', () => {
-  assert.match(sendCss, /\.desk\[data-stage='flying'\] \.envelope \{\s*animation: flyOut/)
-  assert.match(sendCss, /@keyframes flyOut \{[\s\S]*?translate\(72%, -96%\) rotate\(20deg\) scale\(\.2\)/,
+test('the sealed envelope flies away within 1500ms and the timeline stays skippable', () => {
+  assert.match(sendCss, /\.envelope \{[\s\S]{0,200}?animation: flyOut var\(--clock\)/)
+  assert.match(sendCss, /@keyframes flyOut \{[\s\S]*?translate3d\(72%, -96%, 0\) rotate\(20deg\) scale\(\.2\)/,
     '飞出必须朝右上方、带旋转并缩小')
-  assert.match(sendCss, /\.desk\[data-stage='flying'\] \.wax \{ opacity: 1; transform: scale\(1\); \}/,
+  assert.match(sendCss, /@keyframes waxSet[\s\S]*?74\.667%, 100% \{ opacity: 1; transform: scale\(1\); \}/,
     '飞出的必须是带火漆的信封')
-  const total = [...sendTsx.matchAll(/:\s*(\d+),/g)].reduce((sum, match) => sum + Number(match[1]), 0)
-  assert.ok(total >= 3000 && total <= 4200, `动画总时长应在 3–4 秒之间，当前 ${total}ms`)
+  assert.match(sendTsx, /export const ANIMATION_MS = 1500/, '总时长不得超过 1500ms')
   assert.match(sendTsx, /跳过动画/)
   assert.match(sendCss, /@media \(prefers-reduced-motion: reduce\)/)
   assert.doesNotMatch(sendTsx, /fetch\(|@\/lib\/shun-master/, '动画组件不得调用任何接口')

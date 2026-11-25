@@ -270,6 +270,11 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
     try {
       const outcome = await api<{ status: string }>(`round/${round.id}/letter`, { message: content })
       if (outcome.status !== 'SENT_LETTER') throw new RequestError('本次通知已发送，无法再补充匿名留言。', 'ALREADY_NOTIFIED')
+      // Close the native dialog now, not in the later effect: <dialog>.showModal()
+      // enters the browser top layer, which would sit above the portalled skip
+      // button for a frame. Closing here guarantees the button is clickable from
+      // the first animation frame.
+      dialog.current?.close()
       setStep('animate')
       await Promise.all([loadStatus(), loadRecords()])
     } catch (error) {
