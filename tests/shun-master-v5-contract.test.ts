@@ -174,7 +174,8 @@ test('the capture result follows the required wording and flows', () => {
   // 关闭 counts as "no note" and the plain arrest notice is still delivered.
   assert.match(client, /function closeCaptureResult\(\)[\s\S]{0,700}?void sendCapturePlain\(\)/)
   // A permanent opt-out keeps the historical flow but offers no new take.
-  assert.match(client, /status\?\.optedOut \? '已退出顺大师' : status\?\.remaining \? '再顺一手'/)
+  // V6 inserts the closed-hours wording between the two original branches.
+  assert.match(client, /status\?\.optedOut \? '已退出顺大师' : !openNow \? '休息中 💤'\s*\r?\n?\s*: status\?\.remaining \? '再顺一手'/)
 })
 
 // ------------------------------------------------------------ bonus safety

@@ -23,6 +23,10 @@ type Summary = {
   notifyStats: { day: string; pending: number; plain: number; letter: number; auto: number; retryAttempts: number }
   // V5: cumulative recovery-bonus audit (admin-only).
   bonusStats: { recoveredCount: number; bonusCount: number; bonusRate: number; bonusTotal: number; recoveredTotal: number }
+  // V6: the daily window as the server judges it right now.
+  openHoursNow: { openHoursEnabled: boolean; openTime: string; closeTime: string; label: string
+    open: boolean; nextOpenAt: string | null }
+  serverNow: string
 }
 const refusalLabels = { LEAVE: '旧版明确退出', PROTECT: '旧版开启保护', UNPROTECT: '旧版关闭保护', REJOIN: '旧版重新参与' }
 const integerFields = [
@@ -100,6 +104,34 @@ export function ShunMasterAdmin() {
           <button type="button" className="flat-button-primary" disabled={saving || effectiveEnabled} onClick={() => void setEnabled(true)}>启用顺大师</button>
           <button type="button" className="border px-3 py-2" disabled={saving || !data?.config.enabled} onClick={() => void setEnabled(false)}>关闭顺大师</button>
         </div>
+      </section>
+      {/* 每日开放时间：只限制新的顺取，历史记录、抓捕调查与已有留言不受影响 */}
+      <section className="grid gap-2 border-b pb-4" aria-label="每日开放时间">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold">每日开放时间</h2>
+          <strong aria-live="polite">{!data?.openHoursNow ? '—'
+            : data.openHoursNow.openHoursEnabled ? (data.openHoursNow.open ? '当前开放中' : '当前休息中') : '全天开放'}</strong>
+        </div>
+        <label className="flex flex-wrap items-center gap-2">
+          <input type="checkbox" checked={config.openHoursEnabled}
+            onChange={(event) => setConfig({ ...config, openHoursEnabled: event.target.checked })} />
+          启用开放时间限制
+        </label>
+        <div className="flex flex-wrap gap-3">
+          <label className="flex min-w-0 flex-wrap items-center gap-2">开始时间
+            <input className="border p-2" type="time" step={60} required aria-label="每日开放开始时间"
+              value={config.openTime} onChange={(event) => setConfig({ ...config, openTime: event.target.value })} />
+          </label>
+          <label className="flex min-w-0 flex-wrap items-center gap-2">结束时间
+            <input className="border p-2" type="time" step={60} required aria-label="每日开放结束时间"
+              value={config.closeTime} onChange={(event) => setConfig({ ...config, closeTime: event.target.value })} />
+          </label>
+        </div>
+        <p className="text-sm">时区：北京时间（UTC+8）</p>
+        <p className="text-sm text-[var(--foreground-muted)]">开启后，用户只能在设定时间内发起新的顺取。历史记录、抓捕调查及已有留言不受限制。</p>
+        <p className="text-sm text-[var(--foreground-muted)]">开放区间为左闭右开：{config.openTime || '--:--'} ≤ 当前北京时间 &lt; {config.closeTime || '--:--'}。
+          支持跨午夜（如 22:00–02:00）；开始与结束时间相同时无法保存。</p>
+        <button className="flat-button-primary w-fit" disabled={saving}>保存开放时间</button>
       </section>
       <div className="grid gap-2 sm:grid-cols-2">{integerFields.map(([key, title]) => <label className="flex min-w-0 flex-wrap items-center justify-between gap-2" key={key}>{title}
         <input className="w-28 max-w-full border p-2" type="number" min={1} step={1} required value={config[key]}

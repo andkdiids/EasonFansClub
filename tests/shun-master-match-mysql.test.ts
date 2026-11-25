@@ -23,6 +23,8 @@ const DAY = 86_400_000
 
 const baseConfig = {
   ...defaultShunConfig,
+  // V6's window has its own suite; matching must not depend on the wall clock.
+  openHoursEnabled: false,
   attempts: 7,
   victimCap: 20,
   goldenMinutes: 10,
@@ -317,8 +319,12 @@ test('player-facing surfaces never expose the match source', {
   await shunSendNotification(actor.id, round.id, '不要泄露来源')
   const status = await shunStatus(actor.id)
   // `optedOut` is a player-visible participation state, not a match-source detail.
-  assert.deepEqual(Object.keys(status).sort(), ['attempts', 'balance', 'enabled', 'goldenMinutes', 'optedOut', 'received',
-    'remaining', 'serverNow', 'victimCap'])
+  // `openHours` (V6) is the published daily window — its own copy needs it, and
+  // it contains no match-source, probability or audience detail.
+  assert.deepEqual(Object.keys(status).sort(), ['attempts', 'balance', 'enabled', 'goldenMinutes', 'openHours', 'optedOut',
+    'received', 'remaining', 'serverNow', 'victimCap'])
+  assert.deepEqual(Object.keys(status.openHours).sort(),
+    ['closeTime', 'label', 'nextOpenAt', 'open', 'openHoursEnabled', 'openTime'])
   assert.equal(JSON.stringify(status).includes('friendChance'), false, '状态接口不得携带好友命中概率')
   assert.equal(JSON.stringify(status).includes('permanentlyOptedOutAt'), false, '状态接口不得泄露内部时间戳')
   const summary = await getShunCandidateSummary(prisma, shunDay(new Date()), baseConfig.victimCap)

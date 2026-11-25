@@ -25,8 +25,11 @@ import { CAPTURE_RESULT_NOTIFICATION, captureInvestigationLink, captureNotifyKey
 
 const qa = process.env.SHUN_V5_MYSQL_QA === '1'
 
+// The daily window is V6 territory; these suites settle takes at any wall-clock
+// hour, so they run with the restriction switched off.
 const baseConfig = {
   ...defaultShunConfig,
+  openHoursEnabled: false,
   attempts: 7, victimCap: 20, goldenMinutes: 10,
   weights: [100, 100, 100, 100, 100], friendChance: 0, bonusChance: 0,
 }

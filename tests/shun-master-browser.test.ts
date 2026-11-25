@@ -52,7 +52,9 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
     const legacy = await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, budget: 0 }, 'PATCH')
     assert.equal(legacy.status, 200)
     assert.ok(!('budget' in legacy.body.config))
-    assert.equal((await request('/api/admin/shun-master', adminToken, defaultShunConfig, 'PATCH')).status, 200)
+    // V6's daily window is covered by its own suite: keep this one clock-free.
+    assert.equal((await request('/api/admin/shun-master', adminToken,
+      { ...defaultShunConfig, openHoursEnabled: false }, 'PATCH')).status, 200)
     assert.equal((await request('/api/shun-master/attempt', actorToken, { requestId: randomUUID() })).body.code, 'DISABLED')
     const refusal = await prisma.shunMasterProtection.create({ data: { userId: actor.id, protected: true } })
     await prisma.userOperationLog.create({ data: { userId: actor.id, category: 'SHUN_MASTER', action: 'LEAVE',
@@ -81,7 +83,9 @@ test('real HTTP and browser exercise the public pool, result modal, capture and 
     const friendError = await request('/api/admin/shun-master', adminToken, { ...defaultShunConfig, enabled: false, friendChance: 101 }, 'PATCH')
     assert.equal(friendError.status, 400)
     assert.match(friendError.body.message, /好友命中概率/)
-    assert.equal((await request('/api/admin/shun-master', adminToken, defaultShunConfig, 'PATCH')).status, 200)
+    // V6's daily window is covered by its own suite: keep this one clock-free.
+    assert.equal((await request('/api/admin/shun-master', adminToken,
+      { ...defaultShunConfig, openHoursEnabled: false }, 'PATCH')).status, 200)
     const beforeNoticeId = (await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId
     assert.equal(await prisma.systemNotification.count({ where: { title: { contains: '顺大师' } } }), 0)
     const beforeToggleLogs = await prisma.userOperationLog.count({ where: { category: 'SHUN_MASTER', action: 'CONFIG_UPDATE' } })

@@ -58,7 +58,7 @@ test('anonymous letter stays readable in light and midnight mode', {
   await prisma.shunMasterProtection.createMany({
     data: [...outsiders, admin, actor].map(({ id: userId }) => ({ userId, protected: true })), skipDuplicates: true,
   })
-  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false })
+  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false, openHoursEnabled: false })
   await setShunEnabled(admin.id, true)
   const take = await shunAttempt(actor.id, randomUUID())
   assert.equal(take.person?.uid, victim.uid)
@@ -154,7 +154,7 @@ test('sending animation is captured beat by beat on a phone viewport', {
   await prisma.shunMasterProtection.createMany({
     data: [...outsiders, admin].map(({ id: userId }) => ({ userId, protected: true })), skipDuplicates: true,
   })
-  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false })
+  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false, openHoursEnabled: false })
   await setShunEnabled(admin.id, true)
 
   const browser = await chromium.launch({ ...(process.env.SHUN_MASTER_BROWSER_PATH
