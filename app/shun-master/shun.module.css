@@ -19,6 +19,12 @@
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .filters select,.filters input{background:transparent;color:#171717;border:1px solid #9b7c52;padding:5px;max-width:100%;min-width:0;color-scheme:light}
 .modal{box-sizing:border-box;width:min(420px,calc(100% - 32px));max-height:calc(100dvh - 48px - env(safe-area-inset-top) - env(safe-area-inset-bottom));margin:auto;padding:0;background:#f1e7d5;color:#171717;border:1px solid #9b7c52}
+/* 黑夜主题会给所有 dialog 元素重新上色（白色文字 + 深色底），而结果弹窗是米色纸面：
+   把纸面配色放到不会被该全局规则命中的 .modalBody 上，并显式声明每类文字颜色。 */
+.modalBody{background:#f1e7d5;color:#171717}
+.modalBody h2,.modalBody strong,.modalBody p{color:#171717}
+.modalBody .letterSent{color:#7b2233}
+.modalBody .uid,.modalBody .composeMeta{color:#585049}
 .modal::backdrop{background:#171717a8}
 .modalBody{display:grid;gap:16px;text-align:center;justify-items:center;padding:24px 16px}
 .modal h2{font-size:24px;font-weight:650}
@@ -60,3 +66,23 @@
 .uid{margin:0;font-size:12px;color:#585049;font-variant-numeric:tabular-nums}
 .notice{margin:0 0 10px;padding:10px 11px;background:#e8f0e2;color:#2f441f}
 @media(max-width:420px){.composeActions{grid-template-columns:minmax(0,1fr)}}
+
+/* ---- permanent opt-out (only inside the rules <details>, default collapsed) ---- */
+.optOutArea{margin:16px 0 0;padding-top:14px;border-top:1px solid #c9b391}
+.optOutArea p{margin:0 0 6px;font-size:14px;color:#585049;line-height:1.6}
+.optOutLink{min-height:36px;padding:4px 0;border:0;background:transparent;color:#7b2233;font:inherit;font-size:13px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.optOutDone{margin:0!important;font-size:14px;color:#585049}
+.optedOut{display:flex;flex-direction:column;gap:4px;margin:0;padding:12px;border:1px solid #c9b391;background:#f1e7d5;color:#171717}
+.optedOut strong{font-size:15px}
+.optedOut span{font-size:13px;color:#585049}
+.optOutOverlay{position:fixed;inset:0;z-index:100000;display:grid;place-items:center;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));background:#171717b3}
+.optOutCard{box-sizing:border-box;width:min(420px,100%);max-height:calc(100dvh - 40px);overflow:auto;padding:22px 20px;border:1px solid #9b7c52;background:#f1e7d5;color:#171717}
+.optOutCard h2{margin:0 0 12px;font-size:18px;color:#171717}
+.optOutCard p{margin:0 0 12px;font-size:14px;line-height:1.7;color:#171717}
+.optOutWarning{padding:10px 12px;border:1px solid #7b2233;background:#f7e9ec;color:#7b2233!important;font-weight:700}
+.optOutAck{display:flex;align-items:flex-start;gap:8px;margin:14px 0;font-size:14px;color:#171717;cursor:pointer}
+.optOutAck input{margin-top:2px;width:18px;height:18px;accent-color:#7b2233;flex:none}
+.optOutCard .tabs{margin-top:4px}
+.optOutCard .tabs button{min-height:44px;border:1px solid #9b7c52;background:transparent;color:#171717;font:inherit;font-size:14px}
+.optOutCard .tabs button:disabled{opacity:.55}
+.optOutCard .tabs .primary{background:#171717;color:#f1e7d5;border-color:#171717;font-weight:650}

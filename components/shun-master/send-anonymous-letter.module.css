@@ -1,6 +1,8 @@
-/* Sending animation — same纸张/线稿/火漆 language as the reading animation.
-   Only transform/opacity animate, so it stays smooth on low-end phones and
-   inside the Android WebView. */
+/* Sending animation — same paper/ink/wax language as the reading animation.
+   Only transform/opacity animate, so it stays smooth on low-end phones and in
+   the Android WebView. The paper really folds (3D rotation around the crease)
+   and really slides behind the envelope pocket, and the seal is stamped down by
+   a separate stamp element that then lifts off. */
 
 .overlay {
   position: fixed;
@@ -9,8 +11,17 @@
   z-index: 100000;
   display: grid;
   place-items: center;
-  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  align-content: center;
+  gap: 18px;
+  padding: max(12px, env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
   color: #1b1a17;
+}
+
+/* The global midnight theme recolours every [role='dialog']; the paper surface
+   keeps its own palette in both themes. */
+.overlay[role='dialog'][aria-modal='true'] {
+  color: #1b1a17;
+  background: transparent;
 }
 
 .scrim {
@@ -20,202 +31,282 @@
   animation: fadeIn .28s ease both;
 }
 
-.stage {
+/* ---------- stage ---------- */
+
+.desk {
   position: relative;
-  display: grid;
-  place-items: center;
-  gap: 14px;
-  width: min(400px, 100%);
-  max-height: calc(100dvh - 24px);
-  padding: 8px 0 56px;
+  width: min(268px, 76vw);
+  aspect-ratio: 3 / 2;
+  perspective: 900px;
+  perspective-origin: 50% 45%;
 }
+
+.envelope {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+.desk[data-stage='flying'] .envelope {
+  animation: flyOut .7s cubic-bezier(.34, .06, .5, 1) both;
+}
+
+/* ---------- envelope body ---------- */
+
+.envBack {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #f7f1e3;
+  border: 1.5px solid #1b1a17;
+  box-shadow: 0 18px 42px -24px #1b1a17b8;
+  opacity: 1;
+  transition: opacity .3s ease;
+}
+
+/* The V-shaped front: everything below the fold line hides the paper. */
+.pocket {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: linear-gradient(#f3ecdb, #ece2cf);
+  clip-path: polygon(0 0, 50% 42%, 100% 0, 100% 100%, 0 100%);
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+
+/* The envelope waits behind the paper from the first beat; only its pocket
+   front is withheld, so the paper is uncovered while it is still outside. */
+.desk[data-stage='paper'] .pocket,
+.desk[data-stage='folding'] .pocket { opacity: 0; }
+
+.desk[data-stage='inserting'] .envBack,
+.desk[data-stage='sealing'] .envBack,
+.desk[data-stage='stamping'] .envBack,
+.desk[data-stage='flying'] .envBack,
+.desk[data-stage='inserting'] .pocket,
+.desk[data-stage='sealing'] .pocket,
+.desk[data-stage='stamping'] .pocket,
+.desk[data-stage='flying'] .pocket { opacity: 1; }
 
 /* ---------- letter paper ---------- */
 
 .sheet {
-  grid-area: 1 / 1;
-  position: relative;
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
   z-index: 2;
-  box-sizing: border-box;
-  width: min(252px, 72vw);
-  min-height: 150px;
-  max-height: min(38dvh, 220px);
-  overflow: hidden;
-  padding: 18px 16px;
-  background: #f7f1e3;
-  border: 1.5px solid #1b1a17;
-  box-shadow: 0 14px 30px -22px #1b1a17aa;
-  transform-origin: 50% 78%;
-  transition: transform .4s cubic-bezier(.4, .1, .3, 1), opacity .32s ease;
+  width: min(228px, 66vw);
+  height: 160px;
+  margin-bottom: 10px;
+  transform: translateX(-50%);
+  transform-style: preserve-3d;
+  transition: transform .65s cubic-bezier(.42, .05, .35, 1), opacity .3s ease;
 }
 
-.sheet p {
+.sheetUpper,
+.sheetLower {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  background: #f7f1e3;
+  border: 1.5px solid #1b1a17;
+}
+
+.sheetUpper {
+  top: 0;
+  height: 50%;
+  padding: 14px 14px 10px;
+  overflow: hidden;
+  border-bottom: 0;
+  color: #1b1a17;
+  box-shadow: 0 14px 30px -22px #1b1a17aa;
+}
+
+/* The crease stays visible after the fold, so the result still reads as paper. */
+.sheetLower {
+  top: 50%;
+  height: 50%;
+  border-top: 1.5px dashed #b8ab95;
+  transform-origin: top center;
+  backface-visibility: visible;
+  transition: transform .65s cubic-bezier(.5, .02, .3, 1);
+}
+
+.ink {
   margin: 0;
+  color: #1b1a17;
   font-size: 13px;
-  line-height: 1.8;
+  line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #1b1a17;
   animation: inkIn .34s ease both;
 }
 
-/* The second half of the fold: a crease appears before the paper collapses. */
-.sheet::after {
-  content: '';
-  position: absolute;
-  inset: 50% 0 auto 0;
-  height: 1.5px;
-  background: #1b1a1733;
-  opacity: 0;
-  transition: opacity .2s ease;
+/* Stage 1 → 2: the blank lower half lifts over the written half. */
+.desk[data-stage='folding'] .sheetLower,
+.desk[data-stage='inserting'] .sheetLower,
+.desk[data-stage='sealing'] .sheetLower,
+.desk[data-stage='stamping'] .sheetLower,
+.desk[data-stage='flying'] .sheetLower { transform: rotateX(-176deg); }
+
+.desk[data-stage='paper'] .sheet { animation: sheetIn .5s cubic-bezier(.22, .68, .32, 1) both; }
+
+/* Stage 3: the folded paper slides down behind the pocket and is covered. */
+.desk[data-stage='inserting'] .sheet,
+.desk[data-stage='sealing'] .sheet,
+.desk[data-stage='stamping'] .sheet,
+.desk[data-stage='flying'] .sheet {
+  /* Slides down until it is fully behind the envelope pocket. */
+  transform: translateX(-50%) translateY(calc(100% + 24px));
 }
 
-.stage[data-stage='paper'] .sheet { animation: sheetIn .45s cubic-bezier(.22, .68, .32, 1) both; }
-.stage[data-stage='folding'] .sheet { transform: scaleY(.52) translateY(6px); }
-.stage[data-stage='folding'] .sheet::after { opacity: 1; }
+.desk[data-stage='sealing'] .sheet,
+.desk[data-stage='stamping'] .sheet,
+.desk[data-stage='flying'] .sheet { opacity: 0; }
 
-.stage[data-stage='inserting'] .sheet,
-.stage[data-stage='sealing'] .sheet,
-.stage[data-stage='wax'] .sheet,
-.stage[data-stage='flying'] .sheet {
-  transform: translateY(42px) scale(.62, .3);
-  opacity: 0;
-}
-
-/* ---------- envelope ---------- */
-
-.envelope {
-  grid-area: 1 / 1;
-  position: relative;
-  z-index: 1;
-  width: min(268px, 76vw);
-  aspect-ratio: 3 / 2;
-  background: #f7f1e3;
-  border: 1.5px solid #1b1a17;
-  box-shadow: 0 18px 42px -24px #1b1a17b8;
-  opacity: 0;
-  transform: scale(.94);
-  transition: opacity .3s ease, transform .3s ease;
-}
-
-.stage[data-stage='inserting'] .envelope,
-.stage[data-stage='sealing'] .envelope,
-.stage[data-stage='wax'] .envelope { opacity: 1; transform: scale(1); }
-
-.stage[data-stage='flying'] .envelope {
-  opacity: 1;
-  transform: scale(1);
-  animation: flyOut .62s cubic-bezier(.3, .1, .4, 1) both;
-}
-
-.pocket {
-  position: absolute;
-  inset: 0;
-  background: #efe5cf;
-  clip-path: polygon(0 0, 50% 46%, 100% 0, 100% 100%, 0 100%);
-}
+/* ---------- flap ---------- */
 
 .flap {
   position: absolute;
   inset: 0 0 auto 0;
-  height: 58%;
+  z-index: 4;
+  height: 52%;
+  box-sizing: border-box;
   background: #f7f1e3;
-  border-bottom: 1.5px solid #1b1a17;
+  border: 1.5px solid #1b1a17;
+  border-bottom: 0;
   clip-path: polygon(0 0, 100% 0, 50% 100%);
   transform-origin: top center;
   transform: rotateX(-172deg);
-  transition: transform .35s cubic-bezier(.4, .1, .3, 1);
+  opacity: 0;
+  backface-visibility: visible;
+  transition: transform .5s cubic-bezier(.45, .05, .3, 1), opacity .3s ease;
 }
 
-.stage[data-stage='sealing'] .flap,
-.stage[data-stage='wax'] .flap,
-.stage[data-stage='flying'] .flap { transform: rotateX(0deg); }
+.desk[data-stage='inserting'] .flap { opacity: 1; }
+.desk[data-stage='sealing'] .flap,
+.desk[data-stage='stamping'] .flap,
+.desk[data-stage='flying'] .flap { opacity: 1; transform: rotateX(0deg); }
 
-.seal {
+/* ---------- wax seal ---------- */
+
+.wax {
   position: absolute;
   left: 50%;
-  top: 54%;
+  top: 52%;
+  z-index: 5;
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  margin: -19px 0 0 -19px;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
   border-radius: 50%;
-  background: #7b2233;
   color: #f7f1e3;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: .04em;
-  box-shadow: inset 0 0 0 2px #f7f1e3, inset 0 0 0 3px #7b2233, inset 0 -2px 4px #00000033;
+  background: radial-gradient(circle at 34% 30%, #a33a4c 0%, #7b2233 46%, #5d1826 100%);
+  box-shadow:
+    inset 0 0 0 2px #f7f1e3,
+    inset 0 0 0 3px #7b2233,
+    inset 0 -3px 6px #0000004d,
+    0 3px 8px -2px #00000066;
   opacity: 0;
-  transform: scale(1.5);
+  transform: scale(.5);
 }
 
-.stage[data-stage='wax'] .seal,
-.stage[data-stage='flying'] .seal {
-  opacity: 1;
-  animation: stamp .36s cubic-bezier(.2, .9, .3, 1.4) both;
+/* Appears while the stamp is pressing and stays for the flight. */
+.desk[data-stage='stamping'] .wax { animation: waxSet .7s ease-out both; }
+.desk[data-stage='flying'] .wax { opacity: 1; transform: scale(1); }
+
+/* ---------- stamp ---------- */
+
+.stamp {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  color: #f7f1e3ee;
+  font-size: 18px;
+  font-weight: 700;
+  background: radial-gradient(circle at 36% 28%, #b8485c 0%, #8a2939 52%, #5f1a28 100%);
+  box-shadow: inset 0 0 0 3px #f7f1e3cc, 0 10px 18px -8px #00000099, 0 0 0 1px #4b111d;
+  opacity: 0;
+  transform: translateY(-180%) scale(1.35);
 }
+
+.desk[data-stage='stamping'] .stamp { animation: stampPress .7s cubic-bezier(.3, .7, .4, 1) both; }
 
 /* ---------- chrome ---------- */
 
 .hint {
-  position: absolute;
-  left: 50%;
-  bottom: 42px;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100% - 24px);
   margin: 0;
-  padding: 5px 14px;
+  padding: 5px 16px;
   border-radius: 999px;
   background: #1b1a17cc;
-  text-align: center;
+  color: #efe5cf;
   font-size: 13px;
   line-height: 1.4;
-  color: #efe5cf;
   letter-spacing: .02em;
   white-space: nowrap;
 }
 
 .skip {
-  position: absolute;
-  left: 50%;
-  bottom: 4px;
-  transform: translateX(-50%);
-  min-height: 30px;
-  padding: 4px 16px;
+  min-height: 32px;
+  padding: 5px 18px;
   border: 1px solid #efe5cf66;
   border-radius: 999px;
   background: #1b1a1799;
   color: #efe5cf;
   font: inherit;
   font-size: 12px;
+  cursor: pointer;
 }
+
+/* ---------- motion ---------- */
 
 @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
 @keyframes inkIn { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
 
 @keyframes sheetIn {
-  from { opacity: 0; transform: translateY(14px) scale(.94) }
-  to { opacity: 1; transform: none }
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(.94) }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) }
+}
+
+/* The wax grows out of the stamp print: soft, slight overshoot, then crisp. */
+@keyframes waxSet {
+  0% { opacity: 0; transform: scale(.55); }
+  35% { opacity: 1; transform: scale(1.08); }
+  60% { opacity: 1; transform: scale(.97); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Down, press, short recoil, lift away — the seal stays behind on the paper. */
+@keyframes stampPress {
+  0% { opacity: 0; transform: translateY(-190%) scale(1.4); }
+  30% { opacity: 1; transform: translateY(-18%) scale(1.12); }
+  46% { opacity: 1; transform: translateY(0) scale(1); }
+  58% { opacity: 1; transform: translateY(0) scale(.94); }
+  72% { opacity: 1; transform: translateY(-8%) scale(1.02); }
+  100% { opacity: 0; transform: translateY(-150%) scale(1.08); }
 }
 
 @keyframes flyOut {
-  0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1 }
-  28% { transform: translate(6px, -10px) rotate(-4deg) scale(1.02); opacity: 1 }
-  100% { transform: translate(58%, -78%) rotate(16deg) scale(.18); opacity: 0 }
-}
-
-@keyframes stamp {
-  0% { transform: scale(1.5); opacity: 0 }
-  60% { transform: scale(.92); opacity: 1 }
-  80% { transform: scale(1.06) }
-  100% { transform: scale(1); opacity: 1 }
+  0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
+  26% { transform: translate(4px, -14px) rotate(-3deg) scale(1.03); opacity: 1; }
+  100% { transform: translate(72%, -96%) rotate(20deg) scale(.2); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sheet, .envelope, .flap, .seal, .scrim, .sheet p { animation: none !important; transition: none !important }
-  .stage[data-stage='folding'] .sheet,
-  .stage[data-stage='inserting'] .sheet { opacity: 1 }
+  .sheet, .sheetLower, .flap, .pocket, .envBack, .wax, .stamp, .scrim, .ink { animation: none !important; transition: none !important; }
+  .desk[data-stage] .wax { opacity: 1; transform: scale(1); }
+  .desk[data-stage] .flap { transform: rotateX(0deg); opacity: 1; }
 }

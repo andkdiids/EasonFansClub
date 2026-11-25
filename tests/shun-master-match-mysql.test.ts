@@ -316,9 +316,11 @@ test('player-facing surfaces never expose the match source', {
   const round = await shunAttempt(actor.id, randomUUID())
   await shunSendNotification(actor.id, round.id, '不要泄露来源')
   const status = await shunStatus(actor.id)
-  assert.deepEqual(Object.keys(status).sort(), ['attempts', 'balance', 'enabled', 'goldenMinutes', 'received',
+  // `optedOut` is a player-visible participation state, not a match-source detail.
+  assert.deepEqual(Object.keys(status).sort(), ['attempts', 'balance', 'enabled', 'goldenMinutes', 'optedOut', 'received',
     'remaining', 'serverNow', 'victimCap'])
   assert.equal(JSON.stringify(status).includes('friendChance'), false, '状态接口不得携带好友命中概率')
+  assert.equal(JSON.stringify(status).includes('permanentlyOptedOutAt'), false, '状态接口不得泄露内部时间戳')
   const summary = await getShunCandidateSummary(prisma, shunDay(new Date()), baseConfig.victimCap)
   assert.deepEqual(Object.keys(summary).sort(), ['day', 'eligible', 'excluded'])
   assert.deepEqual(Object.keys(summary.excluded).sort(), ['account', 'balance', 'dailyCap', 'refused'])
@@ -531,4 +533,49 @@ test('deferred notification: plain, letter, sweep, scope and idempotency', {
   assert.equal(JSON.stringify(rows).includes('notifyStatus'), false)
   assert.equal(JSON.stringify(rows).includes('notifyDueAt'), false)
   assert.equal(JSON.stringify(await shunStatus(actor4.id)).includes('notify'), false)
+})
+
+test('capture decoys prefer the victim’s friends and never repeat or self-reference', {
+  skip: !qa, timeout: 180000,
+}, async () => {
+  assertIsolatedFixture()
+  await ensureSettings()
+  await publish({ friendChance: 0 })
+
+  const actor = await createUser()
+  const victim = await createUser(60)
+  // The victim's two friends are the most attractive decoys: same look (no
+  // avatar) and recently active.
+  const friendA = await createUser()
+  const friendB = await createUser()
+  await befriend(victim.id, friendA.id)
+  await befriend(victim.id, friendB.id)
+  await prisma.user.updateMany({ where: { id: { in: [friendA.id, friendB.id] } }, data: { lastActiveAt: new Date() } })
+  const decoyPool = await Promise.all([createUser(), createUser()])
+  await pinFundedTo(victim.id)
+
+  const take = await shunAttempt(actor.id, randomUUID())
+  const round = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take.id } })
+  const candidates = round.candidates as string[]
+  assert.equal(candidates.length, 3, '三选一必须给三位候选人')
+  assert.equal(new Set(candidates).size, 3, '候选人不得重复')
+  assert.ok(candidates.includes(actor.id), '真实顺取者必须在候选名单里且只出现一次')
+  assert.equal(candidates.filter((id) => id === actor.id).length, 1)
+  assert.ok(!candidates.includes(victim.id), '被顺者本人不得出现在选项里')
+  const decoys = candidates.filter((id) => id !== actor.id)
+  assert.ok(decoys.every((id) => [friendA.id, friendB.id, ...decoyPool.map(({ id: poolId }) => poolId)].includes(id)),
+    '干扰者必须来自合格候选池')
+  assert.ok(decoys.some((id) => id === friendA.id || id === friendB.id),
+    '被顺者有活跃好友时，干扰者必须优先取好友')
+  assert.ok(decoys.includes(round.goldenDecoyId), '黄金期干扰者必须是其中一位真实干扰者')
+
+  // Re-reading the round (i.e. opening the capture page) must not reshuffle.
+  const reread = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: take.id } })
+  assert.deepEqual(reread.candidates, candidates, '历史抓捕候选人不得重新生成')
+
+  // The player-facing payload never carries the pool source.
+  const options = await shunCapture(victim.id, take.id)
+  assert.equal(options.candidates?.length, 2, '黄金期只给两位候选人')
+  assert.deepEqual(Object.keys(options.candidates![0]).sort(), ['avatarUrl', 'nickname', 'uid'])
+  assert.equal(JSON.stringify(options).includes('friend'), false, '前台不得泄露候选匹配来源')
 })

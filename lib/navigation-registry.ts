@@ -205,7 +205,7 @@ export const NAVIGATION_REGISTRY = [
   },
   {
     featureKey: 'SHUN_MASTER', label: '顺大师', href: '/shun-master', icon: 'star', title: '顺大师',
-    defaultSortOrder: 44, defaultEnabled: true, isManageable: false,
+    defaultSortOrder: 44, defaultEnabled: true, isManageable: true,
     showInCenter: true, showInQuickNavigation: true, showInDesktopSidebar: false,
     sidebarSection: 'quick', editable: true, hideable: true,
     activePrefixes: ['/shun-master'],

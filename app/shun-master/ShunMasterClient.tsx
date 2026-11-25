@@ -15,7 +15,7 @@ const MESSAGE_MAX = 60
 type Person = { uid: number; nickname: string; avatarUrl: string | null }
 type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' | 'FAILED' | null
   createdAt: string; goldenUntil: string; person: Person | null; canCapture: boolean; hasLetter?: boolean }
-type Status = { enabled: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
+type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null; windowAt: string }
 type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
 type Side = 'in' | 'out'
@@ -24,9 +24,11 @@ class RequestError extends Error {
   constructor(message: string, readonly code?: string, readonly status?: number) { super(message) }
 }
 
-async function api<T>(path: string, body?: object): Promise<T> {
+async function api<T>(path: string, body?: object, method?: 'POST'): Promise<T> {
   const response = await fetch('/api/shun-master/' + path, {
-    cache: 'no-store', ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+    cache: 'no-store', ...(body || method
+      ? { method: method || 'POST', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) }
+      : {}),
   }).catch(() => { throw new RequestError('网络连接中断，请重试。') })
   const data = await response.json().catch(() => null)
   if (!response.ok) throw new RequestError(data?.message || '请求失败，请重试。', data?.code, response.status)
@@ -72,6 +74,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const [letterError, setLetterError] = useState('')
   // Re-opening a letter from the record list skips the delivery animation.
   const [letterInstant, setLetterInstant] = useState(false)
+  // Permanent opt-out confirmation. Kept local and unchecked by default; the
+  // exit entry only ever renders inside the collapsed-by-default rules block.
+  const [optOutOpen, setOptOutOpen] = useState(false)
+  const [optOutAck, setOptOutAck] = useState(false)
   // Visible landing spot after an overlay closes: the capture picker, the
   // settlement panel or one record row. Without it the state changes but the
   // user sees nothing, which was the reported "no feedback" bug.
@@ -188,6 +194,17 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       lock.current = false
       setBusy('')
     }
+  }
+  async function confirmOptOut() {
+    if (!optOutAck) return
+    await perform('opt-out', async () => {
+      const response = await api<{ optedOut: boolean }>('opt-out', undefined, 'POST')
+      setOptOutOpen(false)
+      setOptOutAck(false)
+      setNotice('你已永久退出顺大师')
+      await loadStatus()
+      if (!response.optedOut) setError('退出未生效，请稍后重试。')
+    })
   }
   function attempt() {
     return perform('attempt', async () => {
@@ -361,7 +378,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
             <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
           </dl>
-          {!status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => void attempt()}>
+          {status.optedOut ? <p className={styles.optedOut} role="status">
+            <strong>你已永久退出顺大师</strong>
+            <span>今后你不会再被顺取挂号费，也无法继续顺取其他 EF。</span>
+          </p> : !status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => void attempt()}>
             {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
           </button>}
         </>}
@@ -374,6 +394,15 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <p>超过 {status?.goldenMinutes ?? 10} 分钟：三选一。</p>
           <p>猜中即可追回被顺走的挂号费，猜错则无法追回。</p>
           <p>每日机会于北京时间 00:00 重置。</p>
+          <div className={styles.optOutArea}>
+            {status?.optedOut
+              ? <p className={styles.optOutDone}>你已永久退出顺大师，无法重新加入。</p>
+              : <>
+                <p>不想参与顺大师？</p>
+                <p>你可以选择永久退出，退出后无法重新加入。</p>
+                <button type="button" className={styles.optOutLink} onClick={() => { setOptOutAck(false); setOptOutOpen(true) }}>永久退出顺大师</button>
+              </>}
+          </div>
         </details>
       </section>
       {status && <section className={styles.panel} aria-label="历史记录" id="shun-records" tabIndex={-1}>
@@ -412,7 +441,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           )}
           {side === 'in' && !row.result && (row.canCapture ? <>
             {remaining(row.goldenUntil) > 0 && <span>黄金抓捕期 · {countdown(remaining(row.goldenUntil))}</span>}
-            <button disabled={!!busy} onClick={() => void perform('start', () => openCapture(row.id))}>抓捕追回</button>
+            <button disabled={!!busy} onClick={() => void perform('start', () => openCapture(row.id))}>前往调查</button>
           </> : <p>可用嫌疑人不足，本次不可抓捕。</p>)}
         </article>)}
         {loading && <p role="status">记录加载中…</p>}
@@ -473,5 +502,22 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
     {letter && <AnonymousLetter letter={letter} busy={letterBusy} error={letterError} instant={letterInstant}
       onInvestigate={() => void investigate()} onClose={closeLetter}
       onShowRecord={() => showRecord(letter.roundId)} />}
+    {optOutOpen && <div className={styles.optOutOverlay} role="dialog" aria-modal="true" aria-labelledby="opt-out-title">
+      <div className={styles.optOutCard}>
+        <h2 id="opt-out-title">确定永久退出顺大师？</h2>
+        <p>退出后，你将无法再顺取其他 EF 的挂号费，也不会再被其他 EF 顺取。退出前的游戏记录和挂号费结算均会保留。</p>
+        <p className={styles.optOutWarning}>此操作永久生效，确认后无法重新加入。</p>
+        <label className={styles.optOutAck}>
+          <input type="checkbox" checked={optOutAck} onChange={(event) => setOptOutAck(event.target.checked)} />
+          <span>我已了解，永久退出后无法重新加入。</span>
+        </label>
+        <div className={styles.tabs}>
+          <button type="button" onClick={() => { setOptOutOpen(false); setOptOutAck(false) }} disabled={busy === 'opt-out'}>取消</button>
+          <button type="button" className={styles.primary} disabled={!optOutAck || busy === 'opt-out'} onClick={() => void confirmOptOut()}>
+            {busy === 'opt-out' ? '处理中…' : '确认永久退出'}
+          </button>
+        </div>
+      </div>
+    </div>}
   </main>
 }
