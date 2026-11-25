@@ -567,6 +567,7 @@ test('capture decoys prefer the victim’s friends and never repeat or self-refe
     '干扰者必须来自合格候选池')
   assert.ok(decoys.some((id) => id === friendA.id || id === friendB.id),
     '被顺者有活跃好友时，干扰者必须优先取好友')
+  assert.ok(round.goldenDecoyId, '黄金期必须设置黄金干扰者')
   assert.ok(decoys.includes(round.goldenDecoyId), '黄金期干扰者必须是其中一位真实干扰者')
 
   // Re-reading the round (i.e. opening the capture page) must not reshuffle.
