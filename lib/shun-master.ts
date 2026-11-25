@@ -3,11 +3,13 @@ import { randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { createNotificationWithDb } from '@/lib/notification-write'
 import { awardRegistrationFee, consumeRegistrationFee, getRegistrationFeeHistoryWindow, type RegistrationFeeHistoryRange } from '@/lib/registration-fee'
-import { activityTier, captureMode, defaultShunConfig, friendPoolDraw, pickStratified, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, SHUN_NOTIFY_STATUS, SHUN_NOTIFY_WINDOW_MS, type ShunConfig } from './shun-master-rules'
+import { activityTier, captureMode, defaultShunConfig, friendPoolDraw, pickStratified, shunDay, shunRulesChanged, shuffle, validateShunConfig, weightedIndex, SHUN_CAPTURE_NOTIFY_STATUS, SHUN_CAPTURE_NOTIFY_WINDOW_MS, SHUN_NOTIFY_STATUS, SHUN_NOTIFY_WINDOW_MS, type ShunConfig } from './shun-master-rules'
 import { ANONYMOUS_LETTER_NOTIFICATION, anonymousLetterNotificationLink, readAnonymousMessageField, type AnonymousMessageField } from './shun-anonymous-letter'
+import { CAPTURE_RESULT_NOTIFICATION, captureInvestigationLink, captureLetterLink, readCaptureMessageField } from './shun-capture-letter'
 import { shunInvestigationLink } from './shun-letter-notification'
 import { shunPerson } from './shun-person'
 import { pickDecoys, type DecoyCandidate } from './shun-decoys'
+import { triggerBadgeEvaluation } from './badge-rule-engine'
 
 // Re-exported for callers that historically imported it from the service.
 export { shunPerson } from './shun-person'
@@ -127,15 +129,17 @@ async function lockAccounts(tx: Tx, ids: string[]) {
 }
 
 async function ledger(tx: Tx, id: string, userId: string, before: number, delta: number,
-  kind: 'take' | 'recover' | 'compensate', reversal?: string) {
+  kind: 'take' | 'recover' | 'compensate' | 'bonus', reversal?: string) {
   if (!delta) return
   const after = before + delta
   if (after < 0 || after > 2147483647) throw new ShunError('BALANCE', '目前无法完成挂号费结算，请稍后重试。')
-  const action = kind === 'take' ? 'SHUN_STEAL' : kind === 'recover' ? 'SHUN_RECOVERY' : 'SHUN_COMPENSATION'
+  const action = kind === 'take' ? 'SHUN_STEAL' : kind === 'recover' ? 'SHUN_RECOVERY'
+    : kind === 'bonus' ? 'SHUN_BONUS' : 'SHUN_COMPENSATION'
   const entry = {
     userId, action, businessKey: `shun:${id}:${kind}:${userId}`,
     // Point history is user-visible. Keep opponent identifiers out of the description.
-    reason: kind === 'take' ? '顺大师 · 顺取' : kind === 'recover' ? '顺大师 · 追回' : '顺大师 · 平台补偿',
+    reason: kind === 'take' ? '顺大师 · 顺取' : kind === 'recover' ? '顺大师 · 追回'
+      : kind === 'bonus' ? '顺大师 · 额外奖励' : '顺大师 · 平台补偿',
     reversalOfBusinessKey: reversal,
   } as const
   const posted = delta > 0
@@ -151,15 +155,23 @@ function notify(tx: Tx, id: string, recipientId: string, title: string, content:
     key: `shun:${id}:${kind}`,
   } })
 }
-async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = false) {
+async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = false, hasCaptureLetter = false) {
   const visible = side === 'out' || round.result !== null
   return {
     id: round.id, amount: round.amount, recovered: round.recovered, result: round.result,
     createdAt: round.createdAt, goldenUntil: round.goldenUntil, canCapture: (round.candidates as string[]).length === 3,
+    // The platform bonus is part of the capturer's own settlement view. It is
+    // never shown to anybody else and never leaks into the caught player's copy.
+    bonusAwarded: round.bonusAwarded,
     person: visible ? await shunPerson(tx, side === 'out' ? round.victimId : round.actorId) : null,
     // Recipient-side flag only: the sender never learns whether a letter exists
     // from anybody else's view, and it is derived from an ownership-scoped query.
     ...(side === 'in' ? { hasLetter } : {}),
+    // Capturer-side flag on both projections: on 「我顺了谁」 it is the actor's
+    // own note, and on 「谁顺了我」 it is the viewer's own note about the failed
+    // attempt they just caught. It is always computed from `senderId = viewer`,
+    // so it can never reveal anybody else's note.
+    hasCaptureLetter,
   }
 }
 
@@ -245,6 +257,8 @@ async function selectDecoys(tx: Tx, input: {
 export async function shunAttempt(actorId: string, requestId: string) {
   const now = new Date()
   const day = shunDay(now)
+  // Captured for the post-commit badge refresh of both sides of the transfer.
+  let victimId: string | null = null
   const rangeStart = new Date(`${shunDay(new Date(now.getTime() - 6 * 86_400_000))}T00:00:00+08:00`)
   // Read-only snapshot, taken before the settlement transaction so that the
   // serialised section (settings lock, account locks, ledger) stays short even
@@ -317,6 +331,7 @@ export async function shunAttempt(actorId: string, requestId: string) {
       return null
     }
     const accounts = await lockAccounts(tx, [actorId, victim.id])
+    victimId = victim.id
     const actorBalance = accounts.get(actorId)
     const victimBalance = accounts.get(victim.id)
     if (actorBalance === undefined || actorBalance < 0 || victimBalance === undefined || victimBalance <= 0 || shunDay(new Date()) !== day
@@ -356,6 +371,11 @@ export async function shunAttempt(actorId: string, requestId: string) {
     return present(tx, round, 'out')
   })
   if (!result) throw new ShunError('NO_TARGET', '暂时没有可顺取的 EF，今日次数不会扣除。')
+  // Best effort, after commit: the take moved cumulative progress for both
+  // accounts. A failed refresh never fails a settled transfer.
+  for (const account of [actorId, victimId]) {
+    if (account) void triggerBadgeEvaluation(account, 'SHUN_MASTER_SETTLED').catch(() => false)
+  }
   return result
 }
 
@@ -450,19 +470,35 @@ export async function shunRecords(userId: string, side: 'out' | 'in', cursor?: s
         select: { roundId: true },
       })).map((row) => row.roundId))
     : new Set<string>()
-  return { records: await Promise.all(pageRows.map((row) => present(prisma, row, side, letterRoundIds.has(row.id)))),
-    focused: focused && await present(prisma, focused, side, letterRoundIds.has(focused.id)),
+  // Capturer-side counterpart: `senderId` is always the viewer (on 「我顺了谁」
+  // they caught this take, on 「谁顺了我」 they caught the person who took from
+  // them), so one ownership-scoped query covers both tabs and can never leak.
+  const captureLetterRoundIds = (pageRows.length || focused)
+    ? new Set((await prisma.shunMasterCaptureLetter.findMany({
+        where: { senderId: userId, hiddenAt: null,
+          roundId: { in: [...pageRows.map((row) => row.id), ...(focused ? [focused.id] : [])] } },
+        select: { roundId: true },
+      })).map((row) => row.roundId))
+    : new Set<string>()
+  return { records: await Promise.all(pageRows.map((row) => present(prisma, row, side,
+      letterRoundIds.has(row.id), captureLetterRoundIds.has(row.id)))),
+    focused: focused && await present(prisma, focused, side,
+      letterRoundIds.has(focused.id), captureLetterRoundIds.has(focused.id)),
     nextCursor: rows.length > 20 ? rows[19].id : null, windowAt: now.toISOString() }
 }
 
 export function shunCapture(userId: string, id: string, guess?: { mode: number; uid: number }) {
+  // Captured for the post-commit badge refresh: both sides gained cumulative
+  // progress (the victim recovered, the actor's take becomes a real loss).
+  let actorId: string | null = null
   return shunTransaction(async (tx) => {
-    await settings(tx)
+    const { config } = await settings(tx)
     if (!await tx.user.findFirst({ where: { id: userId, ...eligible }, select: { id: true } })) {
       throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
     }
     const round = await tx.shunMasterRound.findFirst({ where: { id, victimId: userId } })
     if (!round) throw new ShunError('NOT_FOUND', '未找到这条记录。', 404)
+    actorId = round.actorId
     if (round.result) return { record: await present(tx, round, 'in') }
     const candidates = round.candidates as string[]
     if (candidates.length !== 3) throw new ShunError('UNAVAILABLE', '可用嫌疑人不足，本次不可抓捕。')
@@ -496,15 +532,122 @@ export function shunCapture(userId: string, id: string, guess?: { mode: number; 
         userId, category: 'SHUN_MASTER', action: 'COMPENSATION', summary: '触发挂号费补偿', source: 'WEB', operatorType: 'SYSTEM',
         targetType: 'ShunMasterRound', targetId: id, riskLevel: 'MEDIUM', metadata: { compensation, roundId: id },
       } })
-      await notify(tx, id, round.actorId, '挂号费被追回啦！', `你之前顺走的 ${round.amount} 挂号费被对方成功追回了！`, 'recover-actor')
     }
     const final = await tx.shunMasterRound.update({ where: { id }, data: { mode, selectedId,
-      result: correct ? 'SUCCESS' : 'FAILED', recovered: correct ? round.amount : 0, compensation, capturedAt: now } })
+      result: correct ? 'SUCCESS' : 'FAILED', recovered: correct ? round.amount : 0, compensation, capturedAt: now,
+      // Only a successful capture opens the deferred notice window: the caught
+      // actor is told once the capturer decides about a counter note, or when
+      // the 120-second sweep expires. A failed capture has nobody to tell.
+      ...(correct ? {
+        captureNotifyStatus: SHUN_CAPTURE_NOTIFY_STATUS.pending,
+        captureNotifyDueAt: new Date(now.getTime() + SHUN_CAPTURE_NOTIFY_WINDOW_MS),
+      } : {}) } })
+    // V5 recovery bonus: platform-funded, equal to the amount actually
+    // recovered, decided at most once per capture. The guarded update is the
+    // idempotency gate — a replay or a concurrent guess can never re-roll or
+    // pay twice, and it shares the round row lock already held by settle.
+    if (correct) {
+      const won = config.bonusChance > 0 && randomInt(100) < config.bonusChance
+      const claimed = await tx.shunMasterRound.updateMany({
+        where: { id, bonusRolled: false },
+        data: { bonusRolled: true, bonusAwarded: won ? round.amount : 0 },
+      })
+      if (claimed.count === 1 && won) {
+        await ledger(tx, id, userId, receiver + debit + compensation, round.amount, 'bonus')
+        await tx.userOperationLog.create({ data: {
+          userId, category: 'SHUN_MASTER', action: 'RECOVERY_BONUS', summary: '抓捕成功触发额外奖励',
+          source: 'WEB', operatorType: 'SYSTEM', targetType: 'ShunMasterRound', targetId: id,
+          metadata: { bonus: round.amount, recovered: round.amount, roundId: id, chance: config.bonusChance },
+        } })
+      }
+    }
     const actor = options[visible.indexOf(round.actorId)]
     await notify(tx, id, userId, correct ? '抓到你啦！' : '让 TA 溜了！',
       correct ? `你成功追回了 ${round.amount} 挂号费！` : `真正顺走你挂号费的是「${actor?.nickname}」，这次没能追回。`, 'capture')
-    return { record: await present(tx, final, 'in') }
+    // Re-read so the capturer's own result carries the persisted bonus amount
+    // instead of the pre-roll snapshot.
+    const settled = correct ? await tx.shunMasterRound.findUniqueOrThrow({ where: { id } }) : final
+    return { record: await present(tx, settled, 'in') }
+  }).then((outcome) => {
+    // Best effort, after commit: a failed badge refresh must never fail a
+    // settled capture, and every metric is re-derivable from the rounds anyway.
+    for (const account of [userId, actorId]) {
+      if (account) void triggerBadgeEvaluation(account, 'SHUN_MASTER_SETTLED').catch(() => false)
+    }
+    return outcome
   })
+}
+
+/** Capture-result notification copy for the caught actor. */
+function notifyCapture(tx: Tx, round: Round, withLetter: boolean) {
+  const title = CAPTURE_RESULT_NOTIFICATION.title
+  const content = withLetter
+    ? CAPTURE_RESULT_NOTIFICATION.letter(round.amount)
+    : CAPTURE_RESULT_NOTIFICATION.plain(round.amount)
+  return notify(tx, round.id, round.actorId, title, content,
+    withLetter ? 'captured-letter' : 'captured',
+    withLetter ? captureLetterLink(round.id) : captureInvestigationLink(round.id))
+}
+
+/**
+ * Turns one successful capture into a delivered capture-result notice.
+ *
+ * The recovery (and the optional bonus) were settled when the capture was
+ * accepted, so this only decides *how* the caught actor learns about it:
+ * - the capturer choosing "no note" (`auto = false`, plain),
+ * - the capturer sending a counter note (`auto = false`, letter),
+ * - the server sweep when the capturer walked away (`auto = true`, plain).
+ *
+ * Everything runs under the settings row lock, exactly like the take flow, so
+ * the sweep and a late "send note" can never both win and a second notice is
+ * impossible. A note can never be appended once the plain notice went out.
+ */
+export async function shunCaptureNotifyRound(roundId: string, letter: AnonymousMessageField, options: {
+  capturerId?: string; auto?: boolean
+} = {}) {
+  const withLetter = letter.provided && !!letter.content
+  const outcome = await shunTransaction(async (tx) => {
+    await settings(tx)
+    const round = await tx.shunMasterRound.findFirst({
+      where: { id: roundId, ...(options.capturerId ? { victimId: options.capturerId } : {}) },
+    })
+    if (!round) throw new ShunError('NOT_FOUND', '未找到这条记录。', 404)
+    // A failed capture never exposes the actor and never accepts a note.
+    if (round.result !== 'SUCCESS') throw new ShunError('NOT_CAPTURED', '本次抓捕未成功，无法留言。', 409)
+    if (round.captureNotifyStatus === SHUN_CAPTURE_NOTIFY_STATUS.letter) {
+      return { status: SHUN_CAPTURE_NOTIFY_STATUS.letter, roundId: round.id }
+    }
+    if (round.captureNotifyStatus !== SHUN_CAPTURE_NOTIFY_STATUS.pending) {
+      if (letter.provided) throw new ShunError('ALREADY_NOTIFIED', '抓捕通知已发送，无法再补充留言。')
+      return { status: round.captureNotifyStatus, roundId: round.id }
+    }
+    if (letter.provided && letter.error) throw new ShunError('LETTER_INVALID', letter.error, 400)
+    const now = new Date()
+    if (withLetter) {
+      // `roundId` is unique, so this can never grow a second note; the status
+      // check above already guarantees the plain notice did not win.
+      await tx.shunMasterCaptureLetter.create({ data: {
+        roundId: round.id, senderId: round.victimId, recipientId: round.actorId, content: letter.content as string,
+      } })
+    }
+    await notifyCapture(tx, round, withLetter)
+    const status = withLetter ? SHUN_CAPTURE_NOTIFY_STATUS.letter : SHUN_CAPTURE_NOTIFY_STATUS.plain
+    await tx.shunMasterRound.update({ where: { id: round.id }, data: {
+      captureNotifyStatus: status, captureNotifiedAt: now, captureNotifyAuto: options.auto === true,
+    } })
+    return { status, roundId: round.id }
+  })
+  return outcome
+}
+
+/** Capturer-driven choice: `null` means "no note", a string means "send this note". */
+export function shunSendCaptureNotification(capturerId: string, roundId: string, message: string | null) {
+  return shunCaptureNotifyRound(roundId, readCaptureMessageField(message), { capturerId })
+}
+
+/** Sweeper entry point for an abandoned capture result. */
+export function shunSendDueCaptureNotification(roundId: string) {
+  return shunCaptureNotifyRound(roundId, { provided: false }, { auto: true })
 }
 
 export async function updateShunConfig(userId: string, draft: ShunConfig) {

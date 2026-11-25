@@ -19,7 +19,7 @@ import { parseNotificationCategory, type NotificationCategory } from '@/lib/noti
 import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 import { safeInternalPathOrNull } from '@/lib/url-safety'
-import { ANONYMOUS_LETTER_ENTRY_LABEL, SHUN_INVESTIGATE_ENTRY_LABEL, isShunLetterNotification, shunInvestigationLink, shunLetterHref, shunRoundNotification } from '@/lib/shun-letter-notification'
+import { ANONYMOUS_LETTER_ENTRY_LABEL, CAPTURE_LETTER_ENTRY_LABEL, CAPTURE_RESULT_ENTRY_LABEL, isShunCaptureKind, isShunLetterNotification, SHUN_INVESTIGATE_ENTRY_LABEL, captureLetterHref, captureResultHref, shunInvestigationHref, shunLetterHref, shunRoundNotification } from '@/lib/shun-letter-notification'
 import type { FriendDockUser } from '@/lib/friend-types'
 import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
 import { REPLY_MAX_LENGTH } from '@/lib/reply-length'
@@ -54,9 +54,15 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
   // 匿名信优先：即便它使用 SYSTEM 类型，也要给出「打开神秘来信」而不是通用系统详情。
   const letterHref = shunLetterHref(item)
   if (letterHref) return { label: ANONYMOUS_LETTER_ENTRY_LABEL, href: letterHref }
-  // 普通被顺通知必须能直接回到「谁顺了我」的对应记录，不能只落到顺大师首页。
+  // V5 抓捕通知：若抓捕者留了话，直接给「查看留言」；否则给「查看调查结果」。
+  const captureHref = captureLetterHref(item)
+  if (captureHref) return { label: CAPTURE_LETTER_ENTRY_LABEL, href: captureHref }
+  // 普通被顺通知必须能直接回到对应记录，不能只落到顺大师首页。
   const shunRound = shunRoundNotification(item)
-  if (shunRound) return { label: SHUN_INVESTIGATE_ENTRY_LABEL, href: shunInvestigationLink(shunRound.roundId) }
+  if (shunRound) return {
+    label: isShunCaptureKind(shunRound.kind) ? CAPTURE_RESULT_ENTRY_LABEL : SHUN_INVESTIGATE_ENTRY_LABEL,
+    href: shunInvestigationHref(item) ?? undefined,
+  }
   if (item.category === 'review') {
     const target = getNotificationTarget(item)
     return target ? { label: '查看审核', href: target } : null
@@ -633,17 +639,34 @@ export function NotificationsClient({
   function shunNotificationActions(item: UnifiedNotification) {
     const round = shunRoundNotification(item)
     if (!round) return undefined
+    const capture = isShunCaptureKind(round.kind)
+    // Capture notices lead with the counter note (when one exists) and always
+    // keep 「查看调查结果」 next to it. Take notices keep their original order.
+    if (capture) {
+      const letter = captureLetterHref(item)
+      const investigate = captureResultHref(item)
+      return [
+        ...(letter ? [{
+          label: CAPTURE_LETTER_ENTRY_LABEL,
+          onClick: () => { setSelectedSystemNotification(null); router.push(letter) },
+        }] : []),
+        ...(investigate ? [{
+          label: CAPTURE_RESULT_ENTRY_LABEL,
+          onClick: () => { setSelectedSystemNotification(null); router.push(investigate) },
+        }] : []),
+      ]
+    }
     const letter = shunLetterHref(item)
-    const investigate = shunInvestigationLink(round.roundId)
+    const investigate = shunInvestigationHref(item)
     return [
       ...(letter ? [{
         label: ANONYMOUS_LETTER_ENTRY_LABEL,
         onClick: () => { setSelectedSystemNotification(null); router.push(letter) },
       }] : []),
-      {
+      ...(investigate ? [{
         label: SHUN_INVESTIGATE_ENTRY_LABEL,
         onClick: () => { setSelectedSystemNotification(null); router.push(investigate) },
-      },
+      }] : []),
     ]
   }
 

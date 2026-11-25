@@ -55,7 +55,16 @@ const HINTS: Record<Stage, string> = {
   flying: '寄出…',
 }
 
-export function SendAnonymousLetter({ message, onComplete }: { message: string; onComplete: () => void }) {
+export function SendAnonymousLetter({ message, onComplete, variant = 'take' }: {
+  message: string
+  onComplete: () => void
+  /**
+   * Which letter this is. Both variants share one component, one CSS timeline
+   * and one set of timings; only the accessible label differs, so a screen
+   * reader never announces a capture note as an anonymous letter.
+   */
+  variant?: 'take' | 'capture'
+}) {
   const [stage, setStage] = useState<Stage>('paper')
   const finished = useRef(false)
   const onCompleteRef = useRef(onComplete)
@@ -93,7 +102,8 @@ export function SendAnonymousLetter({ message, onComplete }: { message: string; 
   }
 
   const tree = (
-    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="正在寄出匿名信">
+    <div className={styles.overlay} role="dialog" aria-modal="true"
+      aria-label={variant === 'capture' ? '正在寄出留言' : '正在寄出匿名信'}>
       <div className={styles.scrim} />
       <div className={styles.desk} data-stage={stage}>
         <div className={styles.envelope}>

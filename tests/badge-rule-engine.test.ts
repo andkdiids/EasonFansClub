@@ -39,7 +39,7 @@ test('规则输入只接受受控类型、正整数阈值，首版后台只开�
 })
 
 test('规则注册表统一提供指标、文案、阈值、操作符和事件映射', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 21)
+  assert.equal(BADGE_RULE_TYPES.length, 24)
   for (const ruleType of BADGE_RULE_TYPES) {
     const definition = BADGE_RULE_REGISTRY[ruleType]
     assert.equal(definition.metricLoader, ruleType)
@@ -50,7 +50,11 @@ test('规则注册表统一提供指标、文案、阈值、操作符和事件�
     else assert.ok(definition.events.length > 0)
     if (definition.threshold) {
       assert.equal(definition.threshold.min, 1)
-      assert.equal(definition.threshold.max, 1_000_000_000)
+      // The three Shun Master cumulative rules publish a narrower, documented
+      // range (1–1,000,000) instead of the generic billion-wide one; every other
+      // rule keeps the default bound.
+      assert.equal(definition.threshold.max,
+        ruleType.startsWith('SHUN_') ? 1_000_000 : 1_000_000_000, ruleType)
     } else {
       assert.ok('targetKind' in definition || ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY' || ruleType === 'BADGE_OWNERSHIP' || ruleType === 'CHECKIN_ON_DATE')
     }

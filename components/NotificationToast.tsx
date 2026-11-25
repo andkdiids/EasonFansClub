@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { normalizeActionUrl } from '@/lib/url-safety'
-import { ANONYMOUS_LETTER_ENTRY_LABEL, SHUN_INVESTIGATE_ENTRY_LABEL, shunInvestigationLink, shunLetterHref, shunRoundNotification } from '@/lib/shun-letter-notification'
+import { ANONYMOUS_LETTER_ENTRY_LABEL, CAPTURE_LETTER_ENTRY_LABEL, CAPTURE_RESULT_ENTRY_LABEL, isShunCaptureKind, SHUN_INVESTIGATE_ENTRY_LABEL, captureLetterHref, shunInvestigationHref, shunLetterHref, shunRoundNotification } from '@/lib/shun-letter-notification'
 
 type ToastNotification = {
   id: string
@@ -81,10 +81,15 @@ export function NotificationToast({ enabled }: { enabled: boolean }) {
   const letterHref = shunLetterHref({ key: toast.key, link: toast.link, targetUrl: toast.targetUrl })
   // 普通被顺通知同样必须直连「谁顺了我」的对应记录，而不是只给一个通用详情。
   const shunRound = shunRoundNotification({ key: toast.key, link: toast.link, targetUrl: toast.targetUrl })
-  const targetUrl = letterHref || (shunRound ? shunInvestigationLink(shunRound.roundId) : null)
+  // V5 抓捕通知：被抓到的 EF 落到自己的「我顺了谁」记录；若对方留了话，优先直达留言。
+  const captureHref = captureLetterHref({ key: toast.key, link: toast.link, targetUrl: toast.targetUrl })
+  const targetUrl = captureHref || letterHref
+    || shunInvestigationHref({ key: toast.key, link: toast.link, targetUrl: toast.targetUrl })
     || normalizeActionUrl(toast.targetUrl) || normalizeActionUrl(toast.link) || '/notifications'
-  const actionLabel = letterHref ? ANONYMOUS_LETTER_ENTRY_LABEL
-    : shunRound ? SHUN_INVESTIGATE_ENTRY_LABEL : '查看详情'
+  const actionLabel = captureHref ? CAPTURE_LETTER_ENTRY_LABEL
+    : letterHref ? ANONYMOUS_LETTER_ENTRY_LABEL
+    : shunRound ? (isShunCaptureKind(shunRound.kind) ? CAPTURE_RESULT_ENTRY_LABEL : SHUN_INVESTIGATE_ENTRY_LABEL)
+    : '查看详情'
 
   return (
     <div className="notification-toast fixed inset-x-4 md:inset-x-auto md:right-6 md:w-96">

@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
-import { shunSendDueNotification } from '@/lib/shun-master'
-import { SHUN_NOTIFY_STATUS } from '@/lib/shun-config'
+import { shunSendDueCaptureNotification, shunSendDueNotification } from '@/lib/shun-master'
+import { SHUN_CAPTURE_NOTIFY_STATUS, SHUN_NOTIFY_STATUS } from '@/lib/shun-config'
 import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from '@/lib/deployment-db-maintenance-hold'
 
 /**
@@ -26,12 +26,15 @@ export type ShunNotifySweepResult = {
   scanned: number
   delivered: number
   failed: number
+  /** Capture-result notices delivered by the same pass (V5). */
+  captureDelivered: number
+  captureFailed: number
 }
 
 let sweeping = false
 
 export async function runShunNotifySweepOnce(now = new Date()): Promise<ShunNotifySweepResult> {
-  if (sweeping) return { scanned: 0, delivered: 0, failed: 0 }
+  if (sweeping) return { scanned: 0, delivered: 0, failed: 0, captureDelivered: 0, captureFailed: 0 }
   sweeping = true
   try {
     const due = await prisma.shunMasterRound.findMany({
@@ -58,10 +61,33 @@ export async function runShunNotifySweepOnce(now = new Date()): Promise<ShunNoti
         })
       }
     }
-    if (due.length) {
-      console.info('[shun-notify.worker.sweep]', { scanned: due.length, delivered, failed })
+    // Capture results share the same window and the same serialised service, so
+    // a capturer who closes the page can never leave the caught actor unaware.
+    const dueCaptures = await prisma.shunMasterRound.findMany({
+      where: { captureNotifyStatus: SHUN_CAPTURE_NOTIFY_STATUS.pending, captureNotifyDueAt: { lte: now } },
+      orderBy: { captureNotifyDueAt: 'asc' },
+      take: SWEEP_BATCH,
+      select: { id: true },
+    })
+    let captureDelivered = 0
+    let captureFailed = 0
+    for (const { id } of dueCaptures) {
+      try {
+        const outcome = await shunSendDueCaptureNotification(id)
+        if (outcome.status === SHUN_CAPTURE_NOTIFY_STATUS.plain) captureDelivered += 1
+      } catch (error) {
+        captureFailed += 1
+        console.error('[shun-notify.worker.capture-failed]', {
+          roundId: id, errorName: error instanceof Error ? error.name : 'UNKNOWN',
+        })
+      }
     }
-    return { scanned: due.length, delivered, failed }
+    if (due.length || dueCaptures.length) {
+      console.info('[shun-notify.worker.sweep]', {
+        scanned: due.length, delivered, failed, captureScanned: dueCaptures.length, captureDelivered, captureFailed,
+      })
+    }
+    return { scanned: due.length, delivered, failed, captureDelivered, captureFailed }
   } finally {
     sweeping = false
   }

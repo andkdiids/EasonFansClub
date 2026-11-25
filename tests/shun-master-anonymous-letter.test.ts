@@ -157,11 +157,16 @@ test('the plain notice keeps the documented copy', () => {
 test('the transfer route no longer accepts a message while the notify route screens it', () => {
   assert.doesNotMatch(attemptRoute, /anonymousMessage/, '顺一手请求不再携带留言')
   assert.match(attemptRoute, /shunAttempt\(guard\.user\.id, body\.requestId\)/, '顺一手只使用 requestId')
-  assert.match(notifyRoute, /action !== 'notify' && action !== 'letter'/, '只允许两种通知动作')
+  // V5 扩展到四个动作：被顺通知 / 匿名信 / 抓捕通知 / 抓捕反击留言，其它一律 404。
+  assert.match(notifyRoute, /const take = action === 'notify' \|\| action === 'letter'/, '被顺流程只允许两种动作')
+  assert.match(notifyRoute, /const capture = action === 'captured' \|\| action === 'capture-letter'/, '抓捕流程只允许两种动作')
+  assert.match(notifyRoute, /\(!take && !capture\)/, '四个动作之外必须拒绝')
   assert.match(notifyRoute, /findMatchedBannedWords\(body\.message, await getEnabledBannedWords\(\)\)/,
     '留言必须走现有违禁词校验')
   assert.match(notifyRoute, /shunSendNotification\(guard\.user\.id, id, body\.message\)/)
   assert.match(notifyRoute, /shunSendNotification\(guard\.user\.id, id, null\)/, '不留言必须调用普通通知')
+  assert.match(notifyRoute, /shunSendCaptureNotification\(guard\.user\.id, id, body\.message\)/, '抓捕留言必须走抓捕服务')
+  assert.match(notifyRoute, /shunSendCaptureNotification\(guard\.user\.id, id, null\)/, '抓捕不留言必须走普通抓捕通知')
 })
 
 test('顺一手 executes the take directly and shows the target first', () => {

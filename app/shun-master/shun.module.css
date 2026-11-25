@@ -86,3 +86,14 @@
 .optOutCard .tabs button{min-height:44px;border:1px solid #9b7c52;background:transparent;color:#171717;font:inherit;font-size:14px}
 .optOutCard .tabs button:disabled{opacity:.55}
 .optOutCard .tabs .primary{background:#171717;color:#f1e7d5;border-color:#171717;font-weight:650}
+
+/* V5 capture counter note: the composer lives in the result panel (not the
+   take-flow dialog), so it needs its own field styling. Same 60-character
+   contract and the same paper palette as the anonymous composer. */
+.result textarea{box-sizing:border-box;width:100%;min-height:96px;padding:10px;border:1px solid #9b7c52;background:#fbf6ea;color:#171717;font:inherit;line-height:1.7;resize:vertical}
+.result .composeActions{grid-template-columns:repeat(2,minmax(0,1fr))}
+/* The bonus block is a separate, clearly-visible win: it must never be mistaken
+   for part of the recovered amount. */
+.bonus{display:grid;gap:2px;padding:10px;border:1px solid #d9b26a;border-radius:10px;background:#fdf6e3;color:#7b2233}
+.bonus strong{font-size:15px}
+.bonus p{margin:0;font-size:13px;color:#5d4a34}

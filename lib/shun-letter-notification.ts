@@ -106,19 +106,46 @@ export function shunInvestigationLink(roundId: string) {
 }
 
 const ROUND_KEY_PATTERN = /^shun:([a-z0-9]{1,40}):(taken|taken-letter)$/
+const CAPTURE_KEY_PATTERN = /^shun:([a-z0-9]{1,40}):(captured|captured-letter)$/
 const INVESTIGATION_LINK_PATTERN = /^\/shun-master$/
 
-export type ShunRoundNotificationKind = 'taken' | 'taken-letter'
+export type ShunRoundNotificationKind = 'taken' | 'taken-letter' | 'captured' | 'captured-letter'
+
+/** Whether this kind is a capture-result notice for the caught actor. */
+export function isShunCaptureKind(kind: ShunRoundNotificationKind | null | undefined) {
+  return kind === 'captured' || kind === 'captured-letter'
+}
+
+/** Canonical capture-result keys. Must stay byte-identical to the stored ones. */
+export function captureNotifyKey(roundId: string, withLetter: boolean) {
+  return `shun:${roundId}:${withLetter ? 'captured-letter' : 'captured'}`
+}
+
+/**
+ * Canonical 「查看调查结果」 link for one capture: the caught actor lands on
+ * 「我顺了谁」 with the matching record focused. `side=out` is mandatory — a bare
+ * `/shun-master` would drop them on the default tab with no way to find it.
+ */
+export function captureInvestigationLink(roundId: string) {
+  return `${ANONYMOUS_LETTER_PATH}?record=${encodeURIComponent(roundId)}&side=out`
+}
+
+/** Canonical 「查看留言」 link: the same record plus the one-shot letter flag. */
+export function captureLetterNotificationLink(roundId: string) {
+  return `${captureInvestigationLink(roundId)}&captureLetter=1`
+}
 
 /**
  * Recognises a Shun round notification from server-written identifiers only:
- * the key `shun:<roundId>:taken` / `shun:<roundId>:taken-letter`, or a
+ * `shun:<roundId>:(taken|taken-letter|captured|captured-letter)` or a
  * `/shun-master?record=<roundId>` link. Titles and copy are never inspected, so
- * an unrelated system notice can never be routed into the investigation flow.
+ * an unrelated system notice can never be routed into a Shun flow.
  */
 export function shunRoundNotification(item: ShunLetterNotificationLike):
   { roundId: string; kind: ShunRoundNotificationKind } | null {
   const key = (item.key || '').trim()
+  const fromCaptureKey = CAPTURE_KEY_PATTERN.exec(key)
+  if (fromCaptureKey) return { roundId: fromCaptureKey[1], kind: fromCaptureKey[2] as ShunRoundNotificationKind }
   const fromKey = ROUND_KEY_PATTERN.exec(key)
   if (fromKey) return { roundId: fromKey[1], kind: fromKey[2] as ShunRoundNotificationKind }
   const raw = (item.link || item.targetUrl || '').trim()
@@ -132,20 +159,49 @@ export function shunRoundNotification(item: ShunLetterNotificationLike):
   if (!INVESTIGATION_LINK_PATTERN.test(url.pathname)) return null
   const record = url.searchParams.get('record')?.trim() || ''
   if (!ROUND_ID_PATTERN.test(record)) return null
+  if (url.searchParams.get('captureLetter')) return { roundId: record, kind: 'captured-letter' }
+  if (url.searchParams.get('side') === 'out' && url.searchParams.get('letter') === null) {
+    // `side=out` is only ever written by a capture-result notice: the caught
+    // actor is sent to their own 「我顺了谁」 record. Recognising it here also
+    // repairs historical 'recover-actor' rows whose link had no key.
+    return { roundId: record, kind: 'captured' }
+  }
   return { roundId: record, kind: url.searchParams.get('letter') ? 'taken-letter' : 'taken' }
 }
 
-/** Round id of any Shun round notification (plain or letter), or null. */
+/** Round id of any Shun round notification (plain, letter or capture), or null. */
 export function shunRoundNotificationId(item: ShunLetterNotificationLike): string | null {
   return shunRoundNotification(item)?.roundId ?? null
+}
+
+/** Round id carried by a capture notice that also has a counter note, or null. */
+export function captureLetterRoundId(item: ShunLetterNotificationLike): string | null {
+  const parsed = shunRoundNotification(item)
+  return parsed?.kind === 'captured-letter' ? parsed.roundId : null
 }
 
 /**
  * Investigation target for a Shun notification. Rebuilt from the trusted round
  * id so historical rows with a bare `/shun-master?record=…` link (no `side`)
- * still land on the right tab.
+ * still land on the right tab, and capture notices land on 「我顺了谁」.
  */
 export function shunInvestigationHref(item: ShunLetterNotificationLike): string | null {
   const parsed = shunRoundNotification(item)
-  return parsed ? shunInvestigationLink(parsed.roundId) : null
+  if (!parsed) return null
+  return isShunCaptureKind(parsed.kind) ? captureInvestigationLink(parsed.roundId) : shunInvestigationLink(parsed.roundId)
+}
+
+export const CAPTURE_LETTER_ENTRY_LABEL = '查看留言'
+export const CAPTURE_RESULT_ENTRY_LABEL = '查看调查结果'
+
+/** 「查看留言」 target for a capture notice that carries a counter note, or null. */
+export function captureLetterHref(item: ShunLetterNotificationLike): string | null {
+  const roundId = captureLetterRoundId(item)
+  return roundId ? captureLetterNotificationLink(roundId) : null
+}
+
+/** 「查看调查结果」 target for any capture notice, or null. */
+export function captureResultHref(item: ShunLetterNotificationLike): string | null {
+  const parsed = shunRoundNotification(item)
+  return parsed && isShunCaptureKind(parsed.kind) ? captureInvestigationLink(parsed.roundId) : null
 }

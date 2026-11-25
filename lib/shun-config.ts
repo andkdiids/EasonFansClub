@@ -28,10 +28,30 @@ export const SHUN_NOTIFY_STATUS = {
 } as const
 export type ShunNotifyStatus = typeof SHUN_NOTIFY_STATUS[keyof typeof SHUN_NOTIFY_STATUS]
 
+/**
+ * Capture-result notification state machine.
+ *
+ * A successful capture settles the recovery (and the optional bonus) at once,
+ * but the real Shun actor is only told after the capturer decides whether to
+ * leave a counter note — or after this window expires. It shares the same
+ * 120-second reliability window and the same server-side sweep as the take
+ * notification, so closing the page can never leave the actor unnotified.
+ */
+export const SHUN_CAPTURE_NOTIFY_STATUS = SHUN_NOTIFY_STATUS
+export const SHUN_CAPTURE_NOTIFY_WINDOW_MS = SHUN_NOTIFY_WINDOW_MS
+
+/**
+ * Default chance (in percent) that a successful capture also pays a platform
+ * bonus equal to the amount actually recovered. Administrator-configurable
+ * 0–100. Invisible to players: it is never part of any notification or page.
+ */
+export const RECOVERY_BONUS_CHANCE_DEFAULT = 5
+
 export const defaultShunConfig = {
   enabled: false, attempts: 7, victimCap: 4, goldenMinutes: 10,
   probabilities: [25, 21, 17, 14, 10, 7, 6], weights: [130, 122, 115, 108, 100],
   friendChance: FRIEND_CHANCE_DEFAULT,
+  bonusChance: RECOVERY_BONUS_CHANCE_DEFAULT,
 }
 export type ShunConfig = typeof defaultShunConfig
 
@@ -74,6 +94,11 @@ export function shunConfigError(value: unknown): string | null {
   if (c.friendChance !== undefined && !bounded(c.friendChance, 0, 100)) {
     return '好友命中概率必须是 0 到 100 的整数。'
   }
+  // Absent on configurations saved before the recovery bonus existed. Both
+  // bounds are allowed on purpose: 0% disables the roll, 100% makes it certain.
+  if (c.bonusChance !== undefined && !bounded(c.bonusChance, 0, 100)) {
+    return '追回额外奖励概率必须是 0 到 100 的整数。'
+  }
   return null
 }
 
@@ -86,6 +111,9 @@ export function validateShunConfig(value: unknown): ShunConfig | null {
     weights: c.weights as number[],
     // Legacy rows predate the friend pool: default it instead of rejecting them.
     friendChance: typeof c.friendChance === 'number' ? c.friendChance : FRIEND_CHANCE_DEFAULT,
+    // Same for the recovery bonus: a configuration saved before V5 keeps the
+    // published 5% default instead of silently turning the bonus off.
+    bonusChance: typeof c.bonusChance === 'number' ? c.bonusChance : RECOVERY_BONUS_CHANCE_DEFAULT,
   }
 }
 

@@ -108,6 +108,20 @@ const BADGE_RULE_METRIC_LOADERS: Partial<Record<SupportedBadgeRuleType, BadgeMet
   // evaluateBadgeRule; these scalar loaders are intentionally inert.
   BIRTHDAY_ZODIAC: async () => 0,
   BIRTHDAY_TODAY: async () => 0,
+  // Shun Master cumulative amounts. All three read the authoritative round
+  // table, so pre-release history counts without replaying any transfer:
+  // - stolen: fees this user took (kept even if later recovered);
+  // - victim: fees taken away from this user (kept even if later recovered);
+  // - recovered: `recovered` only, so the platform bonus can never inflate it.
+  SHUN_STOLEN_TOTAL: async (userId) => safeMetric((await prisma.shunMasterRound.aggregate({
+    where: { actorId: userId }, _sum: { amount: true },
+  }))._sum.amount),
+  SHUN_VICTIM_TOTAL: async (userId) => safeMetric((await prisma.shunMasterRound.aggregate({
+    where: { victimId: userId }, _sum: { amount: true },
+  }))._sum.amount),
+  SHUN_RECOVERED_TOTAL: async (userId) => safeMetric((await prisma.shunMasterRound.aggregate({
+    where: { victimId: userId, result: 'SUCCESS' }, _sum: { recovered: true },
+  }))._sum.recovered),
 }
 
 export function getBadgeMetricLoader(ruleType: SupportedBadgeRuleType) {
