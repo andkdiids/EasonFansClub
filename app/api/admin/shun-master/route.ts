@@ -78,10 +78,25 @@ export async function GET(request: Request) {
     prisma.shunMasterProtection.findMany({ where: { protected: true }, orderBy: [{ updatedAt: 'desc' }, { userId: 'asc' }],
       take: 50, select: { userId: true, updatedAt: true } }),
   ])
+  // Admin-only recovery-bonus audit. Cumulative on purpose: the published
+  // figures are "累计额外奖励挂号费 / 累计原额追回挂号费", and the trigger rate
+  // must be comparable with the configured chance.
+  const [bonusAggregate, bonusCount] = await Promise.all([
+    prisma.shunMasterRound.aggregate({ where: { result: 'SUCCESS' },
+      _count: { _all: true }, _sum: { bonusAwarded: true, recovered: true } }),
+    prisma.shunMasterRound.count({ where: { bonusAwarded: { gt: 0 } } }),
+  ])
+  const bonusStats = {
+    recoveredCount: bonusAggregate._count._all,
+    bonusCount,
+    bonusRate: bonusAggregate._count._all ? Math.round(bonusCount / bonusAggregate._count._all * 1000) / 10 : 0,
+    bonusTotal: bonusAggregate._sum.bonusAwarded ?? 0,
+    recoveredTotal: bonusAggregate._sum.recovered ?? 0,
+  }
   return json({ config, effectiveEnabled: config.enabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated,
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
     outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit,
-    matchStats, notifyStats })
+    matchStats, notifyStats, bonusStats })
 }
 
 export async function PATCH(request: Request) {

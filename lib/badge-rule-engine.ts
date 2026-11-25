@@ -892,6 +892,32 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
       rows.forEach((row) => metrics.set(row.userId, (metrics.get(row.userId) || 0) + 1))
       return metrics
     }
+    // Shun Master cumulative amounts, batched for historical backfill. The
+    // single-user loaders in badge-metrics.ts stay authoritative for the normal
+    // event path; both read the same round table so they can never disagree.
+    case 'SHUN_STOLEN_TOTAL': {
+      const rows = await prisma.shunMasterRound.groupBy({
+        by: ['actorId'], where: { actorId: { in: userIds } }, _sum: { amount: true },
+      })
+      rows.forEach((row) => metrics.set(row.actorId, Math.max(0, row._sum.amount ?? 0)))
+      return metrics
+    }
+    case 'SHUN_VICTIM_TOTAL': {
+      const rows = await prisma.shunMasterRound.groupBy({
+        by: ['victimId'], where: { victimId: { in: userIds } }, _sum: { amount: true },
+      })
+      rows.forEach((row) => metrics.set(row.victimId, Math.max(0, row._sum.amount ?? 0)))
+      return metrics
+    }
+    case 'SHUN_RECOVERED_TOTAL': {
+      // `recovered` only: the platform bonus is stored separately and must never
+      // inflate a badge.
+      const rows = await prisma.shunMasterRound.groupBy({
+        by: ['victimId'], where: { victimId: { in: userIds }, result: 'SUCCESS' }, _sum: { recovered: true },
+      })
+      rows.forEach((row) => metrics.set(row.victimId, Math.max(0, row._sum.recovered ?? 0)))
+      return metrics
+    }
     case 'BADGE_SERIES_COMPLETE':
     case 'ACTIVITY_PARTICIPATION':
     case 'BADGE_OWNERSHIP':

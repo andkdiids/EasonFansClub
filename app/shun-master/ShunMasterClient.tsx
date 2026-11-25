@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ShunMasterArt } from '@/components/ShunMasterArt'
 import { ShunMasterLogo } from '@/components/ShunMasterLogo'
 import { AnonymousLetter, type AnonymousLetterData } from '@/components/shun-master/AnonymousLetter'
+import { CaptureLetter, type CaptureLetterData } from '@/components/shun-master/CaptureLetter'
 import { SendAnonymousLetter } from '@/components/shun-master/SendAnonymousLetter'
 import { publicImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
@@ -14,7 +15,11 @@ const MESSAGE_MAX = 60
 
 type Person = { uid: number; nickname: string; avatarUrl: string | null }
 type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' | 'FAILED' | null
-  createdAt: string; goldenUntil: string; person: Person | null; canCapture: boolean; hasLetter?: boolean }
+  createdAt: string; goldenUntil: string; person: Person | null; canCapture: boolean; hasLetter?: boolean
+  /** Platform bonus granted on a successful capture (0 when the roll lost). */
+  bonusAwarded?: number
+  /** Capturer side: this capture already carries a delivered counter note. */
+  hasCaptureLetter?: boolean }
 type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null; windowAt: string }
 type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
@@ -46,8 +51,10 @@ function PersonLabel({ person, link = false }: { person: Person | null; link?: b
     : <span className={styles.person}>{content}</span>
 }
 
-export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId }: {
+export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId, autoCaptureLetterId }: {
   focusedRecord?: string; initialSide: Side; initialGuest: boolean; autoLetterId?: string
+  /** V5:一-shot flag from a capture notice that carries a counter note. */
+  autoCaptureLetterId?: string
 }) {
   const [status, setStatus] = useState<Status>()
   const [side, setSide] = useState<Side>(initialSide)
@@ -74,6 +81,14 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const [letterError, setLetterError] = useState('')
   // Re-opening a letter from the record list skips the delivery animation.
   const [letterInstant, setLetterInstant] = useState(false)
+  // Capture counter note reading view (the caught actor's side).
+  const [captureLetterView, setCaptureLetterView] = useState<CaptureLetterData>()
+  const [captureLetterBusy, setCaptureLetterBusy] = useState(false)
+  const [captureLetterError, setCaptureLetterError] = useState('')
+  // Capture counter note: the result is settled first, the note is a separate,
+  // later decision that reuses the very same delivery animation.
+  const [captureStep, setCaptureStep] = useState<'result' | 'write' | 'sending' | 'animate' | 'delivered' | 'expired'>('result')
+  const [captureMessage, setCaptureMessage] = useState('')
   // Permanent opt-out confirmation. Kept local and unchecked by default; the
   // exit entry only ever renders inside the collapsed-by-default rules block.
   const [optOutOpen, setOptOutOpen] = useState(false)
@@ -89,6 +104,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   // One notification click may only open one envelope: guards against React
   // re-renders and StrictMode double effects replaying the animation.
   const letterRequested = useRef(false)
+  // One notification click may only open one counter note.
+  const captureLetterRequested = useRef(false)
   // A notification deep link must land on its record once, not on every render.
   const focusOnce = useRef(false)
   const loadStatus = useCallback(async () => {
@@ -145,6 +162,26 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       setLetter(undefined)
     }
   }, [])
+  const openCaptureLetter = useCallback(async (id: string) => {
+    try {
+      setCaptureLetterView(await api<CaptureLetterData>('capture-letter/' + encodeURIComponent(id)))
+      setCaptureLetterError('')
+    } catch {
+      // Missing, hidden or foreign notes degrade silently: no empty sheet and no
+      // error banner, the record list behaves exactly as before.
+      setCaptureLetterView(undefined)
+    }
+  }, [])
+  useEffect(() => {
+    if (!autoCaptureLetterId || !signedIn || captureLetterRequested.current) return
+    captureLetterRequested.current = true
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('captureLetter')) {
+      url.searchParams.delete('captureLetter')
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+    }
+    void openCaptureLetter(autoCaptureLetterId)
+  }, [autoCaptureLetterId, signedIn, openCaptureLetter])
   useEffect(() => {
     if (!autoLetterId || !signedIn || letterRequested.current) return
     letterRequested.current = true
@@ -336,9 +373,31 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       setLetterBusy(false)
     }
   }
+  /**
+   * 「查看调查结果」 from a capture note. Reuses the exact capture-preparation
+   * call the record list uses: it only opens the suspect picker (or the settled
+   * panel) and never submits an answer, so nothing about capture is replayed.
+   */
+  async function investigateCaptureLetter() {
+    if (!captureLetterView || captureLetterBusy) return
+    setCaptureLetterBusy(true)
+    setCaptureLetterError('')
+    try {
+      await openCapture(captureLetterView.roundId)
+      setCaptureLetterView(undefined)
+      setPendingFocus(['shun-capture', 'shun-caught'])
+    } catch (error) {
+      if (error instanceof RequestError && (error.code === 'UNAVAILABLE' || error.code === 'NOT_FOUND')) {
+        setCaptureLetterError(error.message)
+      } else {
+        setCaptureLetterError(error instanceof Error ? error.message : '暂时无法打开调查，请重试。')
+      }
+    } finally {
+      setCaptureLetterBusy(false)
+    }
+  }
   /** Closes the settled letter and lands on its row in the record list. */
-  function showRecord(roundId: string) {
-    closeLetter()
+  function showRecord(roundId: string) {    closeLetter()
     setSide('in')
     setPendingFocus([side === 'in' ? `shun-record-${roundId}` : 'shun-records', 'shun-records'])
   }
@@ -348,6 +407,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       try {
         const outcome = await api<{ record: Round }>(`capture/${capture.id}/guess`, { uid: selected, mode: capture.data.mode })
         setCaught(outcome.record)
+        setCaptureStep('result')
+        setCaptureMessage('')
         setCapture(undefined)
         setPendingFocus(['shun-caught'])
         await Promise.all([loadStatus(), loadRecords()])
@@ -360,6 +421,75 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       }
     })
   }
+  /**
+   * Capture result: "no note" and "close" both end in the ordinary arrest
+   * notice. The request is idempotent and the server sweep is the backstop, so
+   * a lost response can never leave the caught actor unaware.
+   */
+  async function sendCapturePlain() {
+    const round = caught
+    if (!round || lock.current || captureStep === 'sending') return
+    lock.current = true
+    setBusy('capture-notify')
+    setError('')
+    try {
+      await api<{ status: string }>(`round/${round.id}/captured`, {})
+      setCaught(undefined)
+      setCaptureStep('result')
+      setCaptureMessage('')
+      setNotice('已发送被抓通知。')
+      await Promise.all([loadStatus(), loadRecords()])
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '通知发送失败，请重试。')
+    } finally {
+      lock.current = false
+      setBusy('')
+    }
+  }
+  /** Sends the counter note, then plays the shared delivery animation. */
+  async function sendCaptureLetter() {
+    const round = caught
+    const content = captureMessage.trim()
+    if (!round || lock.current || !content) return
+    lock.current = true
+    setBusy('capture-letter')
+    setError('')
+    setCaptureStep('sending')
+    try {
+      const outcome = await api<{ status: string }>(`round/${round.id}/capture-letter`, { message: content })
+      if (outcome.status !== 'SENT_LETTER') throw new RequestError('抓捕通知已发送，无法再补充留言。', 'ALREADY_NOTIFIED')
+      setCaptureStep('animate')
+      await Promise.all([loadStatus(), loadRecords()])
+    } catch (error) {
+      if (error instanceof RequestError && error.code === 'ALREADY_NOTIFIED') {
+        // The ordinary arrest notice already went out: saying "已送达" for a
+        // note that was never stored would be a lie.
+        setCaptureStep('expired')
+        setError(error.message)
+        await Promise.all([loadStatus(), loadRecords()])
+      } else {
+        setCaptureStep('write')
+        setError(error instanceof Error ? error.message : '留言发送失败，请重试。')
+      }
+    } finally {
+      lock.current = false
+      setBusy('')
+    }
+  }
+  /** Esc / 关闭 on the capture result: never lets a settled capture go unnoticed. */
+  function closeCaptureResult() {
+    if (busy || captureStep === 'sending' || captureStep === 'animate') return
+    const settled = !!caught && caught.result === 'SUCCESS'
+    // Nothing left to notify when the note was already delivered, the notice
+    // already expired, or the capture failed.
+    if (!settled || captureStep === 'delivered' || captureStep === 'expired' || caught?.hasCaptureLetter) {
+      setCaught(undefined)
+      setCaptureStep('result')
+      setCaptureMessage('')
+      return
+    }
+    void sendCapturePlain()
+  }
   const rows = list?.focused && !list.records.some((round) => round.id === list.focused?.id)
     ? [list.focused, ...list.records] : list?.records || []
   const myTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Shanghai' })
@@ -369,6 +499,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   // The letter is free: it must stay sendable even when this take used the last
   // daily attempt.
   const canSend = messageLength > 0 && messageLength <= MESSAGE_MAX && !busy
+  // Same 60-character contract for the capture counter note.
+  const captureLength = [...captureMessage.trim()].length
+  const canSendCapture = captureLength > 0 && captureLength <= MESSAGE_MAX && !busy
   return <main className={styles.page}>
     <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div></header>
     {error && <p className={styles.alert} role="alert">{error}</p>}
@@ -412,8 +545,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       </section>
       {status && <section className={styles.panel} aria-label="历史记录" id="shun-records" tabIndex={-1}>
         <div className={styles.tabs} aria-label="记录类别">
-          <button aria-pressed={side === 'out'} onClick={() => { setSide('out'); setCapture(undefined); setCaught(undefined) }}>我顺了谁</button>
-          <button aria-pressed={side === 'in'} onClick={() => { setSide('in'); setCapture(undefined); setCaught(undefined) }}>谁顺了我</button>
+          <button aria-pressed={side === 'out'} onClick={() => { setSide('out'); setCapture(undefined); setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>我顺了谁</button>
+          <button aria-pressed={side === 'in'} onClick={() => { setSide('in'); setCapture(undefined); setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>谁顺了我</button>
         </div>
         <div className={styles.filters}>
           <label>记录日期 <select value={range} onChange={(event) => setRange(event.target.value)}>
@@ -431,9 +564,68 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <button disabled={!!busy || selected === undefined} onClick={() => void confirmCapture()}>确认抓捕</button>
           <button disabled={!!busy} onClick={() => setCapture(undefined)}>返回记录</button>
         </section>}
-        {caught && <div className={styles.result} role="status" id="shun-caught" tabIndex={-1}><strong>{caught.result === 'SUCCESS' ? '抓到你啦！' : '让 TA 溜了！'}</strong>
-          <PersonLabel person={caught.person} link /><p>{caught.result === 'SUCCESS' ? `追回 ${caught.recovered} 挂号费` : `${caught.amount} 挂号费未追回`}</p>
-          <button onClick={() => setCaught(undefined)}>返回记录</button></div>}
+        {caught && <div className={styles.result} role="status" id="shun-caught" tabIndex={-1}>
+          {caught.result !== 'SUCCESS' ? <>
+            <strong>让 TA 溜了！</strong>
+            <PersonLabel person={caught.person} link />
+            <p>{caught.amount} 挂号费未追回</p>
+            <button onClick={() => { setCaught(undefined); setCaptureStep('result') }}>返回记录</button>
+          </> : captureStep === 'delivered' || captureStep === 'expired' ? <>
+            <strong>{captureStep === 'delivered' ? '留言已送达！✉️' : '本次通知已发送'}</strong>
+            <p className={styles.letterSent}>{captureStep === 'delivered'
+              ? '你的留言已经送给被抓到的 EF。'
+              : '抓捕通知已经送达，无法再补充留言。'}</p>
+            <div className={styles.tabs}>
+              {/* Permanent opt-out removes every new take entry point, but the
+                  already-settled capture note flow still completes. */}
+              <button type="button" autoFocus
+                disabled={!!busy || status?.optedOut || !status?.enabled || !status?.remaining}
+                onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage(''); void attempt() }}>
+                {status?.optedOut ? '已退出顺大师' : status?.remaining ? '再顺一手' : '今日次数已用完'}
+              </button>
+              <button type="button" onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>返回顺大师</button>
+            </div>
+          </> : captureStep === 'write' || captureStep === 'sending' ? <>
+            <strong>给被抓到的 EF 留句话</strong>
+            <PersonLabel person={caught.person} link />
+            <p>成功追回 {caught.recovered} 挂号费{caught.bonusAwarded ? ` · 额外奖励 ${caught.bonusAwarded}` : ''}</p>
+            <textarea aria-label="反击留言内容" placeholder="抓到你啦！有什么想对 TA 说的？" value={captureMessage} autoFocus
+              onChange={(event) => {
+                const next = event.target.value.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
+                setCaptureMessage([...next].slice(0, MESSAGE_MAX).join(''))
+              }} />
+            <div className={styles.composeMeta}><span>{captureLength}/{MESSAGE_MAX}</span><span>这条留言会署名</span></div>
+            <div className={styles.composeActions}>
+              <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSendCapture || captureStep === 'sending'}
+                onClick={() => void sendCaptureLetter()}>{captureStep === 'sending' ? '发送中…' : '发送留言'}</button>
+              <button type="button" disabled={!!busy || captureStep === 'sending'}
+                onClick={() => { setError(''); setCaptureStep('result') }}>返回</button>
+              <button type="button" disabled={!!busy || captureStep === 'sending'} onClick={closeCaptureResult}>关闭</button>
+            </div>
+          </> : <>
+            <strong>抓到你啦！</strong>
+            <PersonLabel person={caught.person} link />
+            <p>成功追回 {caught.recovered} 挂号费</p>
+            {!!caught.bonusAwarded && <div className={styles.bonus} data-shun-bonus>
+              <strong>意外惊喜！🎉</strong>
+              <p>额外获得 {caught.bonusAwarded} 挂号费！</p>
+              <p>本次共获得 {caught.recovered + caught.bonusAwarded} 挂号费</p>
+            </div>}
+            {caught.hasCaptureLetter
+              ? <p className={styles.letterSent}>你已经给 TA 留过一句话，无法再补充。</p>
+              : <p className={styles.letterSent}>要不要给 TA 留句话？不留言也可以。</p>}
+            <div className={styles.composeActions}>
+              {!caught.hasCaptureLetter && <>
+                <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
+                  onClick={() => { setError(''); setCaptureStep('write') }}>给 TA 留句话</button>
+                <button type="button" disabled={!!busy} onClick={() => void sendCapturePlain()}>
+                  {busy === 'capture-notify' ? '发送中…' : '不留言'}
+                </button>
+              </>}
+              <button type="button" disabled={!!busy} onClick={closeCaptureResult}>关闭</button>
+            </div>
+          </>}
+        </div>}
         {rows.map((row) => <article className={styles.record} key={row.id} id={`shun-record-${row.id}`} tabIndex={-1}>
           <PersonLabel person={row.person} link />
           <p>{myTime.format(new Date(row.createdAt))} · {side === 'in' ? '−' : '+'}{row.amount} 挂号费</p>
@@ -504,9 +696,18 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       setStep('delivered')
       setMessage('')
     }} />}
+    {/* Capture counter note: the very same component, CSS timeline and skip
+        button — only the accessible label differs. */}
+    {captureStep === 'animate' && caught && <SendAnonymousLetter variant="capture" message={captureMessage.trim()} onComplete={() => {
+      // The note is already stored: the animation only reveals the result.
+      setCaptureStep('delivered')
+      setCaptureMessage('')
+    }} />}
     {letter && <AnonymousLetter letter={letter} busy={letterBusy} error={letterError} instant={letterInstant}
       onInvestigate={() => void investigate()} onClose={closeLetter}
       onShowRecord={() => showRecord(letter.roundId)} />}
+    {captureLetterView && <CaptureLetter letter={captureLetterView} busy={captureLetterBusy} error={captureLetterError}
+      onInvestigate={() => void investigateCaptureLetter()} onClose={() => { setCaptureLetterView(undefined); setCaptureLetterError('') }} />}
     {optOutOpen && <div className={styles.optOutOverlay} role="dialog" aria-modal="true" aria-labelledby="opt-out-title">
       <div className={styles.optOutCard}>
         <h2 id="opt-out-title">确定永久退出顺大师？</h2>

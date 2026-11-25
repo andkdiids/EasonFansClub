@@ -1,0 +1,154 @@
+/* Reading view for a capture counter note.
+ *
+ * Same paper palette as the anonymous letter: the global midnight theme
+ * recolours every [role='dialog'], so the sheet colours are locked explicitly
+ * and the text stays readable in both themes. The overlay sits above the mobile
+ * bottom nav so the buttons are always reachable. */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  padding: calc(16px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
+  background: #1b1a1799;
+  overflow-y: auto;
+}
+
+.overlay[role='dialog'][aria-modal='true'] {
+  color: #1b1a17;
+  background: #1b1a1799;
+}
+
+.paper {
+  box-sizing: border-box;
+  width: min(420px, 100%);
+  padding: 20px 18px;
+  border: 1.5px solid #1b1a17;
+  border-radius: 4px;
+  background-color: #f7f1e3;
+  box-shadow: 0 22px 50px -28px #1b1a17cc;
+  color: #1b1a17;
+  display: grid;
+  gap: 10px;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: .08em;
+  color: #7b2233;
+}
+
+.paper h2 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.5;
+  color: #1b1a17;
+}
+
+.person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  color: #1b1a17;
+}
+
+.person img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid #c4a983;
+}
+
+.avatarFallback {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid #c4a983;
+  background: #efe5cf;
+  font-weight: 700;
+  color: #7b2233;
+}
+
+.person a {
+  color: #1b1a17;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.uid {
+  font-size: 12px;
+  color: #6d6357;
+  font-variant-numeric: tabular-nums;
+}
+
+.body {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed #b8ab95;
+  border-radius: 4px;
+  background: #fffaf0;
+  color: #1b1a17;
+  font-size: 14px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.verdict {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #4a4238;
+}
+
+.verdict strong {
+  color: #7b2233;
+}
+
+.error {
+  margin: 0;
+  font-size: 13px;
+  color: #a2213a;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.actions button {
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid #9b7c52;
+  border-radius: 8px;
+  background: transparent;
+  color: #1b1a17;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  opacity: .55;
+}
+
+.actions .primary {
+  background: #1b1a17;
+  border-color: #1b1a17;
+  color: #f1e7d5;
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay { transition: none; }
+}

@@ -21,11 +21,21 @@ export const BADGE_EVALUATION_EVENTS = [
   'USER_BIRTHDAY_UPDATED',
   'CLINIC_CONSULTATION_CHANGED',
   'TOPIC_ACTIVITY_PARTICIPATION_CREATED',
+  'SHUN_MASTER_SETTLED',
 ] as const
 
 export type BadgeEvaluationEvent = typeof BADGE_EVALUATION_EVENTS[number]
 
 const BADGE_RULE_THRESHOLD_LIMITS = { min: 1, max: 1_000_000_000 } as const
+/**
+ * Shun Master cumulative rules use a tighter, explicitly published range and a
+ * 727 default. They stay independent of each other: each badge binds its own
+ * rule row, so no shared config value can couple the three thresholds.
+ */
+const SHUN_BADGE_THRESHOLD_LIMITS = { min: 1, max: 1_000_000 } as const
+const SHUN_BADGE_DEFAULT_THRESHOLD = 727
+export const SHUN_BADGE_RULE_DEFAULT_THRESHOLD = SHUN_BADGE_DEFAULT_THRESHOLD
+export const SHUN_BADGE_RULE_TYPES = ['SHUN_STOLEN_TOTAL', 'SHUN_VICTIM_TOTAL', 'SHUN_RECOVERED_TOTAL'] as const
 const ADMIN_BADGE_RULE_OPERATORS = ['GTE'] as const
 
 /** All values reserved by the database/engine. The first admin release exposes only GTE. */
@@ -39,7 +49,12 @@ export type BadgeRuleRegistryEntry = {
   metricLoader: string
   supportedOperators: readonly string[]
   events: readonly BadgeEvaluationEvent[]
-  threshold: typeof BADGE_RULE_THRESHOLD_LIMITS | null
+  threshold: { readonly min: number; readonly max: number } | null
+  /**
+   * Prefilled threshold for a brand-new rule of this type. Shun Master's three
+   * cumulative rules ship with 727; every other type keeps the engine default.
+   */
+  defaultThreshold?: number
   defaultAcquisitionDescription: (threshold: number | null, configJson?: unknown) => string
   adminSelectable?: boolean
   seriesCompletion?: boolean
@@ -369,6 +384,56 @@ export const BADGE_RULE_REGISTRY = {
     historicalBasis: '问诊内容、病例公开状态和病例发布者会动态变化，只支持按当前真实门诊数据重算',
     defaultAcquisitionDescription: (threshold: number | null, configJson?: unknown) => describeAspirinRule(threshold, configJson),
   },
+  /**
+   * Shun Master cumulative rules.
+   *
+   * All three read the authoritative Shun round table, so history recorded
+   * before this release is included without replaying any transfer, and the
+   * figures survive later captures (a take that was punished still happened).
+   * The threshold range is 1–1,000,000 and the shipped default is 727.
+   */
+  SHUN_STOLEN_TOTAL: {
+    group: '挂号', unit: '挂号费',
+    label: '顺大师 · 累计成功顺取',
+    dataDescription: '通过顺大师成功顺取并入账的挂号费累计金额；之后被追回也不扣减，不含其他游戏或平台奖励',
+    metricLoader: 'SHUN_STOLEN_TOTAL',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: ['SHUN_MASTER_SETTLED'],
+    threshold: SHUN_BADGE_THRESHOLD_LIMITS,
+    defaultThreshold: SHUN_BADGE_DEFAULT_THRESHOLD,
+    supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
+    historicalBasis: '按 ShunMasterRound 中该用户作为顺取者的 amount 求和重算，口径与上线前历史一致',
+    defaultAcquisitionDescription: (threshold: number | null) => `顺大师累计成功顺取 ${displayThreshold(threshold || SHUN_BADGE_DEFAULT_THRESHOLD)} 挂号费后获得`,
+  },
+  SHUN_VICTIM_TOTAL: {
+    group: '挂号', unit: '挂号费',
+    label: '顺大师 · 累计被顺走',
+    dataDescription: '通过顺大师实际被扣除的挂号费累计金额；之后成功追回也不扣减，不含其他挂号费消费',
+    metricLoader: 'SHUN_VICTIM_TOTAL',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: ['SHUN_MASTER_SETTLED'],
+    threshold: SHUN_BADGE_THRESHOLD_LIMITS,
+    defaultThreshold: SHUN_BADGE_DEFAULT_THRESHOLD,
+    supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
+    historicalBasis: '按 ShunMasterRound 中该用户作为被顺者的 amount 求和重算，口径与上线前历史一致',
+    defaultAcquisitionDescription: (threshold: number | null) => `顺大师累计被顺走 ${displayThreshold(threshold || SHUN_BADGE_DEFAULT_THRESHOLD)} 挂号费后获得`,
+  },
+  SHUN_RECOVERED_TOTAL: {
+    group: '挂号', unit: '挂号费',
+    label: '顺大师 · 累计成功追回',
+    dataDescription: '成功抓捕后实际追回的挂号费累计金额；不含额外随机奖励、平台补偿、抓捕失败金额和其他收入',
+    metricLoader: 'SHUN_RECOVERED_TOTAL',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: ['SHUN_MASTER_SETTLED'],
+    threshold: SHUN_BADGE_THRESHOLD_LIMITS,
+    defaultThreshold: SHUN_BADGE_DEFAULT_THRESHOLD,
+    supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
+    historicalBasis: '按 ShunMasterRound 中该用户作为被顺者、result=SUCCESS 的 recovered 求和重算，额外奖励不计入',
+    defaultAcquisitionDescription: (threshold: number | null) => `顺大师累计成功追回 ${displayThreshold(threshold || SHUN_BADGE_DEFAULT_THRESHOLD)} 挂号费后获得`,
+  },
 } as const satisfies Record<string, BadgeRuleRegistryEntry>
 
 export type SupportedBadgeRuleType = keyof typeof BADGE_RULE_REGISTRY
@@ -491,7 +556,8 @@ export function getZodiacFromRuleConfig(value: unknown): ZodiacSign | null {
   return isZodiacSign(normalized) ? normalized : null
 }
 
-function parsePositiveInteger(value: unknown, label: string, limits = BADGE_RULE_THRESHOLD_LIMITS) {
+function parsePositiveInteger(value: unknown, label: string,
+  limits: { readonly min: number; readonly max: number } = BADGE_RULE_THRESHOLD_LIMITS) {
   const parsed = typeof value === 'number' && Number.isInteger(value)
     ? value
     : typeof value === 'string' && /^\d+$/.test(value.trim())

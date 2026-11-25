@@ -8,8 +8,9 @@ import { weightedIndex as weightedDraw } from './shun-config'
  * form); this module only adds the crypto-backed randomness and date helpers.
  */
 export {
-  ACTIVITY_TIER_LABELS, ACTIVITY_WEIGHT_RANGE, FRIEND_CHANCE_DEFAULT, SHUN_ACTIVITY_TIERS,
-  SHUN_AMOUNT_TIERS, SHUN_NOTIFY_STATUS, SHUN_NOTIFY_WINDOW_MS, activityTier, defaultShunConfig,
+  ACTIVITY_TIER_LABELS, ACTIVITY_WEIGHT_RANGE, FRIEND_CHANCE_DEFAULT, RECOVERY_BONUS_CHANCE_DEFAULT,
+  SHUN_ACTIVITY_TIERS, SHUN_AMOUNT_TIERS, SHUN_CAPTURE_NOTIFY_STATUS, SHUN_CAPTURE_NOTIFY_WINDOW_MS,
+  SHUN_NOTIFY_STATUS, SHUN_NOTIFY_WINDOW_MS, activityTier, defaultShunConfig,
   friendPoolDraw, pickStratified, shunConfigError, shunRulesChanged, validateShunConfig,
   type ShunConfig, type ShunNotifyStatus, type StratifiedCandidate,
 } from './shun-config'

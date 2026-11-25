@@ -21,6 +21,8 @@ type Summary = {
   matchStats: { day: string; total: number; friendHits: number; friendRate: number; unknownTier: number
     tiers: { tier: number; label: string; count: number }[] }
   notifyStats: { day: string; pending: number; plain: number; letter: number; auto: number; retryAttempts: number }
+  // V5: cumulative recovery-bonus audit (admin-only).
+  bonusStats: { recoveredCount: number; bonusCount: number; bonusRate: number; bonusTotal: number; recoveredTotal: number }
 }
 const refusalLabels = { LEAVE: '旧版明确退出', PROTECT: '旧版开启保护', UNPROTECT: '旧版关闭保护', REJOIN: '旧版重新参与' }
 const integerFields = [
@@ -109,7 +111,14 @@ export function ShunMasterAdmin() {
             value={config.friendChance}
             onChange={(event) => setConfig({ ...config, friendChance: Number(event.target.value) })} />
         </label>
+        {/* 追回额外奖励：只影响抓捕成功后的平台额外发放，普通用户不可见 */}
+        <label className="flex min-w-0 flex-wrap items-center justify-between gap-2">追回额外奖励概率（%）
+          <input className="w-28 max-w-full border p-2" aria-label="追回额外奖励概率" type="number" min={0} max={100} step={1} required
+            value={config.bonusChance}
+            onChange={(event) => setConfig({ ...config, bonusChance: Number(event.target.value) })} />
+        </label>
       </div>
+      <p className="text-sm text-[var(--foreground-muted)]">追回额外奖励：抓捕成功时按该概率由平台额外发放与本次实际追回等额的挂号费，不扣被抓到用户的余额，0% 关闭、100% 必定触发，只影响之后的抓捕。</p>
       {(['probabilities', 'weights'] as const).map((key) => <fieldset className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap" key={key}>
         <legend>{key === 'probabilities' ? '金额概率（%）' : '活跃度权重（极低到极高，1–300，只表示相对倾向）'}</legend>
         {config[key].map((value, index) => <label className="flex min-w-0 items-center gap-2" key={index}>{key === 'probabilities' ? index + 1 : ACTIVITY_TIER_LABELS[index]}
@@ -152,6 +161,16 @@ export function ShunMasterAdmin() {
           <li>发送失败重试 {data.notifyStats.retryAttempts} 次</li>
         </ul>
         <p className="text-sm text-[var(--foreground-muted)]">待通知为玩家仍可选择是否留言的顺取；超过 120 秒未选择由服务端自动发送普通通知。</p>
+      </details>
+      <details open><summary>追回额外奖励统计（累计）</summary>
+        <ul>
+          <li>成功追回次数 {data.bonusStats.recoveredCount} 次</li>
+          <li>额外奖励触发次数 {data.bonusStats.bonusCount} 次</li>
+          <li>实际奖励触发率 {data.bonusStats.bonusRate}%（当前配置 {data.config.bonusChance}%）</li>
+          <li>累计额外奖励挂号费 {data.bonusStats.bonusTotal}</li>
+          <li>累计原额追回挂号费 {data.bonusStats.recoveredTotal}</li>
+        </ul>
+        <p className="text-sm text-[var(--foreground-muted)]">额外奖励单独计入「顺大师 · 额外奖励」流水，不占用准备金、不扣被抓到用户余额，也不计入勋章「累计成功追回」进度。</p>
       </details>
       <details open><summary>匹配来源与活跃度命中分布 · {data.matchStats.day}</summary>
         <p>好友池命中 {data.matchStats.friendHits} 笔 / 全部 {data.matchStats.total} 笔 · 实际好友命中比例 {data.matchStats.friendRate}%</p>

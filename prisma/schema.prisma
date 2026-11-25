@@ -881,6 +881,13 @@ enum BadgeRuleType {
   CHECKIN_ON_DATE
   BADGE_OWNERSHIP
   CLINIC_CONSULTATION_STREAK
+  /// Cumulative registration fee successfully taken through Shun Master.
+  SHUN_STOLEN_TOTAL
+  /// Cumulative registration fee taken away from this user through Shun Master.
+  SHUN_VICTIM_TOTAL
+  /// Cumulative registration fee actually recovered by a successful capture.
+  /// The platform bonus is deliberately excluded from this metric.
+  SHUN_RECOVERED_TOTAL
 }
 
 enum BadgeRuleOperator {
@@ -6122,6 +6129,9 @@ enum PointActionType {
   SHUN_STEAL
   SHUN_RECOVERY
   SHUN_COMPENSATION
+  /// Platform-funded bonus paid on top of a successful capture. Never debits the
+  /// caught player and never draws on another player's balance.
+  SHUN_BONUS
 }
 
 enum PharmacyCampaignStatus {
@@ -7077,6 +7087,20 @@ model ShunMasterRound {
   notifiedAt DateTime?
   notifyAttempts Int @default(0)
   notifyAuto Boolean @default(false)
+  /// Capture-result notification state machine, mirrored from the take flow so
+  /// the caught actor is told exactly once, only after the capturer decides
+  /// whether to leave a counter note (or after the 120-second sweep).
+  /// Historical rows predate this flow and were already notified inline, so the
+  /// default is SENT_PLAIN: the upgrade can never re-notify old captures.
+  captureNotifyStatus String @default("SENT_PLAIN") @db.VarChar(16)
+  captureNotifyDueAt   DateTime?
+  captureNotifiedAt    DateTime?
+  captureNotifyAuto    Boolean  @default(false)
+  /// Whether the V5 recovery-bonus roll already happened for this capture.
+  /// Persisted so a replay can never re-roll or pay twice.
+  bonusRolled   Boolean @default(false)
+  /// Platform bonus actually granted (0 when the roll lost or was disabled).
+  bonusAwarded  Int     @default(0)
 
   @@unique([actorId, requestId])
   @@unique([actorId, day, victimId])
@@ -7085,6 +7109,7 @@ model ShunMasterRound {
   @@index([actorId, createdAt, id])
   @@index([day])
   @@index([notifyStatus, notifyDueAt])
+  @@index([captureNotifyStatus, captureNotifyDueAt])
 }
 
 /// An optional one-off note attached to a single Shun round. The anonymous
@@ -7093,6 +7118,31 @@ model ShunMasterRound {
 /// identity is stored only for authorisation and audit; it is never returned by
 /// a recipient-facing query.
 model ShunMasterAnonymousLetter {
+  id          String    @id @default(cuid())
+  roundId     String    @unique
+  senderId    String
+  recipientId String
+  content     String    @db.Text
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+  hiddenAt    DateTime?
+  hiddenById  String?
+
+  @@index([recipientId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([hiddenAt])
+}
+
+/// An optional one-off counter note left by the capturer for the caught actor.
+///
+/// Unlike the anonymous take letter this one is **not** anonymous: once a
+/// capture succeeds the true actor is already exposed to the victim, and the
+/// caught player is entitled to know who caught them. Only the public
+/// projection (`shunPerson`: nickname, avatar, uid) is ever exposed — never the
+/// database id, email or phone.
+///
+/// `roundId` is unique, so one successful capture can carry at most one note.
+model ShunMasterCaptureLetter {
   id          String    @id @default(cuid())
   roundId     String    @unique
   senderId    String

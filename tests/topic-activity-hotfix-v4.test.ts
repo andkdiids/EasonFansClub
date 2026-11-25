@@ -236,12 +236,29 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   assert.match(memoirMigration, /UNIQUE INDEX `AnnualMemoirReservation_activityId_userId_key`/)
   assert.match(memoirMigration, /UNIQUE INDEX `AnnualMemoirSnapshot_userId_year_key`/)
   const pointActions = currentMainBlocks.get('PointActionType')!
-  assert.deepEqual(comparableBlocks.get('PointActionType'), [...pointActions, 'SHUN_STEAL', 'SHUN_RECOVERY', 'SHUN_COMPENSATION'])
+  assert.deepEqual(comparableBlocks.get('PointActionType'), [...pointActions, 'SHUN_STEAL', 'SHUN_RECOVERY', 'SHUN_COMPENSATION',
+    // V5 approved additive value: the platform-funded capture bonus.
+    '/// Platform-funded bonus paid on top of a successful capture. Never debits the',
+    "/// caught player and never draws on another player's balance.",
+    'SHUN_BONUS'])
   comparableBlocks.set('PointActionType', pointActions)
   for (const name of ['ShunMasterSettings', 'ShunMasterMember', 'ShunMasterConsent', 'ShunMasterProtection', 'ShunMasterRound',
     'ShunMasterAnonymousLetter']) {
     assert.ok(comparableBlocks.delete(name), `required Shun Master model retained: ${name}`)
   }
+  // V5 approved additive model: the signed counter note left by a capturer.
+  assert.ok(comparableBlocks.delete('ShunMasterCaptureLetter'), 'V5 capture counter note model registered')
+  // V5 approved additive BadgeRuleType values: the three cumulative Shun rules.
+  const badgeRuleTypes = currentMainBlocks.get('BadgeRuleType')!
+  assert.deepEqual(comparableBlocks.get('BadgeRuleType'), [...badgeRuleTypes,
+    '/// Cumulative registration fee successfully taken through Shun Master.',
+    'SHUN_STOLEN_TOTAL',
+    '/// Cumulative registration fee taken away from this user through Shun Master.',
+    'SHUN_VICTIM_TOTAL',
+    '/// Cumulative registration fee actually recovered by a successful capture.',
+    '/// The platform bonus is deliberately excluded from this metric.',
+    'SHUN_RECOVERED_TOTAL'])
+  comparableBlocks.set('BadgeRuleType', badgeRuleTypes)
   // V4.1 approved additive field: the irreversible Shun Master opt-out. It is a
   // nullable column (no history rewrite), registered here exactly like the
   // other reviewed additive fields so the snapshot guard still rejects anything

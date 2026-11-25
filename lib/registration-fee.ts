@@ -42,6 +42,7 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   SHUN_STEAL: '顺大师 · 顺取',
   SHUN_RECOVERY: '顺大师 · 追回',
   SHUN_COMPENSATION: '顺大师 · 平台补偿',
+  SHUN_BONUS: '顺大师 · 额外奖励',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
@@ -369,6 +370,11 @@ export function getShunLedgerDisplay(record: Pick<RegistrationFeeRecord, 'action
     return record.points > 0
       ? { label: '顺大师 · 顺走', description: '顺大师 · 成功顺走' }
       : { label: '顺大师 · 被顺', description: '顺大师 · 被其他 EF 顺取' }
+  }
+  // The platform bonus is a separate, platform-funded leg: it has its own
+  // business key, no reversal, and never debits the caught player.
+  if (record.action === 'SHUN_BONUS' && kind === 'bonus' && record.points > 0) {
+    return { label: '顺大师 · 额外奖励', description: '成功抓捕的额外挂号费奖励' }
   }
   if (record.reversalOfBusinessKey !== `shun:${roundId}:take:${account}`) return null
   if (record.action === 'SHUN_RECOVERY' && kind === 'recover' && record.points !== 0) {

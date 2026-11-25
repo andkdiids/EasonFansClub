@@ -115,8 +115,12 @@ test('站内通知弹出层：匿名信入口同样可用（不落到通用通�
   assert.match(toast, /const letterHref = shunLetterHref\(\{ key: toast\.key, link: toast\.link, targetUrl: toast\.targetUrl \}\)/)
   // 普通被顺通知同样必须直连「谁顺了我」的记录，不能再落到通用通知页。
   assert.match(toast, /const shunRound = shunRoundNotification\(\{ key: toast\.key, link: toast\.link, targetUrl: toast\.targetUrl \}\)/)
-  assert.match(toast, /shunRound \? shunInvestigationLink\(shunRound\.roundId\) : null/)
-  assert.match(toast, /\{actionLabel\}/, 'CTA 文案必须按通知类型给出「打开神秘来信」或「前往调查」')
+  // V5：入口统一走 side-aware 的 shunInvestigationHref，抓捕通知因此落到「我顺了谁」，
+  // 被顺通知仍落到「谁顺了我」；抓捕者留了话时优先直达留言。
+  assert.match(toast, /shunInvestigationHref\(\{ key: toast\.key, link: toast\.link, targetUrl: toast\.targetUrl \}\)/)
+  assert.match(toast, /const captureHref = captureLetterHref\(/)
+  assert.match(toast, /captureHref \|\| letterHref/)
+  assert.match(toast, /\{actionLabel\}/, 'CTA 文案必须按通知类型给出「打开神秘来信」/「查看留言」/「前往调查」/「查看调查结果」')
 })
 
 test('信件内容来自真实接口，不在前端硬编码正文', () => {
