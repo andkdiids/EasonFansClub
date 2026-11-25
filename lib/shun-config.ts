@@ -6,6 +6,8 @@
  * never pulls `node:crypto` into the browser bundle.
  */
 
+import { SHUN_OPEN_HOURS_DEFAULT, shunOpenHoursError } from './shun-open-hours'
+
 export const SHUN_AMOUNT_TIERS = 7
 export const SHUN_ACTIVITY_TIERS = 5
 export const ACTIVITY_TIER_LABELS = ['极低', '低', '中', '高', '极高'] as const
@@ -52,6 +54,11 @@ export const defaultShunConfig = {
   probabilities: [25, 21, 17, 14, 10, 7, 6], weights: [130, 122, 115, 108, 100],
   friendChance: FRIEND_CHANCE_DEFAULT,
   bonusChance: RECOVERY_BONUS_CHANCE_DEFAULT,
+  // Daily opening window, Beijing time, left-closed / right-open. Widened on
+  // purpose: `ShunConfig` must allow any boolean/time the admin panel saves.
+  openHoursEnabled: SHUN_OPEN_HOURS_DEFAULT.openHoursEnabled as boolean,
+  openTime: SHUN_OPEN_HOURS_DEFAULT.openTime as string,
+  closeTime: SHUN_OPEN_HOURS_DEFAULT.closeTime as string,
 }
 export type ShunConfig = typeof defaultShunConfig
 
@@ -99,6 +106,11 @@ export function shunConfigError(value: unknown): string | null {
   if (c.bonusChance !== undefined && !bounded(c.bonusChance, 0, 100)) {
     return '追回额外奖励概率必须是 0 到 100 的整数。'
   }
+  // Absent on configurations saved before the daily window existed. Both fields
+  // are still validated when the restriction is switched off, so re-enabling it
+  // later can never fail on a value that was saved while it was dormant.
+  const openHoursInvalid = shunOpenHoursError(c)
+  if (openHoursInvalid) return openHoursInvalid
   return null
 }
 
@@ -114,6 +126,12 @@ export function validateShunConfig(value: unknown): ShunConfig | null {
     // Same for the recovery bonus: a configuration saved before V5 keeps the
     // published 5% default instead of silently turning the bonus off.
     bonusChance: typeof c.bonusChance === 'number' ? c.bonusChance : RECOVERY_BONUS_CHANCE_DEFAULT,
+    // And for the daily window: a row saved before V6 keeps the published
+    // 09:00–23:00 restriction instead of becoming silently unrestricted.
+    openHoursEnabled: typeof c.openHoursEnabled === 'boolean'
+      ? c.openHoursEnabled : SHUN_OPEN_HOURS_DEFAULT.openHoursEnabled,
+    openTime: typeof c.openTime === 'string' ? c.openTime : SHUN_OPEN_HOURS_DEFAULT.openTime,
+    closeTime: typeof c.closeTime === 'string' ? c.closeTime : SHUN_OPEN_HOURS_DEFAULT.closeTime,
   }
 }
 

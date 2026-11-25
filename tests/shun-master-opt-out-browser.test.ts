@@ -28,7 +28,7 @@ test('permanent opt-out browser flow', {
     passwordHash: 'fixture', Profile: { create: { displayName: name } },
   } })
   const token = await createSessionToken(user)
-  await updateShunConfig(user.id, { ...defaultShunConfig, enabled: false })
+  await updateShunConfig(user.id, { ...defaultShunConfig, enabled: false, openHoursEnabled: false })
   await setShunEnabled(user.id, true)
 
   const browser = await chromium.launch({ ...(process.env.SHUN_MASTER_BROWSER_PATH

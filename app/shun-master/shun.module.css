@@ -97,3 +97,12 @@
 .bonus{display:grid;gap:2px;padding:10px;border:1px solid #d9b26a;border-radius:10px;background:#fdf6e3;color:#7b2233}
 .bonus strong{font-size:15px}
 .bonus p{margin:0;font-size:13px;color:#5d4a34}
+
+/* V6 daily opening hours — closed state.
+   The panel keeps its paper palette in both themes, so every colour here is
+   explicit: the block must stay readable under the midnight theme's global
+   recolouring rules (which target dialogs and form controls, not this block). */
+.closed{display:grid;gap:4px;padding:12px;border:1px solid #c4a983;border-radius:10px;background:#fbf3e3;color:#171717}
+.closed strong{font-size:15px;line-height:1.45}
+.closed p{margin:0;font-size:13px;line-height:1.6;color:#4a4034}
+.closed .hours{font-variant-numeric:tabular-nums;color:#7b2233}

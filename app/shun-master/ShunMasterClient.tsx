@@ -8,6 +8,9 @@ import { AnonymousLetter, type AnonymousLetterData } from '@/components/shun-mas
 import { CaptureLetter, type CaptureLetterData } from '@/components/shun-master/CaptureLetter'
 import { SendAnonymousLetter } from '@/components/shun-master/SendAnonymousLetter'
 import { publicImageUrl } from '@/lib/images'
+// Pure, browser-safe: the same helpers the settlement gate uses, so the closed
+// state flips at exactly the boundary the server enforces.
+import { SHUN_CLOSED_TITLE, isShunOpen, shunOpenHoursHelp, shunOpenHoursHint, shunOpenHoursLine } from '@/lib/shun-open-hours'
 import { formatUid } from '@/lib/uid'
 import styles from './shun.module.css'
 
@@ -20,7 +23,11 @@ type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' 
   bonusAwarded?: number
   /** Capturer side: this capture already carries a delivered counter note. */
   hasCaptureLetter?: boolean }
-type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number; serverNow: string }
+type OpenHours = { openHoursEnabled: boolean; openTime: string; closeTime: string; label: string; open: boolean; nextOpenAt: string | null }
+type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number
+  /** V6: the daily window exactly as the server judged it for `serverNow`. */
+  openHours?: OpenHours
+  serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null; windowAt: string }
 type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
 type Side = 'in' | 'out'
@@ -200,6 +207,37 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
     const timer = window.setInterval(update, 1000)
     return () => window.clearInterval(timer)
   }, [clockOffset])
+  /**
+   * V6: the daily window must flip without a reload.
+   *
+   * The one-second tick is already corrected by the server clock offset, so the
+   * boundary lands on the right second locally; the status request that follows
+   * re-syncs the authoritative values (and picks up an admin change). The server
+   * still re-checks the window inside the settlement transaction, so a wrong
+   * client clock can only mislead the display, never authorise a take.
+   */
+  const openHours = status?.openHours
+  const openNow = openHours ? isShunOpen(openHours, new Date(now ?? Date.now())) : true
+  const openState = useRef<boolean | undefined>(undefined)
+  useEffect(() => {
+    if (!openHours) return
+    if (openState.current === undefined) { openState.current = openNow; return }
+    if (openState.current === openNow) return
+    openState.current = openNow
+    void loadStatus()
+  }, [openHours, openNow, loadStatus])
+  // Returning to the tab must re-sync instead of trusting a page that may have
+  // been asleep for hours (or a laptop that was suspended across the boundary).
+  useEffect(() => {
+    if (!status) return
+    const resync = () => { if (document.visibilityState === 'visible') void loadStatus() }
+    window.addEventListener('focus', resync)
+    document.addEventListener('visibilitychange', resync)
+    return () => {
+      window.removeEventListener('focus', resync)
+      document.removeEventListener('visibilitychange', resync)
+    }
+  }, [status, loadStatus])
   useEffect(() => {
     const modal = dialog.current
     const visible = !!result && step !== 'animate'
@@ -264,6 +302,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         setResult(round)
       } catch (error) {
         if (error instanceof RequestError && error.status && error.status < 500 && error.status !== 429) requestId.current = null
+        // A take refused by the daily window means the page is out of date (e.g.
+        // it was open when the page loaded and closed while it sat there): pull
+        // the authoritative state so the button and the copy flip immediately.
+        if (error instanceof RequestError && error.code === 'SHUN_CLOSED') void loadStatus()
         throw error
       }
     })
@@ -519,9 +561,18 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           {status.optedOut ? <p className={styles.optedOut} role="status">
             <strong>你已永久退出顺大师</strong>
             <span>今后你不会再被顺取挂号费，也无法继续顺取其他 EF。</span>
-          </p> : !status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <button className={styles.primary} disabled={!!busy || !status.remaining} onClick={() => void attempt()}>
-            {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
-          </button>}
+          </p> : !status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <>
+            {/* 休息提示：标题与两行说明全部来自服务端配置，后台改时间即时生效。 */}
+            {!openNow && openHours && <section className={styles.closed} role="status" aria-live="polite">
+              <strong>{SHUN_CLOSED_TITLE}</strong>
+              <p>{shunOpenHoursHint(openHours)}</p>
+              <p className={styles.hours}>{shunOpenHoursLine(openHours)}</p>
+            </section>}
+            <button className={styles.primary} disabled={!!busy || !status.remaining || !openNow} onClick={() => void attempt()}>
+              {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…'
+                : !openNow ? '休息中 💤' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
+            </button>
+          </>}
         </>}
         <details><summary>玩法说明</summary>
           <h2>顺大师 · 玩法说明</h2>
@@ -532,6 +583,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <p>超过 {status?.goldenMinutes ?? 10} 分钟：三选一。</p>
           <p>猜中即可追回被顺走的挂号费，猜错则无法追回。</p>
           <p>每日机会于北京时间 00:00 重置。</p>
+          {openHours && <p>{shunOpenHoursHelp(openHours)}</p>}
           <div className={styles.optOutArea}>
             {status?.optedOut
               ? <p className={styles.optOutDone}>你已永久退出顺大师，无法重新加入。</p>
@@ -579,9 +631,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
               {/* Permanent opt-out removes every new take entry point, but the
                   already-settled capture note flow still completes. */}
               <button type="button" autoFocus
-                disabled={!!busy || status?.optedOut || !status?.enabled || !status?.remaining}
+                disabled={!!busy || status?.optedOut || !status?.enabled || !status?.remaining || !openNow}
                 onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage(''); void attempt() }}>
-                {status?.optedOut ? '已退出顺大师' : status?.remaining ? '再顺一手' : '今日次数已用完'}
+                {status?.optedOut ? '已退出顺大师' : !openNow ? '休息中 💤'
+                  : status?.remaining ? '再顺一手' : '今日次数已用完'}
               </button>
               <button type="button" onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>返回顺大师</button>
             </div>
@@ -657,8 +710,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             ? 'TA 会在收到挂号费被顺走的同时，读到只有 TA 能看到的这句话。'
             : '普通通知已经送达，无法再补充匿名留言。'}</p>
           <div className={styles.tabs}>
-            <button type="button" disabled={!!busy || !status?.remaining || !status?.enabled}
-              onClick={() => { setResult(undefined); void attempt() }}>{status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
+            <button type="button" disabled={!!busy || !status?.remaining || !status?.enabled || !openNow}
+              onClick={() => { setResult(undefined); void attempt() }}>{!openNow ? '休息中 💤'
+                : status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
             <button type="button" autoFocus onClick={() => { setResult(undefined); setStep('result') }}>返回顺大师</button>
           </div>
         </> : <>

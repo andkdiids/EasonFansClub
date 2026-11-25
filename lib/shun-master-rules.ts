@@ -15,6 +15,14 @@ export {
   type ShunConfig, type ShunNotifyStatus, type StratifiedCandidate,
 } from './shun-config'
 
+export {
+  SHUN_BEIJING_OFFSET_MINUTES, SHUN_CLOSED_TITLE, SHUN_OPEN_HOURS_DEFAULT,
+  beijingMinuteOfDay, formatShunClock, formatShunClockShort, isShunOpen, nextShunOpenAt,
+  parseShunClock, shunClosedMessage, shunOpenHoursError, shunOpenHoursHelp, shunOpenHoursHint,
+  shunOpenHoursLabel, shunOpenHoursLine, shunOpenHoursState, shunOpenWindow,
+  type ShunOpenHoursConfig, type ShunOpenHoursState,
+} from './shun-open-hours'
+
 /** Weighted lottery over one ticket space; randomness defaults to `randomInt`. */
 export function weightedIndex(weights: number[], draw: (max: number) => number = randomInt) {
   return weightedDraw(weights, draw)

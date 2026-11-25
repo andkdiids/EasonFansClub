@@ -10,6 +10,7 @@ import { shunInvestigationLink } from './shun-letter-notification'
 import { shunPerson } from './shun-person'
 import { pickDecoys, type DecoyCandidate } from './shun-decoys'
 import { triggerBadgeEvaluation } from './badge-rule-engine'
+import { shunClosedMessage, shunOpenHoursState } from './shun-open-hours'
 
 // Re-exported for callers that historically imported it from the service.
 export { shunPerson } from './shun-person'
@@ -102,7 +103,13 @@ async function loadFriendIds(actorId: string) {
 }
 
 export class ShunError extends Error {
-  constructor(public code: string, message: string, public status = 409) { super(message) }
+  /**
+   * `details` carries machine-readable context for a few business rejections —
+   * notably `SHUN_CLOSED`, where the page needs the live window and the next
+   * opening instant even though the status request it holds may be stale.
+   */
+  constructor(public code: string, message: string, public status = 409,
+    public details?: Record<string, unknown>) { super(message) }
 }
 
 async function settings(tx: Tx) {
@@ -189,7 +196,11 @@ export async function shunStatus(userId: string) {
   return { enabled: config.enabled, optedOut,
     balance: account.points,
     remaining: Math.max(0, config.attempts - attempts), received, attempts: config.attempts,
-    victimCap: config.victimCap, goldenMinutes: config.goldenMinutes, serverNow }
+    victimCap: config.victimCap, goldenMinutes: config.goldenMinutes,
+    // The page renders the closed state and its copy from this snapshot alone,
+    // so a window changed in the admin panel shows up without a redeploy.
+    openHours: shunOpenHoursState(config, serverNow),
+    serverNow }
 }
 
 /**
@@ -254,8 +265,17 @@ async function selectDecoys(tx: Tx, input: {
   }, { id: input.actorId, hasAvatar: input.actorHasAvatar, tier: input.actorTier }, 2, randomInt, [input.victimId])
 }
 
-export async function shunAttempt(actorId: string, requestId: string) {
-  const now = new Date()
+/**
+ * Settles one take.
+ *
+ * `clock` is the single source of the server's authoritative time and is read
+ * again *inside* the settlement transaction: a request that was accepted at
+ * 22:59:59 but reaches the settlement section after 23:00:00 is judged against
+ * the instant the qualification checks actually run. Tests inject a frozen
+ * clock here instead of relying on the machine's real time.
+ */
+export async function shunAttempt(actorId: string, requestId: string, clock: () => Date = () => new Date()) {
+  const now = clock()
   const day = shunDay(now)
   // Captured for the post-commit badge refresh of both sides of the transfer.
   let victimId: string | null = null
@@ -274,6 +294,15 @@ export async function shunAttempt(actorId: string, requestId: string) {
     // never reopen the letter decision either.
     if (previous) return present(tx, previous, 'out')
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
+    // Authoritative opening-hours gate. Re-read inside the transaction (not the
+    // pre-transaction snapshot) so a boundary crossing cannot be bypassed, and
+    // placed before any other work so a closed request touches nothing: no
+    // round, no ledger entry, no daily attempt, no notification, no bonus roll.
+    const settledAt = clock()
+    const openHours = shunOpenHoursState(config, settledAt)
+    if (!openHours.open) {
+      throw new ShunError('SHUN_CLOSED', shunClosedMessage(config), 409, { openHours })
+    }
     // Authoritative server-side gate: a permanently opted-out actor can never
     // start a new take, even by replaying an old request id or calling the API
     // directly with the button hidden in the UI.
@@ -334,7 +363,7 @@ export async function shunAttempt(actorId: string, requestId: string) {
     victimId = victim.id
     const actorBalance = accounts.get(actorId)
     const victimBalance = accounts.get(victim.id)
-    if (actorBalance === undefined || actorBalance < 0 || victimBalance === undefined || victimBalance <= 0 || shunDay(new Date()) !== day
+    if (actorBalance === undefined || actorBalance < 0 || victimBalance === undefined || victimBalance <= 0 || shunDay(settledAt) !== day
       || await tx.user.count({ where: { ...transactionAccount, id: { in: [actorId, victim.id] } } }) !== 2) {
       throw new ShunError('BALANCE', '账户状态或结算日期已变化，顺取次数未扣除。')
     }

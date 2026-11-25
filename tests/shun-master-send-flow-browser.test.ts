@@ -49,7 +49,7 @@ test('顺一手 transfers first, then the result dialog decides the notification
   await prisma.shunMasterProtection.createMany({
     data: [...outsiders, admin].map(({ id: userId }) => ({ userId, protected: true })), skipDuplicates: true,
   })
-  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false })
+  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false, openHoursEnabled: false })
   await setShunEnabled(admin.id, true)
 
   const executablePath = process.env.SHUN_MASTER_BROWSER_PATH

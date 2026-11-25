@@ -31,7 +31,7 @@ function createUser(points = 0) {
 
 async function publish() {
   await updateShunConfig(operatorId, {
-    ...defaultShunConfig, attempts: 7, victimCap: 20, goldenMinutes: 10,
+    ...defaultShunConfig, openHoursEnabled: false, attempts: 7, victimCap: 20, goldenMinutes: 10,
     weights: [100, 100, 100, 100, 100], friendChance: 0,
   })
   await setShunEnabled(operatorId, true)
@@ -91,7 +91,7 @@ test('permanent opt-out: default participation, irreversible exclusion, idempote
   assert.equal(second.permanentlyOptedOutAt?.getTime(), first.permanentlyOptedOutAt?.getTime(),
     '重复退出不得改写时间，必须幂等')
   // Re-login / config updates do not revive participation.
-  await updateShunConfig(operatorId, { ...defaultShunConfig, enabled: true })
+  await updateShunConfig(operatorId, { ...defaultShunConfig, enabled: true, openHoursEnabled: false })
   await setShunEnabled(operatorId, true)
   assert.equal((await shunStatus(victim.id)).optedOut, true, '配置更新或重新登录不得恢复参与')
 

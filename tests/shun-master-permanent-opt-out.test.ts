@@ -51,7 +51,10 @@ test('status exposes optedOut and a dedicated opt-out API exists', () => {
 
 test('the exit entry is hidden until the rules are expanded and sits at the bottom', () => {
   assert.match(client, /<details><summary>玩法说明<\/summary>/, '玩法说明必须使用默认折叠的 details')
-  assert.match(client, /<p>每日机会于北京时间 00:00 重置。<\/p>\s*<div className=\{styles\.optOutArea\}>/,
+  // V6 inserted the daily-window sentence before the exit block; the ordering
+  // contract ("exit entry last, after every rules paragraph") is unchanged.
+  assert.match(client,
+    /<p>每日机会于北京时间 00:00 重置。<\/p>\s*\{openHours && <p>\{shunOpenHoursHelp\(openHours\)\}<\/p>\}\s*<div className=\{styles\.optOutArea\}>/,
     '退出区必须位于全部玩法说明文字之后')
   assert.match(client, /不想参与顺大师？/, '必须给出引导文案')
   assert.match(client, /你可以选择永久退出，退出后无法重新加入。/, '必须说明不可重新加入')
@@ -82,5 +85,7 @@ test('after opting out the take button disappears and the entry becomes a notice
 test('default participation needs no opt-in surface', () => {
   assert.doesNotMatch(client, /报名|加入顺大师|立即参与/, '不应要求主动报名')
   assert.match(client, /const \[optOutAck, setOptOutAck\] = useState\(false\)/, '确认框默认不勾选')
-  assert.match(client, /disabled=\{!!busy \|\| !status\.remaining\}/, '参与按钮仍按原规则启用')
+  // V6 added the daily-window condition; participation is still gated only by
+  // the remaining attempts plus that window (no opt-in, no other new gate).
+  assert.match(client, /disabled=\{!!busy \|\| !status\.remaining \|\| !openNow\}/, '参与按钮仍按原规则启用')
 })

@@ -66,7 +66,7 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
     await prisma.shunMasterProtection.updateMany({
       where: { userId: { in: outsiders.map(user => user.id) } }, data: { protected: true },
     })
-    await updateShunConfig(actor.id, { ...defaultShunConfig, enabled: false })
+    await updateShunConfig(actor.id, { ...defaultShunConfig, enabled: false, openHoursEnabled: false })
     await setShunEnabled(actor.id, true)
     const victimDto = await getMobileUserById(other.id)
     assert.ok(victimDto)

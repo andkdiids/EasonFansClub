@@ -47,7 +47,7 @@ async function makeFixture() {
   await prisma.shunMasterProtection.createMany({
     data: [...outsiders, admin, actor].map(({ id: userId }) => ({ userId, protected: true })), skipDuplicates: true,
   })
-  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false })
+  await updateShunConfig(admin.id, { ...defaultShunConfig, enabled: false, openHoursEnabled: false })
   await setShunEnabled(admin.id, true)
   return { actor, victim, ids, cleanup: ids }
 }

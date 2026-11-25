@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { defaultShunConfig, shunConfigError, shunDay, validateShunConfig } from '@/lib/shun-master-rules'
 import { ACTIVITY_TIER_LABELS, SHUN_ACTIVITY_TIERS } from '@/lib/shun-config'
+import { shunOpenHoursState } from '@/lib/shun-open-hours'
 import { getShunCandidateSummary, setShunEnabled, ShunError, updateShunConfig } from '@/lib/shun-master'
 
 export const dynamic = 'force-dynamic'
@@ -93,7 +94,13 @@ export async function GET(request: Request) {
     bonusTotal: bonusAggregate._sum.bonusAwarded ?? 0,
     recoveredTotal: bonusAggregate._sum.recovered ?? 0,
   }
+  // One instant for both fields: the panel must never show a window state and a
+  // clock that disagree.
+  const requestedAt = new Date()
   return json({ config, effectiveEnabled: config.enabled, rulesVersion: settings?.rulesVersion ?? 1, day, reserved, compensated,
+    // Live view of the daily window, judged with the admin request's own server
+    // clock so the panel shows exactly what the settlement gate would decide.
+    openHoursNow: shunOpenHoursState(config, requestedAt), serverNow: requestedAt.toISOString(),
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
     outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit,
     matchStats, notifyStats, bonusStats })

@@ -75,6 +75,11 @@ export async function POST(request: Request, { params }: Context) {
 
 function handleShunError(error: unknown) {
   if (error instanceof RegistrationFeeHistoryQueryError) return json({ message: '请选择有效日期。' }, 400)
-  if (error instanceof ShunError) return json({ code: error.code, message: error.message }, error.status)
+  if (error instanceof ShunError) {
+    // `details` is additive: existing clients keep reading `code` + `message`,
+    // while the page can render the live window and the next opening instant
+    // from the rejection itself even if its status snapshot is stale.
+    return json({ code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) }, error.status)
+  }
   return json({ message: '目前无法完成操作，请稍后重试。' }, 500)
 }
