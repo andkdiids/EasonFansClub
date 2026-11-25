@@ -205,7 +205,7 @@ test('the composer enforces the documented input rules', () => {
 // ------------------------------------------------------------ sending animation
 
 test('the sending animation follows the six documented beats', () => {
-  for (const beat of ['paper', 'folding', 'inserting', 'sealing', 'wax', 'flying']) {
+  for (const beat of ['paper', 'folding', 'inserting', 'sealing', 'stamping', 'flying']) {
     assert.match(sender, new RegExp(`'${beat}'`), `必须实现 ${beat} 分镜`)
     assert.match(senderCss, new RegExp(`data-stage='${beat}'`), `样式必须覆盖 ${beat} 分镜`)
   }
@@ -292,8 +292,8 @@ test('a record that can no longer be investigated explains itself', () => {
 test('the original capture button survives a closed letter', () => {
   assert.match(overlay, /onClick=\{onClose\}>收下这封信/)
   assert.match(client, /function closeLetter\(\) \{[\s\S]*setLetter\(undefined\)/, '关闭后记录列表仍可用')
-  assert.match(client, /onClick=\{\(\) => void perform\('start', \(\) => openCapture\(row\.id\)\)\}>抓捕追回</,
-    '原有抓捕追回按钮必须保留')
+  assert.match(client, /onClick=\{\(\) => void perform\('start', \(\) => openCapture\(row\.id\)\)\}>前往调查</,
+    '记录入口必须保留，并统一为「前往调查」')
 })
 
 // ---------------------------------------------------------------- letter visuals

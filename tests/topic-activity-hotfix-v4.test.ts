@@ -242,6 +242,18 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     'ShunMasterAnonymousLetter']) {
     assert.ok(comparableBlocks.delete(name), `required Shun Master model retained: ${name}`)
   }
+  // V4.1 approved additive field: the irreversible Shun Master opt-out. It is a
+  // nullable column (no history rewrite), registered here exactly like the
+  // other reviewed additive fields so the snapshot guard still rejects anything
+  // genuinely unapproved.
+  const optOutField = 'permanentlyOptedOutAt DateTime?'
+  assert.ok(newBlocks.get('User')?.includes(optOutField), 'approved permanent opt-out field retained')
+  const userFields = comparableBlocks.get('User')!
+  const optOutCommentLines = userFields.filter((field) =>
+    field.startsWith('/// Permanent, irreversible opt-out') || field.startsWith('/// user participates by default'))
+  assert.equal(optOutCommentLines.length, 2, '新增字段必须带不可撤销说明注释')
+  comparableBlocks.set('User', userFields.filter((field) =>
+    field !== optOutField && !optOutCommentLines.includes(field)))
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
   for (const name of concertSchemaBlocks) assert.ok(newBlocks.has(name), `concert schema block retained: ${name}`)
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)

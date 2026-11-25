@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
-import { ShunError, shunAttempt, shunRecords, shunStatus } from '@/lib/shun-master'
+import { ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus } from '@/lib/shun-master'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -53,11 +53,14 @@ export async function POST(request: Request, { params }: Context) {
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { action } = await params
-  if (action !== 'attempt') return json({ message: '未找到操作。' }, 404)
+  if (action !== 'attempt' && action !== 'opt-out') return json({ message: '未找到操作。' }, 404)
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'shun-master:' + action, user: { limit: 18, windowSeconds: 60 }, ip: { limit: 120, windowSeconds: 60 },
   })
   if (limited) return limited
+  // Irreversible: no body, no rejoin counterpart. Repeated calls are absorbed
+  // by the idempotent service and always return the current durable state.
+  if (action === 'opt-out') return json(await shunPermanentOptOut(guard.user.id))
   const body = await request.json().catch(() => null)
   try {
     if (action === 'attempt' && typeof body?.requestId === 'string'

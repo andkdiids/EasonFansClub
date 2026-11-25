@@ -5109,6 +5109,9 @@ model User {
   showBadgeProgressNotifications                         Boolean                            @default(true)
   ipRegion                                               String?
   ipRegionUpdatedAt                                      DateTime?
+  /// Permanent, irreversible opt-out of the Shun Master game. Null means the
+  /// user participates by default; once set, no user-facing path may clear it.
+  permanentlyOptedOutAt                                  DateTime?
   AccountSecurityLog                                     AccountSecurityLog[]
   ActivityFavorite                                       ActivityFavorite[]
   ActivityRegistration                                   ActivityRegistration[]

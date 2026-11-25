@@ -7,6 +7,7 @@ import { activityTier, captureMode, defaultShunConfig, friendPoolDraw, pickStrat
 import { ANONYMOUS_LETTER_NOTIFICATION, anonymousLetterNotificationLink, readAnonymousMessageField, type AnonymousMessageField } from './shun-anonymous-letter'
 import { shunInvestigationLink } from './shun-letter-notification'
 import { shunPerson } from './shun-person'
+import { pickDecoys, type DecoyCandidate } from './shun-decoys'
 
 // Re-exported for callers that historically imported it from the service.
 export { shunPerson } from './shun-person'
@@ -14,9 +15,13 @@ export { shunPerson } from './shun-person'
 type Tx = Prisma.TransactionClient
 type Round = Prisma.ShunMasterRoundGetPayload<Record<string, never>>
 const eligible = { isDeleted: false, status: 'ACTIVE' } as const
-const transactionAccount = { ...eligible, Profile: { isNot: null } } as const
+// A permanent opt-out is durable and irreversible; it participates in every
+// authoritative eligibility check, both in Prisma predicates and raw SQL.
+const stillParticipating = { permanentlyOptedOutAt: null } as const
+const transactionAccount = { ...eligible, ...stillParticipating, Profile: { isNot: null } } as const
 const candidateAccount = Prisma.sql`
   u.status = 'ACTIVE' AND u.isDeleted = false
+  AND u.permanentlyOptedOutAt IS NULL
   AND EXISTS (SELECT 1 FROM Profile p WHERE p.userId = u.id)
 `
 // Existing refusals are durable. Any future time-limited protection belongs
@@ -163,15 +168,78 @@ export async function shunStatus(userId: string) {
   const day = shunDay(serverNow)
   const [state, account, attempts, received] = await Promise.all([
     prisma.shunMasterSettings.findUnique({ where: { id: 1 } }),
-    prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { points: true } }),
+    prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { points: true, permanentlyOptedOutAt: true } }),
     prisma.shunMasterRound.count({ where: { actorId: userId, day } }),
     prisma.shunMasterRound.count({ where: { victimId: userId, day } }),
   ])
   const config = validateShunConfig(state?.config) || defaultShunConfig
-  return { enabled: config.enabled,
+  const optedOut = account.permanentlyOptedOutAt !== null
+  return { enabled: config.enabled, optedOut,
     balance: account.points,
     remaining: Math.max(0, config.attempts - attempts), received, attempts: config.attempts,
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes, serverNow }
+}
+
+/**
+ * Cheap recency bucket for the look-matching only.
+ *
+ * The authoritative activity tier still comes from `activityTier(check-in days)`
+ * and is what the victim lottery uses; decoys only need a comparable signal, and
+ * re-deriving tiers for every candidate would add a check-in scan to the
+ * settlement transaction.
+ */
+function recencyTier(lastActiveAt: Date | null) {
+  if (!lastActiveAt) return 0
+  const days = (Date.now() - lastActiveAt.getTime()) / 86_400_000
+  if (days <= 1) return 4
+  if (days <= 3) return 3
+  if (days <= 7) return 2
+  if (days <= 30) return 1
+  return 0
+}
+
+function decoyCandidate(row: { id: string; avatarUrl: string | null; lastActiveAt: Date | null }): DecoyCandidate {
+  return {
+    id: row.id,
+    hasAvatar: typeof row.avatarUrl === 'string' && row.avatarUrl.length > 0,
+    tier: recencyTier(row.lastActiveAt),
+    lastActiveAt: row.lastActiveAt ? row.lastActiveAt.getTime() : 0,
+  }
+}
+
+/**
+ * Loads the three decoy pools with bounded, indexed queries (one friendship
+ * lookup for the victim, one ordered recency scan, one random fallback) and
+ * hands them to the pure selector. Never scans the whole user table and never
+ * touches the ledger, so the settlement transaction stays short.
+ */
+async function selectDecoys(tx: Tx, input: {
+  actorId: string; victimId: string; actorHasAvatar: boolean; actorTier: number
+}) {
+  const links = await tx.friendship.findMany({
+    where: { OR: [{ userAId: input.victimId }, { userBId: input.victimId }] },
+    select: { userAId: true, userBId: true }, take: 500,
+  })
+  const friendIds = [...new Set(links.map((link) => link.userAId === input.victimId ? link.userBId : link.userAId))]
+  const excluded = [input.actorId, input.victimId]
+  const rows = Prisma.sql`
+    SELECT u.id, u.avatarUrl, u.lastActiveAt FROM User u
+  `
+  const friends = friendIds.length
+    ? await tx.$queryRaw<Array<{ id: string; avatarUrl: string | null; lastActiveAt: Date | null }>>`
+        ${rows} WHERE u.id IN (${Prisma.join(friendIds)}) AND ${candidateFilter} LIMIT 200`
+    : []
+  const active = await tx.$queryRaw<Array<{ id: string; avatarUrl: string | null; lastActiveAt: Date | null }>>`
+    ${rows} WHERE ${candidateFilter} AND u.id NOT IN (${Prisma.join(excluded)})
+    ORDER BY u.lastActiveAt DESC LIMIT 60`
+  const fallback = await tx.$queryRaw<Array<{ id: string; avatarUrl: string | null; lastActiveAt: Date | null }>>`
+    ${rows} WHERE ${candidateFilter} AND u.id NOT IN (${Prisma.join(excluded)})
+    ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 12`
+  return pickDecoys({
+    friends: friends.map(decoyCandidate),
+    active: active.map(decoyCandidate),
+    fallback: fallback.map(decoyCandidate),
+  }, { id: input.actorId, hasAvatar: input.actorHasAvatar, tier: input.actorTier }, 2, randomInt, [input.victimId])
 }
 
 export async function shunAttempt(actorId: string, requestId: string) {
@@ -192,8 +260,13 @@ export async function shunAttempt(actorId: string, requestId: string) {
     // never reopen the letter decision either.
     if (previous) return present(tx, previous, 'out')
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
+    // Authoritative server-side gate: a permanently opted-out actor can never
+    // start a new take, even by replaying an old request id or calling the API
+    // directly with the button hidden in the UI.
+    const optedOut = await tx.user.findFirst({ where: { id: actorId, permanentlyOptedOutAt: { not: null } }, select: { id: true } })
+    if (optedOut) throw new ShunError('OPTED_OUT', '你已永久退出顺大师，无法继续顺取。', 403)
     const actor = await tx.user.findFirst({ where: { id: actorId, ...transactionAccount },
-      select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } })
+      select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, avatarUrl: true, lastActiveAt: true } })
     if (!actor) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
     const played = await tx.shunMasterRound.findMany({ where: { actorId, day }, select: { victimId: true } })
     if (played.length >= config.attempts) throw new ShunError('LIMIT', '今日收工，明天继续！')
@@ -252,12 +325,13 @@ export async function shunAttempt(actorId: string, requestId: string) {
     }
     const rolled = weightedIndex(config.probabilities) + 1
     const amount = Math.min(rolled, victimBalance)
-    const decoyFilter = Prisma.sql`${candidateFilter} AND u.id NOT IN (${actorId}, ${victim.id})`
-    const decoys = await tx.$queryRaw<{ id: string }[]>`
-      SELECT u.id FROM User u WHERE ${decoyFilter}
-      ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 2
-    `
-    const selectedDecoys = decoys.map(({ id }) => id)
+    // Decoys are chosen from the victim's friends first, then from recently
+    // active accounts, always preferring the same public look as the real actor
+    // so the true answer cannot be spotted by avatar or activity alone.
+    const selectedDecoys = await selectDecoys(tx, {
+      actorId, victimId: victim.id, actorHasAvatar: !!actor.avatarUrl,
+      actorTier: recencyTier(actor.lastActiveAt),
+    })
     if (selectedDecoys.length !== 2) {
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '候选不足，未扣除挂号费', source: 'WEB', operatorType: 'USER', metadata: { reason: 'INSUFFICIENT_DECOYS' } } })
@@ -456,5 +530,28 @@ export async function setShunEnabled(userId: string, enabled: boolean) {
         metadata: { old, config }, source: 'WEB', operatorType: 'ADMIN' } })
     }
     return { config, rulesVersion: state.rulesVersion, effectiveEnabled: enabled }
+  })
+}
+
+/**
+ * Permanently opts a user out of Shun Master. Idempotent: the guarded update
+ * only writes for a still-participating account, so repeated requests never
+ * move the timestamp and there is no rejoin surface anywhere in the codebase.
+ * Existing rounds, ledger entries, letters, notifications and captures are
+ * left untouched; already-settled pending notices continue via the V4 sweep.
+ */
+export async function shunPermanentOptOut(userId: string) {
+  const now = new Date()
+  return shunTransaction(async (tx) => {
+    const result = await tx.user.updateMany({
+      where: { id: userId, permanentlyOptedOutAt: null },
+      data: { permanentlyOptedOutAt: now },
+    })
+    if (result.count === 1) {
+      await tx.userOperationLog.create({ data: { userId, category: 'SHUN_MASTER', action: 'PERMANENT_OPT_OUT',
+        summary: '永久退出顺大师', source: 'WEB', operatorType: 'USER', metadata: { at: now.toISOString() } } })
+    }
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { permanentlyOptedOutAt: true } })
+    return { optedOut: user.permanentlyOptedOutAt !== null, permanentlyOptedOutAt: user.permanentlyOptedOutAt }
   })
 }
