@@ -825,7 +825,7 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.doesNotMatch(workflow, /code(?:30|31)_backup_object_key|CODE(?:30|31)_BACKUP_OBJECT_KEY/)
   assert.match(workflow, /VERSION_API_BASELINE_CHANGED/)
   assert.match(workflow, /ANDROID_EXPECTED_CURRENT_B64/)
-  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\|35\|36\|37\)\$/)
+  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\|35\|36\|37\|39\)\$/)
   assert.ok(workflow.indexOf('Update only Android version variables') < workflow.indexOf('Reload only the web process'))
   assert.match(workflow, /pm2 reload easonfansclub --update-env/)
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)
@@ -1041,7 +1041,21 @@ test('Beta23 publishes reviewed notes with code35 CAS and can atomically roll ba
 })
 
 test('Beta24 publishes reviewed notes with code36 CAS and can atomically roll back to authentic code36', (t) => {
-  const pin = JSON.parse(readFileSync(path.join(process.cwd(), 'scripts/android-internal-beta.json'), 'utf8'))
+  // Historical pin, frozen here on purpose: the shared candidate file now
+  // describes Beta.26, and this regression must keep testing code 37 exactly
+  // as it shipped.
+  const pin = {
+    versionName: '1.0.0-beta.24',
+    versionCode: 37,
+    mobileCommit: '972f771e51da95a1a5f38c891c164145d9dd8f3c',
+    sha256: 'BEC3821A6157BE0B299FCB71A3376AFCAE6B2F4C6F8EF03577DF90BD962B8402',
+    size: 183971204,
+    sourceFile: 'ECFC-1.0.0-beta.24-release-shun-972f771-20261124-121300.apk',
+    releaseNotes: [
+      '支持 EasMUSIC 在线修复播放问题', '支持 EasMUSIC 本地导入音乐', '完善后台播放与锁屏通知',
+      '划掉应用后停止播放', '补充隐私时长统计', 'Beta.24 内测版本',
+    ],
+  }
   const code36: AndroidReleaseMetadata = {
     ...metadata,
     ANDROID_VERSION_NAME: '1.0.0-beta.23',
@@ -1089,4 +1103,51 @@ test('Beta24 publishes reviewed notes with code36 CAS and can atomically roll ba
   assert.equal(restored.ANDROID_RELEASE_NOTES, code36.ANDROID_RELEASE_NOTES)
   assert.equal(restored.ANDROID_PUBLISHED_AT, code36.ANDROID_PUBLISHED_AT)
   assert.throws(() => restoreAndroidVersionEnv(rollback), /ANDROID_BASELINE_MISMATCH/)
+})
+
+test('Beta26 publishes the pinned build with code37 CAS and the recorded rollback artifact', (t) => {
+  const pin = JSON.parse(readFileSync(path.join(process.cwd(), 'scripts/android-internal-beta.json'), 'utf8'))
+  const code37: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_NAME: '1.0.0-beta.24',
+    ANDROID_VERSION_CODE: 37,
+    ANDROID_APK_COS_KEY: pin.rollback.objectKey,
+    ANDROID_APK_SHA256: pin.rollback.sha256,
+    ANDROID_APK_SIZE: pin.rollback.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '支持 EasMUSIC 在线修复播放问题', '支持 EasMUSIC 本地导入音乐', '完善后台播放与锁屏通知',
+      '划掉应用后停止播放', '补充隐私时长统计', 'Beta.24 内测版本',
+    ]),
+    ANDROID_PUBLISHED_AT: '2026-11-24T07:21:39.000Z',
+  }
+  const code39: AndroidReleaseMetadata = {
+    ...code37,
+    ANDROID_VERSION_NAME: pin.versionName,
+    ANDROID_VERSION_CODE: pin.versionCode,
+    ANDROID_APK_COS_KEY: `android/releases/ECFC-1.0.0-beta.26-internal-code39-${pin.mobileCommit}-run45699999999-attempt1.apk`,
+    ANDROID_APK_SHA256: pin.sha256,
+    ANDROID_APK_SIZE: pin.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify(pin.releaseNotes),
+    ANDROID_PUBLISHED_AT: '2026-11-26T00:30:00.000Z',
+  }
+  const { ANDROID_APK_COS_KEY: liveCode37Key, ...expected37 } = code37
+  const { appDir, envPath } = fixture(t, `DATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code37)}\n`)
+  const before = readFileSync(envPath, 'utf8')
+  assert.ok(liveCode37Key)
+  assert.equal(pin.versionCode, 39)
+  assert.equal(pin.versionName, '1.0.0-beta.26')
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code39, expectedCurrentMetadata: expected37 }), /BETA26_ARTIFACT_PIN_NOT_READY/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code39, beta26Pin: pin }), /BETA26_CODE37_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code39, beta26Pin: pin, expectedCurrentMetadata: { ...expected37, ANDROID_VERSION_CODE: 36 } }), /BETA26_CODE37_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code39, beta26Pin: { ...pin, rollback: { ...pin.rollback, sha256: 'B'.repeat(64) } }, expectedCurrentMetadata: expected37 }), /BETA26_CODE37_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: { ...code39, ANDROID_APK_SHA256: 'C'.repeat(64) }, beta26Pin: pin, expectedCurrentMetadata: expected37 }), /BETA26_CODE37_CAS_BASELINE_REQUIRED|INVALID_BETA26_APK_SHA256/)
+  assert.equal(readFileSync(envPath, 'utf8'), before)
+  configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code39, beta26Pin: pin, expectedCurrentMetadata: expected37 })
+  const live = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(live.ANDROID_VERSION_CODE, '39')
+  assert.equal(live.ANDROID_VERSION_NAME, '1.0.0-beta.26')
+  assert.equal(live.ANDROID_APK_SHA256, pin.sha256)
+  assert.equal(live.ANDROID_APK_SIZE, String(pin.size))
+  assert.equal(live.ANDROID_RELEASE_NOTES, code39.ANDROID_RELEASE_NOTES)
+  assert.equal(live.ANDROID_APK_COS_KEY, code39.ANDROID_APK_COS_KEY)
 })
