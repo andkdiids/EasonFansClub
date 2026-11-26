@@ -60,16 +60,28 @@ export function getAspirinConsultationLength(value: unknown) {
   return countGraphemes(normalizeAspirinConsultationText(value))
 }
 
+/**
+ * The single source of truth for "this consultation row qualifies".
+ *
+ * Both the badge resolver AND the clinic consultation leaderboard call this, so
+ * deleting a row changes every surface identically. Deliberately excludes the
+ * viewer dimension: the caller decides whose consultation it is.
+ */
+export function qualifiesForAspirinConsultation(fact: AspirinConsultationFact, minLength: number) {
+  if (fact.record.category !== 'ASK_DOCTORS') return false
+  if (fact.status !== 'ACTIVE' || fact.record.status !== 'ACTIVE') return false
+  if (fact.deletedAt || fact.record.deletedAt) return false
+  // A consultation on your own case never counts as "other user's case".
+  if (fact.record.authorId === fact.authorId) return false
+  if (getAspirinConsultationLength(fact.content) < minLength) return false
+  return true
+}
+
 export function isValidAspirinConsultation(fact: AspirinConsultationFact, userId: string, config: AspirinRuleConfig) {
   // The consultation must belong to the current user, but a case published by
   // that same user is not an eligible "other user" case for this badge.
   if (fact.authorId !== userId) return false
-  if (fact.record.category !== 'ASK_DOCTORS') return false
-  if (fact.status !== 'ACTIVE' || fact.record.status !== 'ACTIVE') return false
-  if (fact.deletedAt || fact.record.deletedAt) return false
-  if (fact.record.authorId === userId) return false
-  if (getAspirinConsultationLength(fact.content) < config.minLength) return false
-  return true
+  return qualifiesForAspirinConsultation(fact, config.minLength)
 }
 
 export function getAspirinQualifiedDateKey(value: Date | string) {
@@ -79,6 +91,47 @@ export function getAspirinQualifiedDateKey(value: Date | string) {
 /** The daily unit is the user who published the clinic case, not a reply row. */
 export function getAspirinProgressKey(fact: AspirinConsultationFact) {
   return fact.record.authorId
+}
+
+export type AspirinPeriodAggregate = {
+  userId: string
+  /** Distinct case authors this user consulted within the period. */
+  count: number
+  earliestAt: Date
+  latestAt: Date
+}
+
+/**
+ * Aggregate one period's consultations into per-user, per-case-author-deduped
+ * counts — the exact rule the badge uses, so the leaderboard can never drift.
+ *
+ * Deleting one of several rows against the SAME case author leaves the count
+ * unchanged (the distinct key set still contains that author); deleting the only
+ * qualifying row drops it by one. This is why a plain `count - 1` is wrong.
+ */
+export function aggregateAspirinConsultationsForPeriod(
+  facts: ReadonlyArray<AspirinConsultationFact>,
+  minLength: number,
+): Map<string, AspirinPeriodAggregate> {
+  const buckets = new Map<string, { keys: Set<string>; earliestAt: Date; latestAt: Date }>()
+  for (const fact of facts) {
+    if (!qualifiesForAspirinConsultation(fact, minLength)) continue
+    const at = fact.createdAt instanceof Date ? fact.createdAt : new Date(fact.createdAt)
+    if (Number.isNaN(at.getTime())) continue
+    const key = getAspirinProgressKey(fact)
+    const bucket = buckets.get(fact.authorId)
+    if (bucket) {
+      bucket.keys.add(key)
+      if (at < bucket.earliestAt) bucket.earliestAt = at
+      if (at > bucket.latestAt) bucket.latestAt = at
+    } else {
+      buckets.set(fact.authorId, { keys: new Set([key]), earliestAt: at, latestAt: at })
+    }
+  }
+  return new Map([...buckets].map(([userId, bucket]) => [
+    userId,
+    { userId, count: bucket.keys.size, earliestAt: bucket.earliestAt, latestAt: bucket.latestAt },
+  ]))
 }
 
 export function getAspirinDailyQualifiedAuthorIds(facts: readonly AspirinConsultationFact[], userId: string, dateKey: string, config: AspirinRuleConfig) {

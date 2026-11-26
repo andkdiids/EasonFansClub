@@ -106,6 +106,12 @@ export type ClinicPublicConsultation = {
   viewerHasAspirin: boolean
   viewerHasMouthpiece: boolean
   canDelete: boolean
+  /**
+   * True when the viewer may delete ANY consultation through the clinic
+   * management permission. The UI uses this only to pick the wording of the
+   * delete confirmation; the server re-checks the permission on every request.
+   */
+  canModerateDelete: boolean
   isDeleted: boolean
   replyToName: string | null
   replies: ClinicPublicConsultation[]
@@ -533,8 +539,11 @@ function toPublicConsultation(
   mouthpieceIds: Set<string>,
   publicWords: ModerationWord[],
   equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>,
+  canManage = false,
 ): ClinicPublicConsultation {
   const isDeleted = row.status !== 'ACTIVE'
+  const isAuthor = Boolean(viewerId && row.authorId === viewerId)
+  const moderatorCanDelete = canManage && !isDeleted
   return {
     id: row.id,
     recordId: row.recordId,
@@ -555,15 +564,16 @@ function toPublicConsultation(
     mouthpieceCount: row.mouthpieceCount,
     viewerHasAspirin: aspirinIds.has(row.id),
     viewerHasMouthpiece: mouthpieceIds.has(row.id),
-    canDelete: Boolean(viewerId && row.authorId === viewerId && !isDeleted),
+    canDelete: (isAuthor || canManage) && !isDeleted,
+    canModerateDelete: moderatorCanDelete,
     isDeleted,
     replyToName: null,
     replies: [],
   }
 }
 
-function buildConsultationTree(rows: ClinicConsultationRow[], recordAuthorId: string, recordIdentityMode: ClinicIdentityMode, recordAnonymousNumber: number, viewerId: string | null, aspirinIds: Set<string>, mouthpieceIds: Set<string>, publicWords: ModerationWord[], equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>) {
-  const mapped = new Map(rows.map((row) => [row.id, toPublicConsultation(row, recordAuthorId, recordIdentityMode, recordAnonymousNumber, viewerId, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap)]))
+function buildConsultationTree(rows: ClinicConsultationRow[], recordAuthorId: string, recordIdentityMode: ClinicIdentityMode, recordAnonymousNumber: number, viewerId: string | null, aspirinIds: Set<string>, mouthpieceIds: Set<string>, publicWords: ModerationWord[], equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>, canManage = false) {
+  const mapped = new Map(rows.map((row) => [row.id, toPublicConsultation(row, recordAuthorId, recordIdentityMode, recordAnonymousNumber, viewerId, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap, canManage)]))
   const rowsById = new Map(rows.map((row) => [row.id, row]))
   const roots: ClinicPublicConsultation[] = []
 
@@ -596,7 +606,12 @@ function buildConsultationTree(rows: ClinicConsultationRow[], recordAuthorId: st
   return roots
 }
 
-export async function getPublicClinicRecordDetail(recordId: string, viewerId?: string | null): Promise<ClinicPublicRecordDetail | { unavailable: true; status: ClinicContentStatus } | null> {
+export async function getPublicClinicRecordDetail(
+  recordId: string,
+  viewerId?: string | null,
+  options?: { canManage?: boolean },
+): Promise<ClinicPublicRecordDetail | { unavailable: true; status: ClinicContentStatus } | null> {
+  const canManage = Boolean(options?.canManage)
   const row = await prisma.clinicRecord.findUnique({
     where: { id: recordId },
     select: {
@@ -666,6 +681,8 @@ export async function getPublicClinicRecordDetail(recordId: string, viewerId?: s
     consultationCount: row.consultationCount,
     mouthpieceCount: row.mouthpieceCount,
     viewerHasAspirin: Boolean(recordAspirin),
+    // Deleting the whole case stays author-only: an administrator deleting one
+    // consultation must never be able to remove the entire record by mistake.
     canDelete: Boolean(viewerId && row.author.id === viewerId),
     createdAt: publicDate(row.createdAt),
     updatedAt: publicDate(row.updatedAt),
@@ -675,7 +692,7 @@ export async function getPublicClinicRecordDetail(recordId: string, viewerId?: s
   } satisfies ClinicPublicRecord
   return {
     ...record,
-    consultations: buildConsultationTree(row.consultations as ClinicConsultationRow[], row.author.id, row.identityMode, row.anonymousNumber, viewerId || null, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap),
+    consultations: buildConsultationTree(row.consultations as ClinicConsultationRow[], row.author.id, row.identityMode, row.anonymousNumber, viewerId || null, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap, canManage),
   }
 }
 
@@ -693,7 +710,23 @@ export async function removeClinicRecord(recordId: string, userId: string, canMa
   }
 }
 
-export async function removeClinicConsultation(consultationId: string, userId: string, canManage = false) {
+/**
+ * Soft-delete a clinic consultation.
+ *
+ * Idempotent by construction: the state flip is a guarded `updateMany` that only
+ * matches a still-ACTIVE row, and the record counters are only decremented by the
+ * request that actually won that flip. Two parallel deletes therefore apply the
+ * change (and the counter decrement) exactly once.
+ *
+ * Deleting a row never touches sibling rows, the parent case, wallet ledgers or
+ * other users; the leaderboard re-aggregates from live rows on next read.
+ */
+export async function removeClinicConsultation(
+  consultationId: string,
+  userId: string,
+  canManage = false,
+  options?: { reason?: string | null },
+) {
   const result = await prisma.$transaction(async (tx) => {
     const consultation = await tx.clinicConsultation.findUnique({
       where: { id: consultationId },
@@ -701,8 +734,16 @@ export async function removeClinicConsultation(consultationId: string, userId: s
     })
     if (!consultation) throw new ClinicServiceError('CONSULTATION_NOT_FOUND', '这条会诊不存在。', 404)
     if (!canManage && consultation.authorId !== userId) throw new ClinicServiceError('FORBIDDEN', '你只能删除自己的会诊。', 403)
-    if (consultation.status !== 'ACTIVE') return { authorId: consultation.authorId, changed: false }
-    await tx.clinicConsultation.update({ where: { id: consultationId }, data: { status: canManage ? 'REMOVED' : 'DELETED', deletedAt: new Date() } })
+
+    // Guarded state flip: only one concurrent caller can move ACTIVE away.
+    const marked = await tx.clinicConsultation.updateMany({
+      where: { id: consultationId, status: 'ACTIVE' },
+      data: { status: canManage ? 'REMOVED' : 'DELETED', deletedAt: new Date() },
+    })
+    if (marked.count !== 1) {
+      return { authorId: consultation.authorId, recordId: consultation.recordId, changed: false, alreadyDeleted: true }
+    }
+
     await tx.clinicRecord.updateMany({
       where: { id: consultation.recordId, consultationCount: { gt: 0 } },
       data: {
@@ -710,9 +751,41 @@ export async function removeClinicConsultation(consultationId: string, userId: s
         ...(consultation.mouthpieceCount > 0 ? { mouthpieceCount: { decrement: consultation.mouthpieceCount } } : {}),
       },
     })
-    return { authorId: consultation.authorId, changed: true }
+    return { authorId: consultation.authorId, recordId: consultation.recordId, changed: true, alreadyDeleted: false }
   })
-  if (result?.changed) void triggerBadgeEvaluation(result.authorId, 'CLINIC_CONSULTATION_CHANGED', consultationId)
+
+  if (result?.changed) {
+    // Moderator deletions must be auditable. A failed audit never rolls back the
+    // committed content removal, but it is logged loudly for follow-up.
+    if (canManage) {
+      try {
+        await prisma.userOperationLog.create({
+          data: {
+            userId: result.authorId,
+            operatorUserId: userId,
+            category: 'CLINIC',
+            action: 'CONSULTATION_DELETE',
+            summary: '管理员删除门诊会诊',
+            metadata: {
+              consultationId,
+              recordId: result.recordId,
+              authorId: result.authorId,
+              deletedBy: userId,
+              reason: options?.reason?.trim() || null,
+              result: 'SUCCESS',
+            } as never,
+            source: 'WEB',
+            operatorType: 'ADMIN',
+            targetType: 'CLINIC_CONSULTATION',
+            targetId: consultationId,
+          },
+        })
+      } catch (error) {
+        console.error('[clinic.consultation.delete.audit]', { consultationId, recordId: result.recordId, adminId: userId, error })
+      }
+    }
+    void triggerBadgeEvaluation(result.authorId, 'CLINIC_CONSULTATION_CHANGED', consultationId)
+  }
   return result
 }
 

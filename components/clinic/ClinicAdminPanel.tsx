@@ -141,6 +141,41 @@ export function ClinicAdminPanel() {
     }
   }
 
+  /**
+   * Handle a report by removing the reported consultation in one step, then
+   * marking the report resolved. Closes the loop that used to require two
+   * separate screens; the removal itself goes through the same audited endpoint
+   * the public clinic page uses.
+   */
+  async function removeReportedConsultation(reportId: string, consultationId: string, reason: string) {
+    if (!window.confirm('确认删除这条评论？\n\n删除后，该评论将不再显示，并从有效会诊统计及排行榜中移除。此操作会被记录。')) return
+    setBusyId(reportId)
+    try {
+      const response = await fetch(`/api/clinic/consultations/${consultationId}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reason: `举报处理：${reason}`.slice(0, 200) }),
+      })
+      const body = await response.json().catch(() => null) as { message?: string }
+      if (!response.ok) throw new Error(body?.message || '会诊删除失败。')
+      // Mark the report resolved so it leaves the pending queue.
+      const resolved = await fetch('/api/admin/clinic', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'report', reportId, status: 'RESOLVED' }),
+      })
+      if (!resolved.ok) {
+        const failed = await resolved.json().catch(() => null) as { message?: string }
+        throw new Error(failed?.message || '会诊已删除，但举报状态更新失败。')
+      }
+      await load()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '举报处理失败。')
+    } finally {
+      setBusyId('')
+    }
+  }
+
   async function updateReport(id: string, status: ReportStatus) {
     setBusyId(id)
     try {
@@ -236,6 +271,9 @@ export function ClinicAdminPanel() {
                 <td className="clinic-status">{item.status}</td>
                 <td><div className="clinic-admin-actions">
                   {item.status === 'PENDING' ? <><button type="button" disabled={busyId === item.id} onClick={() => void updateReport(item.id, 'RESOLVED')}>已处理</button><button type="button" disabled={busyId === item.id} onClick={() => void updateReport(item.id, 'REJECTED')}>驳回</button></> : null}
+                  {item.consultation && item.consultation.status === 'ACTIVE'
+                    ? <button type="button" className="clinic-danger-link" disabled={busyId === item.id} onClick={() => void removeReportedConsultation(item.id, item.consultation!.id, item.reason)}>删除该评论</button>
+                    : null}
                 </div></td>
               </tr>
             })}</tbody>
