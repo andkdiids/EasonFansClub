@@ -12,6 +12,12 @@ import { startShunNotifyWorker } from './lib/shun-notify-worker'
 import { startMobilePushWorker } from './lib/mobile-push-sender'
 import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from './lib/deployment-db-maintenance-hold'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
+import {
+  MOBILE_SOCKET_REAUTH_CLOSE_CODE,
+  MOBILE_SOCKET_SESSION_MAX_MS,
+  authorizeMobileSocket,
+  shouldAttemptMobileSocketAuth,
+} from './lib/mobile-socket-auth'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
 import { undercoverRealtimeHub } from './lib/undercover-star-realtime'
 import { undercoverChatHub } from './lib/undercover-star-chat-realtime'
@@ -164,7 +170,16 @@ async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
     return null
   }
 
-  if (!hasValidRequestOrigin(toWebRequest(request))) {
+  const webRequest = toWebRequest(request)
+  const tokens = cookieValues(request, authCookieName)
+  const mobileAttempted = shouldAttemptMobileSocketAuth({
+    path: url.pathname,
+    authorization: firstHeader(request.headers.authorization),
+  })
+  // Origin is a cookie-CSRF defence. A native client sends no Origin and cannot
+  // be tricked into attaching a Bearer token by another site, so the check is
+  // enforced for the cookie path only.
+  if (!mobileAttempted && !hasValidRequestOrigin(webRequest)) {
     rejectUpgrade(socket, 403, 'Forbidden', url.pathname)
     return null
   }
@@ -174,13 +189,32 @@ async function authorizeUpgrade(request: IncomingMessage, socket: Duplex) {
     return null
   }
 
-  const tokens = cookieValues(request, authCookieName)
-  if (!tokens.length) {
+  if (!tokens.length && !mobileAttempted) {
     rejectUpgrade(socket, 401, 'Unauthorized', url.pathname)
     return null
   }
 
   try {
+    // A native client authenticates the summary channel with its Bearer access
+    // token; an explicit but invalid Bearer token never falls back to a cookie.
+    if (mobileAttempted) {
+      const mobileIdentity = await authorizeMobileSocket(webRequest)
+      if (!mobileIdentity) {
+        rejectUpgrade(socket, 401, 'Unauthorized', url.pathname)
+        return null
+      }
+      if ((activeConnectionsByUser.get(mobileIdentity.userId) || 0) >= maxConnectionsPerUser) {
+        rejectUpgrade(socket, 429, 'Too Many Requests', url.pathname)
+        return null
+      }
+      return {
+        user: { id: mobileIdentity.userId },
+        ip,
+        channel: 'summary' as const,
+        mobileSessionId: mobileIdentity.sessionId,
+      }
+    }
+
     let user: Awaited<ReturnType<typeof getCurrentUserFromSessionToken>> = null
     let authUnavailable = false
     for (const token of tokens) {
@@ -241,7 +275,7 @@ async function start() {
     perMessageDeflate: false,
   })
 
-  websocketServer.on('connection', (socket: RealtimeSocket, request: IncomingMessage, auth: { user: { id: string }; ip: string; channel: 'summary' | 'duel' | 'undercover' | 'undercover-chat' }) => {
+  websocketServer.on('connection', (socket: RealtimeSocket, request: IncomingMessage, auth: { user: { id: string }; ip: string; channel: 'summary' | 'duel' | 'undercover' | 'undercover-chat'; mobileSessionId?: string }) => {
     const { user, ip } = auth
     const path = requestUrl(request).pathname
     socket.isAlive = true
@@ -252,12 +286,21 @@ async function start() {
     websocketLog('websocket.connection.open', {
       path,
       channel: auth.channel,
+      mobile: Boolean(auth.mobileSessionId),
       activeConnections: realtimeSockets.size,
       connectionOpen: websocketMetrics.connectionOpen,
     })
     increment(activeConnectionsByUser, user.id)
     increment(activeConnectionsByIp, ip)
     let closed = false
+    let reauthTimer: ReturnType<typeof setTimeout> | null = null
+    if (auth.mobileSessionId) {
+      // Native sockets are bounded: the client reconnects with a freshly
+      // refreshed access token, so revoked sessions stop streaming quickly.
+      reauthTimer = setTimeout(() => {
+        if (socket.readyState === WsWebSocket.OPEN) socket.close(MOBILE_SOCKET_REAUTH_CLOSE_CODE, 'session-refresh')
+      }, MOBILE_SOCKET_SESSION_MAX_MS)
+    }
 
     const removeFromHub = auth.channel === 'summary'
       ? realtimeHub.add(user.id, socket)
@@ -273,6 +316,7 @@ async function start() {
     const cleanup = () => {
       if (closed) return
       closed = true
+      if (reauthTimer) clearTimeout(reauthTimer)
       realtimeSockets.delete(socket)
       removeFromHub()
       decrement(activeConnectionsByUser, user.id)
