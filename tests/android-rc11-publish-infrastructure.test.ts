@@ -1393,3 +1393,9 @@ test('Beta27 metadata publication is pin-driven, keeps code39 CAS, and verifies 
   assert.match(script, /BETA27_CODE39_CAS_BASELINE_REQUIRED/)
   assert.match(script, /BETA27_ARTIFACT_PIN_NOT_READY/)
 })
+
+test('internal-beta publishing reads the UTF-8 release pin explicitly', () => {
+  const workflow = read('.github/workflows/publish-android-rc11.yml')
+  assert.match(workflow, /Get-Content -LiteralPath scripts\/android-internal-beta\.json -Raw -Encoding UTF8 \| ConvertFrom-Json/)
+  assert.doesNotMatch(workflow, /Get-Content scripts\/android-internal-beta\.json -Raw \| ConvertFrom-Json/)
+})
