@@ -825,7 +825,7 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.doesNotMatch(workflow, /code(?:30|31)_backup_object_key|CODE(?:30|31)_BACKUP_OBJECT_KEY/)
   assert.match(workflow, /VERSION_API_BASELINE_CHANGED/)
   assert.match(workflow, /ANDROID_EXPECTED_CURRENT_B64/)
-  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\|35\|36\|37\|39\|40\|41\)\$/)
+  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\|35\|36\|37\|39\|40\|41\|42\)\$/)
   assert.ok(workflow.indexOf('Update only Android version variables') < workflow.indexOf('Reload only the web process'))
   assert.match(workflow, /pm2 reload easonfansclub --update-env/)
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)
@@ -1243,7 +1243,26 @@ test('Beta27 publishes the pinned build with code39 CAS and the recorded rollbac
 })
 
 test('Beta28 publishes the pinned build with code40 CAS and the recorded rollback artifact', (t) => {
-  const pin = JSON.parse(readFileSync(path.join(process.cwd(), 'scripts/android-internal-beta.json'), 'utf8'))
+  // Historical beta.28 pin: the working file now carries the beta.29 release.
+  const pin = {
+    versionName: '1.0.0-beta.28',
+    versionCode: 41,
+    mobileCommit: '7ed7afc38b526b5dc4162332ac273d83d9f75eac',
+    sha256: '6C0F48767C827D75FD4EDB505FCE69D89ABC718294F7EF3267BE312FB7EFD09C',
+    size: 184977406,
+    sourceFile: 'ECFC-1.0.0-beta.28-release-beta28-20261126-210345.apk',
+    releaseNotes: [
+      '私信会话列表与未读数在进入聊天页前实时更新', '服务端 Bearer 会话可接入实时通道并按会话增量补齐',
+      '前台正在查看的会话不再重复弹出系统通知', '断网重连、切号隔离与已读状态以服务端游标校准',
+      '保留现有私信界面、底部导航与系统返回行为', 'Beta.28 内测版本',
+    ],
+    rollback: {
+      versionCode: 40,
+      objectKey: 'android/releases/ECFC-1.0.0-beta.27-internal-code40-97143ef6c6937e8b5ea57b029e71749d25f0915b-run45793887717-attempt1.apk',
+      sha256: 'B1AFF0296DF4F5E20434D88557A622B3A37B5308CD75BCDEA5BB941311CCDAA6',
+      size: 184953475,
+    },
+  }
   const code40: AndroidReleaseMetadata = {
     ...metadata,
     ANDROID_VERSION_NAME: '1.0.0-beta.27',
@@ -1289,4 +1308,53 @@ test('Beta28 publishes the pinned build with code40 CAS and the recorded rollbac
   assert.equal(live.ANDROID_APK_SIZE, String(pin.size))
   assert.equal(live.ANDROID_RELEASE_NOTES, code41.ANDROID_RELEASE_NOTES)
   assert.equal(live.ANDROID_APK_COS_KEY, code41.ANDROID_APK_COS_KEY)
+})
+
+test('Beta29 publishes the pinned build with code41 CAS and the recorded rollback artifact', (t) => {
+  const pin = JSON.parse(readFileSync(path.join(process.cwd(), 'scripts/android-internal-beta.json'), 'utf8'))
+  const code41: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_NAME: '1.0.0-beta.28',
+    ANDROID_VERSION_CODE: 41,
+    ANDROID_APK_COS_KEY: pin.rollback.objectKey,
+    ANDROID_APK_SHA256: pin.rollback.sha256,
+    ANDROID_APK_SIZE: pin.rollback.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '私信会话列表与未读数在进入聊天页前实时更新', '服务端 Bearer 会话可接入实时通道并按会话增量补齐',
+      '前台正在查看的会话不再重复弹出系统通知', '断网重连、切号隔离与已读状态以服务端游标校准',
+      '保留现有私信界面、底部导航与系统返回行为', 'Beta.28 内测版本',
+    ]),
+    ANDROID_PUBLISHED_AT: '2026-11-26T16:20:00.000Z',
+  }
+  const code42: AndroidReleaseMetadata = {
+    ...code41,
+    ANDROID_VERSION_NAME: pin.versionName,
+    ANDROID_VERSION_CODE: pin.versionCode,
+    ANDROID_APK_COS_KEY: `android/releases/ECFC-1.0.0-beta.29-internal-code42-${pin.mobileCommit}-run45860000000-attempt1.apk`,
+    ANDROID_APK_SHA256: pin.sha256,
+    ANDROID_APK_SIZE: pin.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify(pin.releaseNotes),
+    ANDROID_PUBLISHED_AT: '2026-11-27T00:00:00.000Z',
+  }
+  const { ANDROID_APK_COS_KEY: liveCode41Key, ...expected41 } = code41
+  const { appDir, envPath } = fixture(t, `DATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code41)}\n`)
+  const before = readFileSync(envPath, 'utf8')
+  assert.ok(liveCode41Key)
+  assert.equal(pin.versionCode, 42)
+  assert.equal(pin.versionName, '1.0.0-beta.29')
+  assert.equal(pin.rollback.versionCode, 41)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code42, expectedCurrentMetadata: expected41 }), /BETA29_ARTIFACT_PIN_NOT_READY/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code42, beta29Pin: pin }), /BETA29_CODE41_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code42, beta29Pin: pin, expectedCurrentMetadata: { ...expected41, ANDROID_VERSION_CODE: 40 } }), /BETA29_CODE41_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code42, beta29Pin: { ...pin, rollback: { ...pin.rollback, sha256: 'B'.repeat(64) } }, expectedCurrentMetadata: expected41 }), /BETA29_CODE41_CAS_BASELINE_REQUIRED/)
+  assert.throws(() => configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: { ...code42, ANDROID_APK_SHA256: 'C'.repeat(64) }, beta29Pin: pin, expectedCurrentMetadata: expected41 }), /BETA29_CODE41_CAS_BASELINE_REQUIRED|INVALID_BETA29_APK_SHA256/)
+  assert.equal(readFileSync(envPath, 'utf8'), before)
+  configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code42, beta29Pin: pin, expectedCurrentMetadata: expected41 })
+  const live = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(live.ANDROID_VERSION_CODE, '42')
+  assert.equal(live.ANDROID_VERSION_NAME, '1.0.0-beta.29')
+  assert.equal(live.ANDROID_APK_SHA256, pin.sha256)
+  assert.equal(live.ANDROID_APK_SIZE, String(pin.size))
+  assert.equal(live.ANDROID_RELEASE_NOTES, code42.ANDROID_RELEASE_NOTES)
+  assert.equal(live.ANDROID_APK_COS_KEY, code42.ANDROID_APK_COS_KEY)
 })
