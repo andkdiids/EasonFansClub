@@ -8,8 +8,44 @@ import { publicPostWhere } from '@/lib/post-moderation'
 import { buildPostExpiryWhere } from '@/lib/post-lifecycle'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
+import { aggregateAspirinConsultationsForPeriod } from '@/lib/aspirin-consultation'
+import { ASPIRIN_MIN_LENGTH, getAspirinRuleConfig } from '@/lib/aspirin-badge-config'
 
 export const DASHBOARD_RANKING_LIMIT = 10
+
+/**
+ * Hard safety ceiling for the consultation scan. Current production volume is
+ * ~250 qualifying rows/month, so this only guards against pathological growth.
+ */
+const CONSULTATION_RANKING_SCAN_LIMIT = 20_000
+
+/**
+ * Read the minimum length from the Aspirin badge rule so the leaderboard and the
+ * badge can never disagree, falling back to the published constant when the rule
+ * is absent. Cached briefly: the leaderboard is queried far more often than an
+ * administrator edits the rule.
+ */
+let aspirinMinLengthCache: { value: number; expiresAt: number } | null = null
+const ASPIRIN_MIN_LENGTH_TTL_MS = 30_000
+
+async function getAspirinConsultationMinLength(): Promise<number> {
+  const now = Date.now()
+  if (aspirinMinLengthCache && aspirinMinLengthCache.expiresAt > now) return aspirinMinLengthCache.value
+  let value = ASPIRIN_MIN_LENGTH
+  try {
+    const rule = await prisma.badgeRule.findFirst({
+      where: { ruleType: 'CLINIC_CONSULTATION_STREAK' },
+      select: { configJson: true },
+      orderBy: { id: 'asc' },
+    })
+    const parsed = getAspirinRuleConfig(rule?.configJson)
+    if (parsed) value = parsed.minLength
+  } catch (error) {
+    console.error('[admin-dashboard-rankings.aspirin-config]', error)
+  }
+  aspirinMinLengthCache = { value, expiresAt: now + ASPIRIN_MIN_LENGTH_TTL_MS }
+  return value
+}
 
 export const DASHBOARD_RANKING_PERIODS = ['this_week', 'last_week', 'this_month', 'last_month', 'custom'] as const
 
@@ -408,30 +444,77 @@ async function queryCommentRanking(range: DashboardPeriodRange) {
   }))
 }
 
+/**
+ * Clinic consultation leaderboard.
+ *
+ * Uses the SAME rule as the Aspirin badge (`qualifiesForAspirinConsultation`):
+ * only ASK_DOCTORS cases, ≥ minLength meaningful characters, never your own
+ * case, deduplicated by the case author. Rows are pre-filtered in SQL for the
+ * structural conditions, then judged in JS so the grapheme/HTML-aware length
+ * check is byte-for-byte the badge's rule. If an admin deletes a consultation,
+ * the next aggregation simply stops counting it — no counter to decrement.
+ */
 async function queryConsultationRanking(range: DashboardPeriodRange) {
-  const rows = await prisma.clinicConsultation.groupBy({
-    by: ['authorId'],
-    where: {
-      status: 'ACTIVE',
-      deletedAt: null,
-      createdAt: { gte: range.start, lt: range.endExclusive },
-      author: rankingUserWhere,
-      record: { status: 'ACTIVE', deletedAt: null },
-    },
-    orderBy: [
-      { _count: { id: 'desc' } },
-      { _max: { createdAt: 'asc' } },
-      { authorId: 'asc' },
-    ],
-    take: DASHBOARD_RANKING_LIMIT,
-    _count: true,
-    _max: { createdAt: true },
-  })
+  const minLength = await getAspirinConsultationMinLength()
+  const rows = await prisma.$queryRaw<Array<{
+    id: string
+    authorId: string
+    content: string
+    createdAt: Date
+    status: string
+    deletedAt: Date | null
+    recordId: string
+    recordAuthorId: string
+    recordCategory: string
+    recordStatus: string
+    recordDeletedAt: Date | null
+  }>>`
+    SELECT c.\`id\` AS id, c.\`authorId\` AS authorId, c.\`content\` AS content,
+           c.\`createdAt\` AS createdAt, c.\`status\` AS status, c.\`deletedAt\` AS deletedAt,
+           c.\`recordId\` AS recordId, r.\`authorId\` AS recordAuthorId,
+           r.\`category\` AS recordCategory, r.\`status\` AS recordStatus,
+           r.\`deletedAt\` AS recordDeletedAt
+    FROM \`ClinicConsultation\` c
+    INNER JOIN \`ClinicRecord\` r ON r.\`id\` = c.\`recordId\`
+    INNER JOIN \`User\` u ON u.\`id\` = c.\`authorId\`
+    INNER JOIN \`Profile\` p ON p.\`userId\` = c.\`authorId\`
+    WHERE c.\`status\` = 'ACTIVE'
+      AND c.\`deletedAt\` IS NULL
+      AND c.\`createdAt\` >= ${range.start}
+      AND c.\`createdAt\` < ${range.endExclusive}
+      AND u.\`status\` = 'ACTIVE'
+      AND u.\`isDeleted\` = 0
+      AND r.\`status\` = 'ACTIVE'
+      AND r.\`deletedAt\` IS NULL
+      AND r.\`category\` = 'ASK_DOCTORS'
+      AND r.\`authorId\` <> c.\`authorId\`
+    ORDER BY c.\`createdAt\` ASC, c.\`id\` ASC
+    LIMIT ${CONSULTATION_RANKING_SCAN_LIMIT}
+  `
 
-  return rows.map((row) => ({
-    userId: row.authorId,
-    count: row._count,
-    lastActivityAt: row._max.createdAt || range.end,
+  const aggregates = aggregateAspirinConsultationsForPeriod(
+    rows.map((row) => ({
+      id: row.id,
+      recordId: row.recordId,
+      authorId: row.authorId,
+      content: row.content,
+      status: row.status,
+      deletedAt: row.deletedAt,
+      createdAt: row.createdAt,
+      record: {
+        authorId: row.recordAuthorId,
+        category: row.recordCategory,
+        status: row.recordStatus,
+        deletedAt: row.recordDeletedAt,
+      },
+    })),
+    minLength,
+  )
+
+  return [...aggregates.values()].map((entry) => ({
+    userId: entry.userId,
+    count: entry.count,
+    lastActivityAt: entry.latestAt,
   }))
 }
 

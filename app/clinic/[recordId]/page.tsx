@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { ClinicDetailClient } from '@/components/clinic/ClinicDetailClient'
 import { getPublicClinicRecordDetail } from '@/lib/clinic-service'
 import { emitRealtime } from '@/lib/realtime'
@@ -14,7 +15,10 @@ export default async function ClinicRecordPage({ params, searchParams }: { param
   const [{ recordId }, query] = await Promise.all([params, searchParams])
   // Do not turn an auth database outage into an anonymous viewer.
   const user = await getCurrentUser()
-  const record = await getPublicClinicRecordDetail(recordId, user?.id || null)
+  // Moderators get an inline "delete consultation" action on every row. The API
+  // re-checks this permission, so the flag only controls what the UI offers.
+  const canManageClinic = user ? await hasAdminPermission(user, 'clinic_manage') : false
+  const record = await getPublicClinicRecordDetail(recordId, user?.id || null, { canManage: canManageClinic })
   if (!record) notFound()
   if (user) {
     const marked = await markPersonalNotificationsForTargetRead({ userId: user.id, linkPrefix: `/clinic/${recordId}`, types: ['REPLY'] })

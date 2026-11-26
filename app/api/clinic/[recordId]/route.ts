@@ -20,7 +20,8 @@ export async function GET(_request: Request, context: RouteContext) {
       user: { limit: 120, windowSeconds: 60 },
     })
     if (limited) return limited
-    const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null)
+    const canManage = viewer ? await hasAdminPermission(viewer, 'clinic_manage') : false
+    const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null, { canManage })
     if (!record) return NextResponse.json({ ok: false, code: 'RECORD_NOT_FOUND', message: '这份病历不存在。' }, { status: 404, headers: clinicPublicHeaders })
     return clinicOk({ record })
   } catch (error) {

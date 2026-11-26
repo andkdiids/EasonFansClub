@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { clinicErrorResponse, clinicOk, clinicPublicHeaders } from '@/lib/clinic-api'
 import { parseClinicIdentityMode } from '@/lib/clinic-config'
 import { createClinicConsultation, getPublicClinicRecordDetail } from '@/lib/clinic-service'
@@ -21,7 +22,8 @@ export async function GET(_request: Request, context: RouteContext) {
       user: { limit: 120, windowSeconds: 60 },
     })
     if (limited) return limited
-    const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null)
+    const canManage = viewer ? await hasAdminPermission(viewer, 'clinic_manage') : false
+    const record = await getPublicClinicRecordDetail(recordId, viewer?.id || null, { canManage })
     if (!record) return NextResponse.json({ ok: false, code: 'RECORD_NOT_FOUND', message: '这份病历不存在。' }, { status: 404, headers: clinicPublicHeaders })
     if ('unavailable' in record) return clinicOk({ consultations: [] })
     return clinicOk({ consultations: record.consultations })
@@ -51,7 +53,9 @@ export async function POST(request: Request, context: RouteContext) {
       identityMode: parseClinicIdentityMode(body?.identityMode),
       parentId: sanitizeText(body?.parentId, 80) || null,
     })
-    const record = await getPublicClinicRecordDetail(recordId, guard.user.id)
+    const record = await getPublicClinicRecordDetail(recordId, guard.user.id, {
+      canManage: await hasAdminPermission(guard.user, 'clinic_manage'),
+    })
     return clinicOk({ consultationId: created.id, record }, 201)
   } catch (error) {
     return clinicErrorResponse(error, {

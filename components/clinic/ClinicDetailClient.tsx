@@ -175,15 +175,31 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function deleteConsultation(item: ClinicPublicConsultation) {
-    if (!(await requireLogin()) || !window.confirm('确定要删除这条会诊吗？有楼中楼回复时会保留删除占位。')) return
+    // Moderators see the stricter wording: their deletion also removes the row
+    // from the effective-consultation statistics and the leaderboard, and is
+    // written to the admin audit trail.
+    const confirmation = item.canModerateDelete
+      ? '确认删除这条评论？\n\n删除后，该评论将不再显示，并从有效会诊统计及排行榜中移除。此操作会被记录。'
+      : '确定要删除这条会诊吗？有楼中楼回复时会保留删除占位。'
+    if (!(await requireLogin()) || !window.confirm(confirmation)) return
     const response = await fetch(`/api/clinic/consultations/${item.id}`, { method: 'DELETE' })
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { message?: string }
       setActionError(body?.message || '会诊删除失败，请稍后再试。')
       return
     }
-    setRecord((current) => ({ ...current, consultationCount: Math.max(0, current.consultationCount - (item.isDeleted ? 0 : 1)), consultations: updateConsultation(current.consultations, item.id, (value) => ({ ...value, isDeleted: true, author: null, content: '这条会诊已被删除。', canDelete: false })) }))
+    // Instant local removal so the row disappears without a round-trip.
+    setRecord((current) => ({
+      ...current,
+      consultationCount: Math.max(0, current.consultationCount - (item.isDeleted ? 0 : 1)),
+      consultations: updateConsultation(current.consultations, item.id, (value) => ({
+        ...value, isDeleted: true, author: null, content: '这条会诊已被删除。', canDelete: false, canModerateDelete: false,
+      })),
+    }))
     notifyAspirinBadgeProgressChanged()
+    // Re-read server state so the case counter and any dependent figure the page
+    // renders match the database (the leaderboard itself is always live-queried).
+    router.refresh()
   }
 
   async function openReply(item: ClinicPublicConsultation) {
@@ -249,7 +265,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
 function ClinicConsultationItem({ item, focusId, onAspirin, onMouthpiece, onReply, onDelete, onReport }: Readonly<{ item: ClinicPublicConsultation; focusId: string; onAspirin: (id: string) => void; onMouthpiece: (id: string) => void; onReply: (id: string) => void; onDelete: (id: string) => void; onReport: (id: string) => void }>) {
   return (
     <article className={`clinic-consultation ${item.parentId ? 'is-reply' : ''} ${item.isDeleted ? 'is-deleted' : ''} ${focusId === item.id ? 'is-focused' : ''}`} id={`clinic-consultation-${item.id}`}>
-      <header><div>{item.author ? <ClinicIdentityBadge identity={item.author} compact /> : <span className="clinic-deleted-author">已删除会诊</span>}<ClinicTime value={item.createdAt} /></div><div className="clinic-consultation-menu"><button type="button" className="clinic-more-button" aria-label="会诊更多操作" onClick={() => onReport(item.id)}>···</button>{item.canDelete ? <button type="button" className="clinic-danger-link" onClick={() => onDelete(item.id)}>删除</button> : null}</div></header>
+      <header><div>{item.author ? <ClinicIdentityBadge identity={item.author} compact /> : <span className="clinic-deleted-author">已删除会诊</span>}<ClinicTime value={item.createdAt} /></div><div className="clinic-consultation-menu"><button type="button" className="clinic-more-button" aria-label="会诊更多操作" onClick={() => onReport(item.id)}>···</button>{item.canDelete ? <button type="button" className="clinic-danger-link" onClick={() => onDelete(item.id)} aria-label={item.canModerateDelete ? '删除评论（管理员）' : '删除我的会诊'}>{item.canModerateDelete ? '删除评论' : '删除'}</button> : null}</div></header>
       {item.replyToName ? <p className="clinic-consultation-target">回复 @{item.replyToName}</p> : null}
       <p className="clinic-consultation-content">{item.content}</p>
       {!item.isDeleted ? <footer className="clinic-consultation-actions"><button type="button" className={`clinic-action-button ${item.viewerHasAspirin ? 'is-active' : ''}`} onClick={() => onAspirin(item.id)} aria-label={item.viewerHasAspirin ? '取消会诊阿士匹灵' : '给会诊一颗阿士匹灵'}><UiIcon name="pill" /><span>阿士匹灵</span><b>{item.aspirinCount}</b></button><button type="button" className={`clinic-action-button clinic-mouthpiece-button ${item.viewerHasMouthpiece ? 'is-active' : ''}`} onClick={() => onMouthpiece(item.id)} aria-label={item.viewerHasMouthpiece ? '取消嘴替' : '你是我的嘴替'}>🗣️ <span>{item.viewerHasMouthpiece ? '已标记嘴替' : '你是我的嘴替'}</span><b>{item.mouthpieceCount}</b></button><button type="button" className="clinic-action-button" onClick={() => onReply(item.id)}>回复</button></footer> : null}

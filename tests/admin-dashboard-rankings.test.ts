@@ -254,19 +254,23 @@ test('统计 service 使用真实模型、公开状态和删除过滤', () => {
   const moderation = source('lib/post-moderation.ts')
   assert.match(service, /prisma\.post\.groupBy/)
   assert.match(service, /prisma\.\$queryRaw<CommentRankingQueryRow\[\]>/)
-  assert.match(service, /prisma\.clinicConsultation\.groupBy/)
   assert.match(service, /publicPostWhere/)
   assert.match(moderation, /isDeleted: false[\s\S]*status: 'PUBLISHED'/)
   assert.match(moderation, /moderationStatus: \{ in: publicPostModerationStatuses \}/)
   assert.match(service, /isDeleted: false/)
   assert.match(service, /deletedAt: null/)
   assert.match(service, /Board: \{ isActive: true \}/)
-  assert.match(service, /status: 'ACTIVE',[\s\S]*record: \{ status: 'ACTIVE', deletedAt: null \}/)
-  assert.match(service, /_count: true/)
-  assert.match(service, /_max: \{ createdAt: true \}/)
-  assert.match(service, /\{ _count: \{ id: 'desc' \} \}/)
-  assert.match(service, /\{ _max: \{ createdAt: 'asc' \} \}/)
-  assert.match(service, /\{ authorId: 'asc' \}/)
+  // The consultation board is now a raw-SQL scan + JS aggregation so it can reuse
+  // the Aspirin badge rule (category, own-case exclusion, grapheme length, dedup).
+  assert.match(service, /FROM \\`ClinicConsultation\\` c/)
+  assert.match(service, /r\.\\`status\\` = 'ACTIVE'/)
+  assert.match(service, /r\.\\`deletedAt\\` IS NULL/)
+  assert.match(service, /r\.\\`category\\` = 'ASK_DOCTORS'/)
+  assert.match(service, /r\.\\`authorId\\` <> c\.\\`authorId\\`/)
+  assert.match(service, /aggregateAspirinConsultationsForPeriod\(/)
+  assert.match(service, /c\.\\`createdAt\\` >= \$\{range\.start\}/)
+  assert.match(service, /c\.\\`createdAt\\` < \$\{range\.endExclusive\}/)
+  assert.doesNotMatch(service, /prisma\.clinicConsultation\.groupBy/)
 })
 
 test('评论榜在数据库内解析 root、按有效事件去重并限制 TOP 10', () => {
@@ -298,7 +302,9 @@ test('三个排行榜在五个周期中复用同一个 resolved range，并由�
   }
   assert.match(service, /const range = typeof input === 'string'/)
   assert.match(service, /const \[postAggregates, commentAggregates, consultationAggregates\] = await Promise\.all\(/)
-  assert.equal((service.match(/createdAt: \{ gte: range\.start, lt: range\.endExclusive \}/g) || []).length, 2)
+  // Only the post board still uses a Prisma where-clause range; the consultation
+  // board moved to raw SQL (so it can dedup by case author in JS).
+  assert.equal((service.match(/createdAt: \{ gte: range\.start, lt: range\.endExclusive \}/g) || []).length, 1)
   assert.match(service, /r\.createdAt >= \$\{range\.start\}/)
   assert.match(service, /r\.createdAt < \$\{range\.endExclusive\}/)
   assert.match(service, /prisma\.user\.findMany/)
