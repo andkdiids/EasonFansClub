@@ -8,6 +8,8 @@
  * also has a separate monthly award that does NOT consume any weekly cap.
  */
 
+import { isValidMonthlyBoundary, isValidWeeklyBoundary } from '@/lib/leaderboard-rewards-period'
+
 export const LEADERBOARD_REWARD_CATEGORIES = ['entertainment', 'comment', 'aspirin'] as const
 export type LeaderboardRewardCategory = (typeof LEADERBOARD_REWARD_CATEGORIES)[number]
 
@@ -41,6 +43,14 @@ export type LeaderboardRewardsConfig = {
   enabled: boolean
   /** ISO instant (Asia/Shanghai wall-clock semantics) of first enable. */
   enabledAt: string | null
+  /**
+   * Earliest period key that may auto-settle, per kind. When set it overrides
+   * the strict `enabledAt` full-cycle guard for that kind only; earlier periods
+   * stay permanently blocked. Fixed-width keys (`week:YYYY-MM-DD`,
+   * `month:YYYY-MM`) compare lexicographically within the same kind.
+   */
+  firstWeeklyPeriod: string | null
+  firstMonthlyPeriod: string | null
   entertainment: {
     weeklyEnabled: boolean
     monthlyEnabled: boolean
@@ -72,6 +82,9 @@ export type LeaderboardRewardsConfig = {
 export const defaultLeaderboardRewardsConfig: LeaderboardRewardsConfig = {
   enabled: false,
   enabledAt: null,
+  // Null = no explicit boundary: the strict enabledAt full-cycle guard applies.
+  firstWeeklyPeriod: null,
+  firstMonthlyPeriod: null,
   entertainment: {
     weeklyEnabled: true,
     monthlyEnabled: true,
@@ -111,6 +124,21 @@ export function leaderboardRewardsConfigError(value: unknown): string | null {
   if (typeof c.enabled !== 'boolean') return '启用状态无效。'
   if (c.enabledAt !== null && typeof c.enabledAt !== 'string') return '生效时间无效。'
   if (c.enabledAt && Number.isNaN(Date.parse(c.enabledAt))) return '生效时间不是有效日期。'
+  // Boundaries are optional (legacy configs predate them). When present they must
+  // match the exact period-key shape so a typo can never silently block or open
+  // the wrong cycles.
+  if (c.firstWeeklyPeriod !== undefined && c.firstWeeklyPeriod !== null) {
+    if (!isValidWeeklyBoundary(c.firstWeeklyPeriod)) return '首次周榜结算周期格式无效，应为 week:YYYY-MM-DD。'
+    if (Number.isNaN(Date.parse(`${String(c.firstWeeklyPeriod).slice(5)}T00:00:00+08:00`))) {
+      return '首次周榜结算周期不是有效日期。'
+    }
+  }
+  if (c.firstMonthlyPeriod !== undefined && c.firstMonthlyPeriod !== null) {
+    if (!isValidMonthlyBoundary(c.firstMonthlyPeriod)) return '首次月榜结算周期格式无效，应为 month:YYYY-MM。'
+    if (Number.isNaN(Date.parse(`${String(c.firstMonthlyPeriod).slice(6)}-01T00:00:00+08:00`))) {
+      return '首次月榜结算周期不是有效日期。'
+    }
+  }
 
   const groups: Array<[string, unknown]> = [
     ['entertainment', c.entertainment],
@@ -153,6 +181,10 @@ export function validateLeaderboardRewardsConfig(value: unknown): LeaderboardRew
   return {
     enabled: c.enabled as boolean,
     enabledAt: typeof c.enabledAt === 'string' ? c.enabledAt : null,
+    // Absent on configurations saved before explicit boundaries existed: null
+    // keeps the strict enabledAt full-cycle guard for that kind.
+    firstWeeklyPeriod: isValidWeeklyBoundary(c.firstWeeklyPeriod) ? c.firstWeeklyPeriod : null,
+    firstMonthlyPeriod: isValidMonthlyBoundary(c.firstMonthlyPeriod) ? c.firstMonthlyPeriod : null,
     entertainment: {
       weeklyEnabled: ent.weeklyEnabled,
       monthlyEnabled: ent.monthlyEnabled,

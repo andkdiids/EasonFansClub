@@ -56,6 +56,13 @@ export async function PATCH(request: Request) {
   const validated = validateLeaderboardRewardsConfig(body)!
   const current = await getLeaderboardRewardsConfig()
 
+  // Boundaries are operated by release staff, not the admin form. Preserve them
+  // unless the caller explicitly includes the key (so a normal save can never
+  // silently reopen historical cycles or close a legitimately opened first cycle).
+  const bodyFields = (body ?? {}) as Record<string, unknown>
+  if (!('firstWeeklyPeriod' in bodyFields)) validated.firstWeeklyPeriod = current.firstWeeklyPeriod
+  if (!('firstMonthlyPeriod' in bodyFields)) validated.firstMonthlyPeriod = current.firstMonthlyPeriod
+
   // Record the official go-live instant the first time the feature is enabled.
   // This is what prevents any pre-existing period from being auto-settled.
   if (validated.enabled && !current.enabled && !validated.enabledAt) {
@@ -72,7 +79,13 @@ export async function PATCH(request: Request) {
         category: 'LEADERBOARD_REWARDS',
         action: 'CONFIG_UPDATE',
         summary: `更新排行榜自动奖励配置 (v${result.rulesVersion})`,
-        metadata: { rulesVersion: result.rulesVersion, enabled: validated.enabled, enabledAt: validated.enabledAt } as never,
+        metadata: {
+          rulesVersion: result.rulesVersion,
+          enabled: validated.enabled,
+          enabledAt: validated.enabledAt,
+          firstWeeklyPeriod: validated.firstWeeklyPeriod,
+          firstMonthlyPeriod: validated.firstMonthlyPeriod,
+        } as never,
         source: 'WEB',
         operatorType: 'ADMIN',
       },

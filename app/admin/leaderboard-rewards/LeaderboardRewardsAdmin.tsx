@@ -29,6 +29,8 @@ type ApiState = {
 const emptyConfig: LeaderboardRewardsConfig = {
   enabled: false,
   enabledAt: null,
+  firstWeeklyPeriod: null,
+  firstMonthlyPeriod: null,
   entertainment: {
     weeklyEnabled: true, monthlyEnabled: true,
     weeklyTop3: DEFAULT_AMOUNTS.entertainmentWeeklyTop3,
@@ -118,6 +120,13 @@ export function LeaderboardRewardsAdmin() {
           启用排行榜自动奖励
         </label>
         <p className="text-xs text-neutral-500">生效时间：{config.enabledAt || '尚未启用'}</p>
+        <p className="text-xs text-neutral-500">
+          首次周榜结算周期：{config.firstWeeklyPeriod || '未设置（按生效时间严格保护）'}
+          {'　'}首次月榜结算周期：{config.firstMonthlyPeriod || '未设置（按生效时间严格保护）'}
+        </p>
+        <p className="text-xs text-neutral-400">
+          首次结算周期由发布流程写入，此页面只读展示；更早周期永久禁止自动发放。
+        </p>
       </section>
 
       <section className="space-y-3 rounded border p-4">

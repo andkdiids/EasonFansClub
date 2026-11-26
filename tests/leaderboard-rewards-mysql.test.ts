@@ -258,3 +258,32 @@ qaTest('历史保护：周期早于生效时间自动跳过', async () => {
   assert.equal(result.reason, 'PERIOD_BEFORE_GO_LIVE')
   assert.equal(await prisma.leaderboardSettlementRun.count(), 0)
 })
+
+qaTest('显式边界：首个周期可真实结算，更早周期仍被拦截', async () => {
+  // NOW is Monday 2026-11-30 06:00 → its cycle is week:2026-11-23.
+  const u = await createUser()
+  const boards = [board('A', [[1, u.id]])]
+  const cfg = config()
+  // Go-live AFTER the cycle start: without a boundary this period would be blocked.
+  cfg.enabledAt = new Date('2026-11-26T11:11:35.871Z').toISOString()
+  cfg.firstWeeklyPeriod = 'week:2026-11-23'
+
+  // Earlier cycle (week:2026-11-16) must stay blocked.
+  const earlier = await runLeaderboardSettlement({
+    kind: 'weekly', config: { ...cfg, firstWeeklyPeriod: null }, now: NOW,
+    candidatesProvider: provider(boards),
+  })
+  assert.equal(earlier.status, 'SKIPPED', '无边界时更早/跨期周期必须被拦截')
+
+  // With the boundary, the first cycle settles for real.
+  const first = await runLeaderboardSettlement({ kind: 'weekly', config: cfg, now: NOW, candidatesProvider: provider(boards) })
+  assert.equal(first.status, 'COMPLETED')
+  assert.equal(first.summary?.walletPoints, 74)
+  assert.equal(await pointsOf(u.id), 74)
+
+  // Re-run is idempotent: no double pay.
+  const again = await runLeaderboardSettlement({ kind: 'weekly', config: cfg, now: NOW, candidatesProvider: provider(boards) })
+  assert.equal(again.status, 'ALREADY')
+  assert.equal(await pointsOf(u.id), 74, '重复执行不得重复发钱')
+  assert.equal(await prisma.pointLog.count({ where: { userId: u.id, businessKey: { startsWith: 'leaderboard:' } } }), 1)
+})
