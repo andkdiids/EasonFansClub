@@ -1,22 +1,22 @@
 {
-  "versionName": "1.0.0-beta.28",
-  "versionCode": 41,
-  "mobileCommit": "7ed7afc38b526b5dc4162332ac273d83d9f75eac",
-  "sha256": "6C0F48767C827D75FD4EDB505FCE69D89ABC718294F7EF3267BE312FB7EFD09C",
-  "size": 184977406,
-  "sourceFile": "ECFC-1.0.0-beta.28-release-beta28-20261126-210345.apk",
+  "versionName": "1.0.0-beta.29",
+  "versionCode": 42,
+  "mobileCommit": "172b28ca77dad06bcc3078517c14fa7bce440575",
+  "sha256": "71D83FBACB035C425CE365343D97455131E2E4742476B1E450E93DF6E76F0117",
+  "size": 184995062,
+  "sourceFile": "ECFC-1.0.0-beta.29-release-beta29-20261127-010558.apk",
   "releaseNotes": [
-    "私信会话列表与未读数在进入聊天页前实时更新",
-    "服务端 Bearer 会话可接入实时通道并按会话增量补齐",
-    "前台正在查看的会话不再重复弹出系统通知",
-    "断网重连、切号隔离与已读状态以服务端游标校准",
-    "保留现有私信界面、底部导航与系统返回行为",
-    "Beta.28 内测版本"
+    "修复点击开启通知后不弹出系统授权窗口",
+    "通知设置新增系统状态页并可直接跳转系统设置",
+    "系统授权后才注册推送令牌，未配置凭据时如实提示",
+    "保留私信会话实时同步与断线增量补齐",
+    "保留活跃症四栏目滑动与底部导航行为",
+    "Beta.29 内测版本"
   ],
   "rollback": {
-    "versionCode": 40,
-    "objectKey": "android/releases/ECFC-1.0.0-beta.27-internal-code40-97143ef6c6937e8b5ea57b029e71749d25f0915b-run45793887717-attempt1.apk",
-    "sha256": "B1AFF0296DF4F5E20434D88557A622B3A37B5308CD75BCDEA5BB941311CCDAA6",
-    "size": 184953475
+    "versionCode": 41,
+    "objectKey": "android/releases/ECFC-1.0.0-beta.28-internal-code41-7ed7afc38b526b5dc4162332ac273d83d9f75eac-run45828858309-attempt1.apk",
+    "sha256": "6C0F48767C827D75FD4EDB505FCE69D89ABC718294F7EF3267BE312FB7EFD09C",
+    "size": 184977406
   }
 }
