@@ -1,22 +1,22 @@
 {
-  "versionName": "1.0.0-beta.26",
-  "versionCode": 39,
-  "mobileCommit": "b7f5258684505856d5fb1abc4e7d23b3b5f32e14",
-  "sha256": "D72A1EED12F736F491F0FA824ED20E00CA40FBB1A0E63BAA5718A1294C7EBE00",
-  "size": 184010936,
-  "sourceFile": "ECFC-1.0.0-beta.26-release-beta26-final-20261126-030341.apk",
+  "versionName": "1.0.0-beta.27",
+  "versionCode": 40,
+  "mobileCommit": "97143ef6c6937e8b5ea57b029e71749d25f0915b",
+  "sha256": "B1AFF0296DF4F5E20434D88557A622B3A37B5308CD75BCDEA5BB941311CCDAA6",
+  "size": 184953475,
+  "sourceFile": "ECFC-1.0.0-beta.27-release-beta27-final-20261126-165930.apk",
   "releaseNotes": [
-    "顺大师新增每日开放时间，默认 09:00–23:00（北京时间）",
-    "后台调整开放时间后 App 自动同步，无需重新安装",
-    "休息时间显示早睡联盟提示，仍可查看记录和抓捕调查",
-    "服务端到点关闭新的顺取，不影响已完成记录",
-    "优化开放状态刷新与深色模式下的休息提示",
-    "Beta.26 内测版本"
+    "活跃症四栏目支持跟手左右滑动",
+    "顶部栏目点击与滑动手势同步切换",
+    "新增系统消息通知授权与设置入口",
+    "私信、好友申请、顺大师等重要消息接入系统通知",
+    "保留原有任务、私信与好友功能",
+    "Beta.27 内测版本"
   ],
   "rollback": {
-    "versionCode": 37,
-    "objectKey": "android/releases/ECFC-1.0.0-beta.24-internal-code37-972f771e51da95a1a5f38c891c164145d9dd8f3c-run45341496770-attempt1.apk",
-    "sha256": "BEC3821A6157BE0B299FCB71A3376AFCAE6B2F4C6F8EF03577DF90BD962B8402",
-    "size": 183971204
+    "versionCode": 39,
+    "objectKey": "android/releases/ECFC-1.0.0-beta.26-internal-code39-b7f5258684505856d5fb1abc4e7d23b3b5f32e14-run45756732259-attempt1.apk",
+    "sha256": "D72A1EED12F736F491F0FA824ED20E00CA40FBB1A0E63BAA5718A1294C7EBE00",
+    "size": 184010936
   }
 }
