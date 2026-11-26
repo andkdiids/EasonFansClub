@@ -1,0 +1,22 @@
+# Copy this file to /etc/cron.d only after replacing the paths and installing
+# /etc/eason-fans-club/birthday-job.env outside the repository. That env file
+# must export DAILY_JOB_SECRET and be root-readable only.
+# CRON_TZ makes the schedule explicit even if the host timezone is UTC.
+CRON_TZ=Asia/Shanghai
+
+# Weekly settlement: every Monday 06:00 settles the previous full week.
+# Monthly settlement: on the 1st 06:00 settles the previous full month.
+# When the 1st is a Monday BOTH jobs run; the engine keys runs by kind+period so
+# they are independent and neither skips the other. Each job is DB-idempotent:
+# later invocations retry only FAILED runs; COMPLETED runs and an active PROCESSING
+# lease return without a second payout. Three time points per job for retry.
+
+# --- weekly (Monday 06:00, 06:05, 06:10) ---
+ 0 6 * * 1 appuser . /etc/eason-fans-club/birthday-job.env && LEADERBOARD_SETTLEMENT_KIND=weekly /bin/sh /home/apps/easonfansclub/current/scripts/run-leaderboard-rewards.sh >> /var/log/eason-fans-club/leaderboard-weekly.log 2>&1
+ 5 6 * * 1 appuser . /etc/eason-fans-club/birthday-job.env && LEADERBOARD_SETTLEMENT_KIND=weekly /bin/sh /home/apps/easonfansclub/current/scripts/run-leaderboard-rewards.sh >> /var/log/eason-fans-club/leaderboard-weekly.log 2>&1
+10 6 * * 1 appuser . /etc/eason-fans-club/birthday-job.env && LEADERBOARD_SETTLEMENT_KIND=weekly /bin/sh /home/apps/easonfansclub/current/scripts/run-leaderboard-rewards.sh >> /var/log/eason-fans-club/leaderboard-weekly.log 2>&1
+
+# --- monthly (1st 06:00, 06:05, 06:10) ---
+ 0 6 1 * * appuser . /etc/eason-fans-club/birthday-job.env && LEADERBOARD_SETTLEMENT_KIND=monthly /bin/sh /home/apps/easonfansclub/current/scripts/run-leaderboard-rewards.sh >> /var/log/eason-fans-club/leaderboard-monthly.log 2>&1
+ 5 6 1 * * appuser . /etc/eason-fans-club/birthday-job.env && LEADERBOARD_SETTLEMENT_KIND=monthly /bin/sh /home/apps/easonfansclub/current/scripts/run-leaderboard-rewards.sh >> /var/log/eason-fans-club/leaderboard-monthly.log 2>&1
+10 6 1 * * appuser . /etc/eason-fans-club/birthday-job.env && LEADERBOARD_SETTLEMENT_KIND=monthly /bin/sh /home/apps/easonfansclub/current/scripts/run-leaderboard-rewards.sh >> /var/log/eason-fans-club/leaderboard-monthly.log 2>&1

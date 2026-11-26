@@ -6132,6 +6132,10 @@ enum PointActionType {
   /// Platform-funded bonus paid on top of a successful capture. Never debits the
   /// caught player and never draws on another player's balance.
   SHUN_BONUS
+  /// Automatic leaderboard weekly reward (entertainment / comment / aspirin).
+  LEADERBOARD_WEEKLY_REWARD
+  /// Automatic entertainment leaderboard monthly extra reward.
+  LEADERBOARD_MONTHLY_REWARD
 }
 
 enum PharmacyCampaignStatus {
@@ -7028,6 +7032,82 @@ model ShunMasterSettings {
   launchNoticeId String?
   reserved Int @default(0)
   compensated Int @default(0)
+}
+
+/// Single-row (id=1) JSON config for automatic leaderboard rewards.
+model LeaderboardRewardSettings {
+  id Int @id
+  config Json
+  rulesVersion Int @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+/// One row per (settlement kind, period): durable idempotency gate + snapshot.
+model LeaderboardSettlementRun {
+  id String @id @default(cuid())
+  kind String @db.VarChar(16)
+  periodKey String @db.VarChar(64)
+  status String @db.VarChar(16) @default("PENDING")
+  attempts Int @default(0)
+  configSnapshot Json
+  result Json?
+  error String? @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  startedAt DateTime?
+  finishedAt DateTime?
+
+  @@unique([kind, periodKey])
+  @@index([status, createdAt])
+}
+
+/// Per-user weekly cap usage, locked inside the reward transaction.
+model LeaderboardWeeklyCapUsage {
+  id String @id @default(cuid())
+  userId String @db.VarChar(191)
+  category String @db.VarChar(32)
+  periodKey String @db.VarChar(64)
+  used Int @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, category, periodKey])
+  @@index([category, periodKey])
+}
+
+/// Immutable audit row for every reward attempt (including clipped zero payouts).
+model LeaderboardRewardGrant {
+  id String @id @default(cuid())
+  businessKey String @unique @db.VarChar(191)
+  runId String @db.VarChar(191)
+  category String @db.VarChar(32)
+  boardKey String @db.VarChar(128)
+  userId String @db.VarChar(191)
+  rank Int
+  originalAmount Int
+  capUsedBefore Int
+  capUsedAfter Int
+  actualAmount Int @default(0)
+  clippedAmount Int @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([userId, createdAt])
+}
+
+/// Immutable audit row for badge grants with rollover / dedup decisions.
+model LeaderboardBadgeGrant {
+  id String @id @default(cuid())
+  grantKey String @unique @db.VarChar(191)
+  runId String @db.VarChar(191)
+  badgeKey String @db.VarChar(32)
+  badgeId String @db.VarChar(191)
+  boardKey String @db.VarChar(128)
+  userId String @db.VarChar(191)
+  rank Int
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([userId, badgeKey])
 }
 
 model ShunMasterMember {
