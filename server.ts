@@ -9,6 +9,7 @@ import { hasValidRequestOrigin } from './lib/security'
 import { ensureRuntimeObservability } from './lib/runtime-observability'
 import { startGlobalPointsGrantWorker } from './lib/global-points-grant-worker'
 import { startShunNotifyWorker } from './lib/shun-notify-worker'
+import { startMobilePushWorker } from './lib/mobile-push-sender'
 import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from './lib/deployment-db-maintenance-hold'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
@@ -224,6 +225,11 @@ async function start() {
   const stopShunNotifyWorker = process.env.NODE_ENV === 'production'
     ? startShunNotifyWorker()
     : null
+  // Queued mobile push deliveries drain through the guarded Expo sender; a
+  // missing EXPO_ACCESS_TOKEN holds the queue instead of failing deliveries.
+  const stopMobilePushWorker = process.env.NODE_ENV === 'production'
+    ? startMobilePushWorker()
+    : null
 
   const server = createServer((request, response) => {
     void handle(request, response)
@@ -438,6 +444,7 @@ async function start() {
     if (productionActivityAutoCheckInHeartbeat) clearInterval(productionActivityAutoCheckInHeartbeat)
     stopGlobalPointsGrantWorker?.()
     stopShunNotifyWorker?.()
+    stopMobilePushWorker?.()
     for (const socket of realtimeSockets) socket.close(1001, 'server shutdown')
     websocketServer.close()
     server.close()

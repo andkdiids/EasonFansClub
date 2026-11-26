@@ -4,6 +4,7 @@ import { normalizeFriendPair } from '@/lib/friends'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
+import { queueDirectMessagePush } from '@/lib/mobile-push'
 import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
@@ -185,6 +186,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         return created
       })
       await recordStickerUsage(user.id, stickerId)
+      await queueDirectMessagePush(prisma, { userId: otherUserId, messageId: message.id, conversationId })
       emitRealtimeMany([user.id, otherUserId], 'message', { conversationId })
       return NextResponse.json({
         success: true,
@@ -252,9 +254,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         where: { conversationId, userId: user.id },
         data: { lastReadAt: now, isDeleted: false },
       })
-      return created
-    })
-    emitRealtimeMany([user.id, otherUserId], 'message', { conversationId })
+        return created
+      })
+      await queueDirectMessagePush(prisma, { userId: otherUserId, messageId: message.id, conversationId })
+      emitRealtimeMany([user.id, otherUserId], 'message', { conversationId })
     return NextResponse.json({
       success: true,
       duplicate: false,
