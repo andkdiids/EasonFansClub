@@ -7173,3 +7173,57 @@ model TopicActivityLotteryAudit {
 
   @@index([lotteryConfigId, createdAt], map: "TopicLotteryAudit_config_time_idx")
 }
+
+// Mobile push notifications: tokens are bound to the Bearer-authenticated
+// mobile user and deliveries queue through a guarded dispatch worker. Push is
+// an additional delivery channel only; the in-app Notification rows remain
+// the business source of truth.
+enum MobilePushTokenStatus {
+  ACTIVE
+  DISABLED
+}
+
+model MobilePushToken {
+  id                String                @id @default(cuid())
+  userId            String?
+  expoPushToken     String                @unique @db.VarChar(255)
+  installationId    String?               @db.VarChar(64)
+  platform          String                @db.VarChar(16)
+  appVersion        String?               @db.VarChar(32)
+  status            MobilePushTokenStatus @default(ACTIVE)
+  failureCount      Int                   @default(0)
+  lastFailureAt     DateTime?
+  lastFailureReason String?               @db.VarChar(255)
+  lastRegisteredAt  DateTime              @default(now())
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([userId, status])
+  @@index([status, updatedAt])
+}
+
+enum MobilePushDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model MobilePushDelivery {
+  id             String                   @id @default(cuid())
+  dedupeKey      String                   @unique @db.VarChar(191)
+  userId         String
+  title          String                   @db.VarChar(120)
+  body           String                   @db.VarChar(191)
+  payload        Json?
+  status         MobilePushDeliveryStatus @default(PENDING)
+  attempts       Int                      @default(0)
+  nextAttemptAt  DateTime                 @default(now())
+  lastError      String?                  @db.VarChar(255)
+  tokenCount     Int                      @default(0)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([userId, createdAt])
+}

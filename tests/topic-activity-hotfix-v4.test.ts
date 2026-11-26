@@ -271,7 +271,16 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   assert.equal(optOutCommentLines.length, 2, '新增字段必须带不可撤销说明注释')
   comparableBlocks.set('User', userFields.filter((field) =>
     field !== optOutField && !optOutCommentLines.includes(field)))
+  // Mobile push delivery is an approved additive schema change: two enums and
+  // two new tables only, no edits to any pre-existing block.
+  for (const name of ['MobilePushTokenStatus', 'MobilePushToken', 'MobilePushDeliveryStatus', 'MobilePushDelivery']) {
+    assert.ok(comparableBlocks.delete(name), `mobile push schema block registered: ${name}`)
+  }
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
+  const pushMigration = read('prisma/migrations/20261126040000_add_mobile_push_tokens/migration.sql')
+  assert.match(pushMigration, /CREATE TABLE `MobilePushToken`/)
+  assert.match(pushMigration, /CREATE TABLE `MobilePushDelivery`/)
+  assert.doesNotMatch(pushMigration, /\b(?:DROP|RENAME|TRUNCATE|DELETE\s+FROM)\b/i)
   for (const name of concertSchemaBlocks) assert.ok(newBlocks.has(name), `concert schema block retained: ${name}`)
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)
   const additive = read('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql')

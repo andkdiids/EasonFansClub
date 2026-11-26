@@ -1,6 +1,7 @@
 import { NotificationType, type Prisma, type PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { logNotificationError } from '@/lib/notification-errors'
+import { queueMobilePushForNotificationData } from '@/lib/mobile-push'
 
 /** The only Notification.type values that application code may persist. */
 export const NOTIFICATION_TYPE_VALUES = [
@@ -101,10 +102,13 @@ export function createNotificationWithDb(
   args: Prisma.NotificationCreateArgs,
   context: NotificationWriteContext = { operation: 'notification.create' },
 ) {
-  return db.notification.create({
-    ...args,
-    data: normalizeCreateData(args.data, context),
-  })
+  // Keep type validation synchronous: existing callers rely on an immediate
+  // InvalidNotificationTypeError, not a rejected promise.
+  const data = normalizeCreateData(args.data, context)
+  // Push delivery joins the notification's own transaction; dedupe happens on
+  // the notification key, so retries can never double queue.
+  return queueMobilePushForNotificationData(db, data)
+    .then(() => db.notification.create({ ...args, data }))
 }
 
 export function createManyNotifications(
@@ -120,13 +124,16 @@ export function createManyNotificationsWithDb(
   context: NotificationWriteContext = { operation: 'notification.createMany' },
 ) {
   const items: Prisma.NotificationCreateManyInput[] = Array.isArray(args.data) ? args.data : [args.data]
-  return db.notification.createMany({
-    ...args,
-    data: items.map((item) => ({
-      ...item,
-      type: normalizeNotificationType(item.type, context),
-    })),
-  })
+  const normalized = items.map((item) => ({
+    ...item,
+    type: normalizeNotificationType(item.type, context),
+  }))
+  // createMany cannot return generated ids, so only key-carrying pushes queue.
+  return Promise.all(normalized.map((item) => queueMobilePushForNotificationData(db, item, { requireKey: true })))
+    .then(() => db.notification.createMany({
+      ...args,
+      data: normalized,
+    }))
 }
 
 export function upsertNotification(
@@ -141,9 +148,15 @@ export function upsertNotificationWithDb(
   args: Prisma.NotificationUpsertArgs,
   context: NotificationWriteContext = { operation: 'notification.upsert' },
 ) {
-  return db.notification.upsert({
-    ...args,
-    create: normalizeCreateData(args.create, context),
-    update: normalizeUpdateData(args.update, context),
-  })
+  const createData = normalizeCreateData(args.create, context)
+  const updateData = normalizeUpdateData(args.update, context)
+  // Only the create branch may enqueue: the update branch refreshes aggregate
+  // state and would otherwise re-notify for an existing notification. The
+  // key-based dedupe makes the queued row idempotent either way.
+  return queueMobilePushForNotificationData(db, createData, { requireKey: true })
+    .then(() => db.notification.upsert({
+      ...args,
+      create: createData,
+      update: updateData,
+    }))
 }
