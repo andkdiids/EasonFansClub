@@ -846,7 +846,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           node scripts/assert-release-main.mjs
           if ($LASTEXITCODE -ne 0) { throw 'MAIN_VERIFICATION_FAILED' }
-          $pin = Get-Content scripts/android-internal-beta.json -Raw | ConvertFrom-Json
+          $pin = Get-Content -LiteralPath scripts/android-internal-beta.json -Raw -Encoding UTF8 | ConvertFrom-Json
           if ($pin.sourceFile -notmatch '^ECFC-[A-Za-z0-9.-]+\.apk$') { throw 'APK_FILENAME_INVALID' }
           $path = Join-Path $env:RUNNER_TEMP "ecfc-internal-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.apk"
           Copy-Item -LiteralPath (Join-Path 'E:/ECFC-Release-Artifacts' $pin.sourceFile) -Destination $path
