@@ -240,8 +240,18 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     // V5 approved additive value: the platform-funded capture bonus.
     '/// Platform-funded bonus paid on top of a successful capture. Never debits the',
     "/// caught player and never draws on another player's balance.",
-    'SHUN_BONUS'])
+    'SHUN_BONUS',
+    // Leaderboard automatic rewards approved additive values.
+    '/// Automatic leaderboard weekly reward (entertainment / comment / aspirin).',
+    'LEADERBOARD_WEEKLY_REWARD',
+    '/// Automatic entertainment leaderboard monthly extra reward.',
+    'LEADERBOARD_MONTHLY_REWARD'])
   comparableBlocks.set('PointActionType', pointActions)
+  // Leaderboard automatic reward additive models (config / run gate / cap / audit).
+  for (const name of ['LeaderboardRewardSettings', 'LeaderboardSettlementRun', 'LeaderboardWeeklyCapUsage',
+    'LeaderboardRewardGrant', 'LeaderboardBadgeGrant']) {
+    assert.ok(comparableBlocks.delete(name), `leaderboard reward model registered: ${name}`)
+  }
   for (const name of ['ShunMasterSettings', 'ShunMasterMember', 'ShunMasterConsent', 'ShunMasterProtection', 'ShunMasterRound',
     'ShunMasterAnonymousLetter']) {
     assert.ok(comparableBlocks.delete(name), `required Shun Master model retained: ${name}`)

@@ -43,6 +43,8 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   SHUN_RECOVERY: '顺大师 · 追回',
   SHUN_COMPENSATION: '顺大师 · 平台补偿',
   SHUN_BONUS: '顺大师 · 额外奖励',
+  LEADERBOARD_WEEKLY_REWARD: '排行榜周榜奖励',
+  LEADERBOARD_MONTHLY_REWARD: '排行榜月榜奖励',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
