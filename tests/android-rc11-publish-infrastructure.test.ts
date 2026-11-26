@@ -1403,6 +1403,7 @@ test('Beta28 metadata publication is pin-driven, keeps code40 CAS, and verifies 
   const allRuns = workflow.jobs.configure.steps.map(step => step.run || '').join('\n')
   assert.match(allRuns, /ANDROID_BETA28_ARTIFACT_PIN_B64/)
   assert.match(allRuns, /expected_version_code=41/)
+  assert.match(allRuns, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\|34\|35\|36\|37\|39\|40\|41\)\$/)
   assert.match(allRuns, /LIVE_BETA28_DOWNLOAD=VERIFIED/)
   assert.match(allRuns, /expectedCode === '41' \? '1\.0\.0-beta\.28'/)
   assert.match(allRuns, /flock -n/)
