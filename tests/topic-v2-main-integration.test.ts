@@ -131,7 +131,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
   assert.equal(createHash('sha256').update(reviewedStaging.replace(/\r\n/g, '\n')).digest('hex'), 'dbdbc92eff05d55fa24361868ea87001e8bad55b88068ca67e6484ac7a9723c0', 'reviewed Android staging workflow must not change without updating this guard')
   const reviewedMetadata = source('.github/workflows/configure-android-version.yml')
-  assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), 'd98a88bc7bb3f97318259141f7d2229b1cdc09658ecaf6deca278e22f38cdfc1', 'reviewed Android metadata workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedMetadata).digest('hex'), '66f0990f6636584e01ec086521284a6ce224487df5efa5d7d77164dd82488a7e', 'reviewed Android metadata workflow must not change without updating this guard')
 })
 
 test('reviewed RC14 diagnostics retain exact main identity and read-only production checks', () => {
@@ -209,6 +209,11 @@ test('Beta23 release control is independently fail-closed and keeps the prior ca
   assert.match(metadata, /ANDROID_BETA24_ARTIFACT_PIN_B64/)
   assert.match(metadata, /expected_version_code=37/)
   assert.match(metadata, /LIVE_BETA24_DOWNLOAD=VERIFIED/)
+  assert.match(metadata, /- beta26/)
+  assert.match(metadata, /ANDROID_BETA26_ARTIFACT_PIN_B64/)
+  assert.match(metadata, /expected_version_code=39/)
+  assert.match(metadata, /LIVE_BETA26_DOWNLOAD=VERIFIED/)
+  assert.match(metadata, /CODE37_ROLLBACK_SOURCE_VERIFIED=YES/)
   assert.match(metadata, /PRODUCTION_VERSION_API_NOT_EXPECTED_CODE36/)
   assert.match(metadata, /verify_only:/)
   assert.match(metadata, /if: inputs\.verify_only != true/)

@@ -33,6 +33,14 @@ export function configureAndroidVersionEnv(input: {
   beta22Pin?: AndroidArtifactPin
   beta23Pin?: AndroidArtifactPin
   beta24Pin?: AndroidArtifactPin & { versionName: string; versionCode: number; mobileCommit: string; sourceFile: string; releaseNotes: string[] }
+  beta26Pin?: AndroidArtifactPin & {
+    versionName: string
+    versionCode: number
+    mobileCommit: string
+    sourceFile: string
+    releaseNotes: string[]
+    rollback: { versionCode: number; objectKey: string; sha256: string; size: number }
+  }
   now?: Date
 }): { backupPath: string; changedKeys: string[]; envSha256: string }
 
