@@ -34,12 +34,15 @@ test('结算引擎：三个独立类别上限、月榜不占额度、勋章顺�
   assert.match(engine, /resolveBadgeAwards\(entertainment, owned, 3\)/)
 })
 
-test('首次上线历史保护：周期早于生效时间则跳过', () => {
+test('首次上线历史保护：显式边界优先，未设置时回退 enabledAt', () => {
   const engine = read('lib/leaderboard-rewards-settlement.ts')
-  assert.match(engine, /isPeriodAfterGoLive\(period, config\.enabledAt\)/)
+  assert.match(engine, /isPeriodAllowed\(period, config, config\.enabledAt\)/)
   assert.match(engine, /PERIOD_BEFORE_GO_LIVE/)
   const api = read('app/api/admin/leaderboard-rewards/route.ts')
   assert.match(api, /validated\.enabledAt = new Date\(\)\.toISOString\(\)/)
+  // A normal admin save must never wipe the operator-managed boundaries.
+  assert.match(api, /!\(\'firstWeeklyPeriod\' in bodyFields\)\) validated\.firstWeeklyPeriod = current\.firstWeeklyPeriod/)
+  assert.match(api, /!\(\'firstMonthlyPeriod\' in bodyFields\)\) validated\.firstMonthlyPeriod = current\.firstMonthlyPeriod/)
 })
 
 test('cron 调度：周一 06:00 周榜、月初 06:00 月榜，月初周一两者都运行', () => {

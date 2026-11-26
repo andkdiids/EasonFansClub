@@ -47,6 +47,9 @@ test('默认配置：三类周上限均 270，奖励档位与口令一致', () =
   // Default is OFF with no go-live: nothing auto-settles until an admin enables it.
   assert.equal(c.enabled, false)
   assert.equal(c.enabledAt, null)
+  // No explicit first-settlement boundary by default: strict full-cycle guard.
+  assert.equal(c.firstWeeklyPeriod, null)
+  assert.equal(c.firstMonthlyPeriod, null)
 })
 
 test('未绑定勋章是安全有效状态（引擎靠 && badgeId 保证不误发）', () => {

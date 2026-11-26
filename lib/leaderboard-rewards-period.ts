@@ -105,6 +105,49 @@ export function isPeriodAfterGoLive(period: SettlementPeriod, enabledAt: string 
   return period.start.getTime() >= goLive.getTime()
 }
 
+/**
+ * Explicit first-settlement boundaries.
+ *
+ * `enabledAt` implements full-cycle protection: only a period that STARTS after
+ * the go-live instant may settle. That is the right default, but business may
+ * need the first settlement to cover a cycle that began before go-live (for
+ * example: enable on 2026-11-26 and settle `week:2026-11-23` on 2026-11-30).
+ *
+ * A boundary pins the earliest allowed period key per kind. Anything earlier
+ * stays blocked forever, so no historical cycle can ever be back-filled.
+ */
+export type SettlementBoundaryConfig = {
+  firstWeeklyPeriod?: string | null
+  firstMonthlyPeriod?: string | null
+}
+
+const WEEKLY_PERIOD_KEY = /^week:\d{4}-\d{2}-\d{2}$/
+const MONTHLY_PERIOD_KEY = /^month:\d{4}-\d{2}$/
+
+export function isValidWeeklyBoundary(value: unknown): value is string {
+  return typeof value === 'string' && WEEKLY_PERIOD_KEY.test(value)
+}
+export function isValidMonthlyBoundary(value: unknown): value is string {
+  return typeof value === 'string' && MONTHLY_PERIOD_KEY.test(value)
+}
+
+/**
+ * Decide whether a period may auto-settle.
+ *
+ * When a boundary is configured for this kind it is authoritative (same-kind,
+ * fixed-width keys compare lexicographically). Otherwise fall back to the
+ * legacy `enabledAt` full-cycle protection, so old configs keep working.
+ */
+export function isPeriodAllowed(
+  period: SettlementPeriod,
+  boundary: SettlementBoundaryConfig,
+  enabledAt: string | null | undefined,
+): boolean {
+  const configured = period.kind === 'weekly' ? boundary.firstWeeklyPeriod : boundary.firstMonthlyPeriod
+  if (configured) return period.periodKey >= configured
+  return isPeriodAfterGoLive(period, enabledAt)
+}
+
 /** Human label used in notification copy, e.g. "2026-11-23 当周". */
 export function periodLabel(period: SettlementPeriod): string {
   return period.kind === 'weekly'

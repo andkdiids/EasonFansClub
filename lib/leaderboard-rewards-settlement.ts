@@ -29,7 +29,7 @@ import {
 } from '@/lib/leaderboard-rewards-config'
 import {
   resolveSettlementPeriod,
-  isPeriodAfterGoLive,
+  isPeriodAllowed,
   periodLabel,
   beijingDayStart,
   type SettlementKind,
@@ -361,8 +361,11 @@ export async function runLeaderboardSettlement(input: {
   const period = input.periodOverride ?? resolveSettlementPeriod(input.kind, now)
   const config = input.config
 
-  // Go-live protection: no automatic historical settlement.
-  if (!input.allowHistorical && !isPeriodAfterGoLive(period, config.enabledAt)) {
+  // First-settlement protection. An explicit per-kind boundary (when set) is
+  // authoritative and allows the configured first cycle to settle even if it
+  // began before go-live; anything earlier stays blocked. Without a boundary the
+  // strict enabledAt full-cycle guard applies, so existing configs are unchanged.
+  if (!input.allowHistorical && !isPeriodAllowed(period, config, config.enabledAt)) {
     return { status: 'SKIPPED', reason: 'PERIOD_BEFORE_GO_LIVE', periodKey: period.periodKey }
   }
   // Feature-category gate.
