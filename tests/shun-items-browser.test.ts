@@ -44,6 +44,13 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       requestKey: 'browser-' + code, configVersion: active.version,
     })
   })
+  await shunTransaction(async (tx) => {
+    await lockShunItemUsers(tx, [sender.id])
+    await postShunItemMovement(tx, {
+      userId: sender.id, code: 'FRIEND_GIFT', type: 'WEEKLY_REWARD',
+      day: shunDay(new Date()), requestKey: 'browser-gift-refresh-retry', configVersion: active.version,
+    })
+  })
   const browser = await chromium.launch({
     headless: true,
     ...(process.env.SHUN_ITEMS_BROWSER_PATH ? { executablePath: process.env.SHUN_ITEMS_BROWSER_PATH } : {}),
@@ -66,8 +73,34 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
           })
           assert.equal(forbidden.status(), 400)
           assert.equal((await context.request.get(base + '/api/admin/shun-master/items')).status(), 403)
-          await box.getByRole('button', { name: '随机赠送' }).click()
+          const giftRequests: string[] = []
+          let committedGift: { id: string; code: string } | undefined
+          await page.route('**/api/shun-master/gift', async (route) => {
+            giftRequests.push(route.request().postDataJSON().requestId)
+            if (giftRequests.length === 1) return route.abort('internetdisconnected')
+            const response = await route.fetch()
+            assert.equal(response.status(), 200)
+            const delivery = await response.json()
+            if (giftRequests.length === 2) {
+              committedGift = delivery
+              return route.abort('connectionreset')
+            }
+            assert.deepEqual(delivery, committedGift)
+            await route.fulfill({ response })
+          })
+          const gift = box.getByRole('button', { name: '随机赠送' })
+          await gift.click()
+          await box.getByText('网络连接中断，请重试。').waitFor()
+          assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id } }), 0)
+          await gift.click()
+          await gift.waitFor({ state: 'visible' })
+          await box.getByText('网络连接中断，请重试。').waitFor()
+          assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id } }), 1)
+          await page.reload()
+          await gift.click()
           await box.getByText('幸运已经送达！').waitFor()
+          assert.equal(giftRequests.length, 3)
+          assert.equal(new Set(giftRequests).size, 1)
           await box.getByText(new RegExp(receiver.nickname)).waitFor()
           assert.equal(await box.getByRole('region', { name: '通讯录好友' }).count(), 0)
           await page.screenshot({ path: join(output, 'v42-pc-gift.png') })
@@ -313,6 +346,111 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       await dropContext.close()
     }
   } finally {
+    await browser.close()
+    await prisma.$disconnect()
+  }
+})
+
+test('V4.2 prescription, comment, friend post share and like use real reward facts', {
+  skip: process.env.SHUN_ITEMS_BROWSER_QA !== '1',
+  timeout: 180_000,
+}, async () => {
+  const database = new URL(process.env.DATABASE_URL ?? '')
+  const base = process.env.SHUN_ITEMS_BROWSER_BASE ?? 'http://127.0.0.1:3127'
+  const output = process.env.SHUN_ITEMS_QA_OUTPUT
+  assert.equal(database.hostname, '127.0.0.1')
+  assert.equal(database.pathname, '/ecfc_shun_items_fixture_qa')
+  assert.equal(new URL(base).hostname, '127.0.0.1')
+  assert.ok(output)
+  const source = validateShunItemDraft(await prisma.shunItemConfigVersion.findFirst({
+    orderBy: { version: 'desc' }, include: { definitions: true },
+  }))
+  assert.ok(source)
+  const oldGate = process.env.SHUN_ITEMS_ENABLED
+  process.env.SHUN_ITEMS_ENABLED = 'true'
+  const fixture = () => {
+    const name = 'V42Activity-' + randomUUID().slice(0, 12)
+    return prisma.user.create({ data: {
+      username: name, usernameNormalized: name.toLowerCase(), nickname: name, passwordHash: 'fixture',
+      Profile: { create: { displayName: name } },
+    } })
+  }
+  const browser = await chromium.launch({
+    headless: true,
+    ...(process.env.SHUN_ITEMS_BROWSER_PATH ? { executablePath: process.env.SHUN_ITEMS_BROWSER_PATH } : {}),
+  })
+  try {
+    const owner = await fixture()
+    const title = '顺大师行为隔离测试 ' + randomUUID().slice(0, 8)
+    const board = await prisma.board.create({ data: { name: title, slug: randomUUID() } })
+    const post = await prisma.post.create({ data: { title, content: '隔离验收测试帖子。', authorId: owner.id, boardId: board.id } })
+    const kinds = ['PRESCRIPTION', 'COMMENT', 'SHARE', 'LIKE'] as const
+    for (const chance of [0, 100]) {
+      const drops = Object.fromEntries(Object.entries(source.rules.drops).map(([kind, rule]) => [kind, { ...rule, chance }]))
+      await prisma.shunItemConfigVersion.create({ data: {
+        createdBy: owner.id, enabled: true, definitions: { create: source.definitions },
+        rules: { ...source.rules, community: true, dailyMax: 2, drops },
+      } })
+      const actors = await Promise.all(kinds.map(async (kind) => {
+        const user = await fixture()
+        const [userAId, userBId] = [owner.id, user.id].sort()
+        await prisma.friendship.create({ data: { userAId, userBId } })
+        const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+        await context.addCookies([{ name: authCookieName, value: await createSessionToken(user), url: base }])
+        return { kind, user, context }
+      }))
+      try {
+        const actions = await Promise.all(actors.map(async ({ kind, user, context }) => {
+          const page = await context.newPage()
+          await page.goto(base + (kind === 'PRESCRIPTION' ? '/games/daily-prescription' : '/posts/' + post.id))
+          const routes = { PRESCRIPTION: '/api/entertainment/daily-draw', COMMENT: '/api/posts/' + post.id + '/replies',
+            SHARE: '/api/posts/' + post.id + '/share', LIKE: '/api/posts/' + post.id + '/like' }
+          const fields = {
+            COMMENT: { content: '这一条隔离验收评论足够长且具有唯一文本。' + user.nickname },
+            SHARE: { recipientId: owner.id, clientMessageId: randomUUID() },
+            PRESCRIPTION: {}, LIKE: {},
+          }
+          const submit = () => context.request.post(base + routes[kind], { headers: { Origin: base }, data: fields[kind] })
+          const response = await submit()
+          assert.ok(response.ok(), kind + ': ' + response.status() + ' ' + await response.text())
+          return { kind, user, page, submit }
+        }))
+        for (let i = 0; i < 8; i++) await runShunItemRewardSweep()
+        for (const { kind, user, page } of actions) {
+          const entries = await prisma.shunItemEntry.findMany({ where: { userId: user.id, type: 'COMMUNITY_DROP' } })
+          assert.equal(entries.length, chance === 100 ? 1 : 0, kind)
+          if (!chance) {
+            assert.equal(await page.getByRole('link', { name: /意外收获/ }).count(), 0)
+            continue
+          }
+          const stock = await prisma.shunItemInventory.findMany({ where: { userId: user.id } })
+          assert.equal(stock.reduce((sum, row) => sum + row.available, 0), 1)
+        }
+        await Promise.all(actions.map(async ({ kind, page, submit }) => {
+          if (chance) {
+            const toast = page.getByRole('link', { name: /意外收获/ })
+            await toast.waitFor()
+            await page.screenshot({ path: join(output, 'v42-activity-' + kind + '.png') })
+            await toast.click()
+            const box = page.getByRole('dialog', { name: /百宝箱/ })
+            await box.getByText(/意外收获 ·/).waitFor()
+            await page.reload()
+            await box.getByText(/意外收获 ·/).waitFor()
+          }
+          await submit()
+        }))
+        for (let i = 0; i < 4; i++) await runShunItemRewardSweep()
+        for (const { kind, user } of actions) assert.equal(
+          await prisma.shunItemEntry.count({ where: { userId: user.id, type: 'COMMUNITY_DROP' } }),
+          chance ? 1 : 0, kind + ' duplicate',
+        )
+      } finally {
+        await Promise.all(actors.map(({ context }) => context.close()))
+      }
+    }
+  } finally {
+    if (oldGate === undefined) delete process.env.SHUN_ITEMS_ENABLED
+    else process.env.SHUN_ITEMS_ENABLED = oldGate
     await browser.close()
     await prisma.$disconnect()
   }

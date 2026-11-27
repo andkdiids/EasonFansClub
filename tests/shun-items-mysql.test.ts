@@ -294,6 +294,50 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     assert.equal(await prisma.shunItemEntry.count({ where: { userId: weeklyUser.id, type: 'COMMUNITY_DROP' } }), 0)
     assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, weeklyUser.id)), [])
     assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, sender.id)), [])
+    const rollbackStock = await prisma.shunItemInventory.findMany({ where: { userId: sender.id }, orderBy: { code: 'asc' } })
+    await assert.rejects(shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [sender.id])
+      await postShunItemMovement(tx, {
+        userId: sender.id, code: 'DOUBLE_AMOUNT', day, type: 'WEEKLY_REWARD',
+        requestKey: 'forced-transaction-failure', configVersion: config.version,
+      })
+      throw new Error('QA rollback after posting inventory movement')
+    }), /QA rollback after posting inventory movement/)
+    assert.deepEqual(await prisma.shunItemInventory.findMany({
+      where: { userId: sender.id }, orderBy: { code: 'asc' },
+    }), rollbackStock)
+    assert.equal(await prisma.shunItemEntry.count({
+      where: { userId: sender.id, requestKey: 'forced-transaction-failure' },
+    }), 0)
+    const [ambusher, onlyTarget, decoyOne, decoyTwo] = await Promise.all([fixture(), fixture(40), fixture(), fixture()])
+    const hidden = await prisma.user.findMany({
+      where: { id: { notIn: [ambusher.id, onlyTarget.id, decoyOne.id, decoyTwo.id] }, permanentlyOptedOutAt: null },
+      select: { id: true },
+    })
+    const hiddenIds = hidden.map(({ id }) => id)
+    const marker = new Date()
+    await prisma.user.updateMany({ where: { id: { in: hiddenIds } }, data: { permanentlyOptedOutAt: marker } })
+    try {
+      await shunTransaction(async (tx) => {
+        await lockShunItemUsers(tx, [ambusher.id])
+        await postShunItemMovement(tx, {
+          userId: ambusher.id, code: 'EXTRA_SUSPECT', day: shunDay(marker), type: 'WEEKLY_REWARD',
+          requestKey: 'insufficient-decoys', configVersion: config.version,
+        })
+      })
+      await setShunItemPending(ambusher.id, 'EXTRA_SUSPECT', randomUUID(), false)
+      const before = await shunStatus(ambusher.id)
+      await assert.rejects(shunAttempt(ambusher.id, randomUUID()), { code: 'NO_TARGET' })
+      assert.equal((await shunStatus(ambusher.id)).remaining, before.remaining)
+      assert.equal((await shunStatus(onlyTarget.id)).received, 0)
+      assert.equal((await shunStatus(onlyTarget.id)).balance, 40)
+      assert.equal(await prisma.shunMasterRound.count({ where: { actorId: ambusher.id } }), 0)
+      assert.equal(await prisma.pointLog.count({ where: { userId: { in: [ambusher.id, onlyTarget.id] } } }), 0)
+      assert.equal(await prisma.shunItemEntry.count({ where: { userId: ambusher.id, type: 'USED' } }), 0)
+      assert.equal(await prisma.shunItemPending.count({ where: { userId: ambusher.id } }), 1)
+    } finally {
+      await prisma.user.updateMany({ where: { id: { in: hiddenIds }, permanentlyOptedOutAt: marker }, data: { permanentlyOptedOutAt: null } })
+    }
   } finally {
     if (previous === undefined) delete process.env.SHUN_ITEMS_ENABLED
     else process.env.SHUN_ITEMS_ENABLED = previous

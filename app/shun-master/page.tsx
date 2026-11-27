@@ -13,7 +13,7 @@ export default async function ShunMasterPage({ searchParams }: { searchParams: P
     : typeof letter === 'string' && letter !== '1' && /^[a-z0-9]{1,40}$/.test(letter) ? letter : undefined
   // V5: the capture counter note uses its own one-shot flag on the same record.
   const autoCaptureLetterId = focus && captureLetter === '1' ? focus : undefined
-  return <ShunMasterClient key={JSON.stringify([!user, focus, autoLetterId ?? null, autoCaptureLetterId ?? null, items === '1'])}
-    initialItemsOpen={items === '1'} initialGuest={!user} focusedRecord={focus} initialSide={side === 'out' || !focus ? 'out' : 'in'}
+  return <ShunMasterClient key={JSON.stringify([user?.id, focus, autoLetterId ?? null, autoCaptureLetterId ?? null, items === '1'])}
+    sessionUserId={user?.id} initialItemsOpen={items === '1'} initialGuest={!user} focusedRecord={focus} initialSide={side === 'out' || !focus ? 'out' : 'in'}
     autoLetterId={autoLetterId} autoCaptureLetterId={autoCaptureLetterId} />
 }

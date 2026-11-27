@@ -59,8 +59,8 @@ function PersonLabel({ person, link = false }: { person: Person | null; link?: b
     : <span className={styles.person}>{content}</span>
 }
 
-export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId, autoCaptureLetterId, initialItemsOpen = false }: {
-  focusedRecord?: string; initialItemsOpen?: boolean; initialSide: Side; initialGuest: boolean; autoLetterId?: string
+export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId, autoCaptureLetterId, initialItemsOpen = false, sessionUserId }: {
+  focusedRecord?: string; sessionUserId?: string; initialItemsOpen?: boolean; initialSide: Side; initialGuest: boolean; autoLetterId?: string
   /** V5:一-shot flag from a capture notice that carries a counter note. */
   autoCaptureLetterId?: string
 }) {
@@ -318,12 +318,34 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   }
   const usableItem = (code: string) => box?.enabled && box.items.some((item) => item.code === code && item.enabled && item.available > 0)
 
+  function readPending<T>(action: string): T | undefined {
+    if (!sessionUserId) return undefined
+    try {
+      const value = sessionStorage.getItem(`shun-request:${sessionUserId}:${action}`)
+      return value ? JSON.parse(value) as T : undefined
+    } catch { return undefined }
+  }
+
+  function savePending(action: string, value?: unknown) {
+    if (!sessionUserId) return
+    const key = `shun-request:${sessionUserId}:${action}`
+    try {
+      if (value === undefined) sessionStorage.removeItem(key)
+      else sessionStorage.setItem(key, JSON.stringify(value))
+    } catch { /* The in-memory request is still available in this tab. */ }
+  }
+
+  function isRejectedRequest(error: unknown) {
+    return error instanceof RequestError && error.status && error.status < 500 && error.status !== 429
+  }
+
   async function submitBoxItem(action: string, fields: Record<string, unknown> = {}) {
     await perform(action, async () => {
       setBoxError('')
       const key = JSON.stringify([action, fields])
-      const itemRequestId = boxRequests.current.get(key) ?? crypto.randomUUID()
+      const itemRequestId = boxRequests.current.get(key) ?? readPending<string>(key) ?? crypto.randomUUID()
       boxRequests.current.set(key, itemRequestId)
+      savePending(key, itemRequestId)
       try {
         if (action === 'gift') {
           setDelivery(undefined)
@@ -332,9 +354,13 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           await api(action, { ...fields, requestId: itemRequestId })
         }
         boxRequests.current.delete(key)
+        savePending(key)
         await Promise.all([loadStatus(), loadItems(), ...(action.startsWith('capture/') ? [loadRecords()] : [])])
       } catch (error) {
-        if (error instanceof RequestError && error.status && error.status < 500 && error.status !== 429) boxRequests.current.delete(key)
+        if (isRejectedRequest(error)) {
+          boxRequests.current.delete(key)
+          savePending(key)
+        }
         if (boxOpen) setBoxError(error instanceof Error ? error.message : '暂时无法使用道具。')
         else throw error
       }
@@ -346,12 +372,18 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       setResult(undefined)
       setStep('result')
       setError('')
+      const pending = readPending<{ id: string; friendId?: string }>('attempt')
+      if (!requestId.current && pending) {
+        requestId.current = pending.id
+        targetRequest.current = pending.friendId
+      }
       if (requestId.current && friendId && friendId !== targetRequest.current) {
         throw new RequestError('请先重试上一笔顺取。')
       }
       if (!requestId.current) {
         targetRequest.current = friendId
         requestId.current = crypto.randomUUID()
+        savePending('attempt', { id: requestId.current, friendId })
       }
       try {
         const round = await api<Round>('attempt', { requestId: requestId.current, friendId: targetRequest.current })
@@ -362,12 +394,16 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           new Promise((resolve) => window.setTimeout(resolve, wait)),
         ])
         requestId.current = null
+        savePending('attempt')
         setMessage('')
         setNotice('')
         setStep('result')
         setResult(round)
       } catch (error) {
-        if (error instanceof RequestError && error.status && error.status < 500 && error.status !== 429) requestId.current = null
+        if (isRejectedRequest(error)) {
+          requestId.current = null
+          savePending('attempt')
+        }
         // A take refused by the daily window means the page is out of date (e.g.
         // it was open when the page loaded and closed while it sat there): pull
         // the authoritative state so the button and the copy flip immediately.
