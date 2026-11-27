@@ -41,8 +41,8 @@ test('管理员资料编辑复用用户管理详情页、权限守卫和统一�
 
 test('移动端资料只返回和接受允许字段，旧版本写入返回冲突', () => {
   const route = read('app/api/admin/users/[userId]/route.ts')
-  assert.match(route, /profile-edit[\s\S]*requireAdmin\('user_manage', request\)[\s\S]*select: \{ id: true, uid: true, nickname: true, bio: true, updatedAt: true \}/)
-  assert.match(route, /new Set\(\['action', 'nickname', 'bio', 'reason', 'expectedUpdatedAt'\]\)/)
+  assert.match(route, /profile-edit[\s\S]*requireAdmin\('user_manage', request\)[\s\S]*select: \{ id: true, uid: true, nickname: true, bio: true, birthdayPublic: true, showBadgeActivity: true, showBadgeProgressNotifications: true, updatedAt: true \}/)
+  assert.match(route, /new Set\(\['action', 'nickname', 'bio', 'reason', 'expectedUpdatedAt', \.\.\.settings\]\)/)
   assert.match(route, /code === 'PROFILE_STALE'.*status: 409/)
 })
 

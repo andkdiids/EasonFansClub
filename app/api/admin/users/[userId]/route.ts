@@ -66,7 +66,7 @@ export async function GET(request: Request, context: RouteContext) {
     const { userId } = await context.params
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, uid: true, nickname: true, bio: true, updatedAt: true },
+      select: { id: true, uid: true, nickname: true, bio: true, birthdayPublic: true, showBadgeActivity: true, showBadgeProgressNotifications: true, updatedAt: true },
     })
     if (!user) return NextResponse.json({ message: '用户不存在' }, { status: 404, headers: noStoreHeaders })
     return NextResponse.json({ user }, { headers: noStoreHeaders })
@@ -93,9 +93,10 @@ export async function PATCH(request: Request, context: RouteContext) {
   const mobileProfile = action === 'updateMobileProfile'
   let expectedUpdatedAt: Date | undefined
   if (mobileProfile) {
-    const allowedFields = new Set(['action', 'nickname', 'bio', 'reason', 'expectedUpdatedAt'])
+    const settings = ['birthdayPublic', 'showBadgeActivity', 'showBadgeProgressNotifications']
+    const allowedFields = new Set(['action', 'nickname', 'bio', 'reason', 'expectedUpdatedAt', ...settings])
     if (Object.keys(body).some((key) => !allowedFields.has(key))
-      || (body.nickname === undefined && body.bio === undefined)
+      || (body.nickname === undefined && body.bio === undefined && settings.every(key => body[key] === undefined))
       || (body.bio !== undefined && (typeof body.bio !== 'string' || body.bio.length > 300))
       || typeof body.expectedUpdatedAt !== 'string') {
       return NextResponse.json({ message: '资料编辑参数无效' }, { status: 400 })

@@ -43,8 +43,8 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.equal(start.status, 200)
   const { user } = await start.json()
   assert.equal(user.bio, '旧简介')
-  assert.deepEqual(Object.keys(user).sort(), ['bio', 'id', 'nickname', 'uid', 'updatedAt'])
-  const patch = { bio: '管理员更新简介', expectedUpdatedAt: user.updatedAt }
+  assert.deepEqual(Object.keys(user).sort(), ['bio', 'birthdayPublic', 'id', 'nickname', 'showBadgeActivity', 'showBadgeProgressNotifications', 'uid', 'updatedAt'])
+  const patch = { bio: '管理员更新简介', birthdayPublic: !user.birthdayPublic, expectedUpdatedAt: user.updatedAt }
   assert.equal((await save(targetBearer, patch)).status, 403)
   assert.equal((await save({ ...browser, Origin: 'https://untrusted.example.invalid' }, patch)).status, 403)
   assert.equal((await save(adminBearer, { ...patch, role: 'SUPER_ADMIN' })).status, 400)
@@ -52,7 +52,9 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.equal((await save(browser, { ...patch, bio: '过期修改' })).status, 409)
   const browserRead = await read(browser)
   assert.equal(browserRead.status, 200)
-  assert.equal((await browserRead.json()).user.bio, patch.bio)
+  const reloaded = (await browserRead.json()).user
+  assert.equal(reloaded.bio, patch.bio)
+  assert.equal(reloaded.birthdayPublic, patch.birthdayPublic)
   assert.equal(await prisma.adminActionLog.count({
     where: { targetUserId: target.id, adminId: admin.id, action: 'UPDATE_USER_PROFILE' },
   }), 1)
@@ -67,6 +69,6 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.equal(pagination.page, 1)
   assert.equal(events[0].action, 'UPDATE_USER_PROFILE')
   assert.equal(events[0].operator.uid, admin.uid)
-  assert.equal(events[0].detail.changedFields, 'bio')
+  assert.deepEqual(events[0].detail.changedFields.split('、').sort(), ['bio', 'birthdayPublic'])
   assert.equal(events[0].detail.oldValue, undefined)
 })
