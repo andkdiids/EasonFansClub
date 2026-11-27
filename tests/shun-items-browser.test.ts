@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -18,6 +19,7 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
   timeout: 180_000,
 }, async () => {
   const url = new URL(process.env.DATABASE_URL ?? '')
+  assert.equal(url.protocol, 'mysql:')
   assert.equal(url.hostname, '127.0.0.1')
   assert.equal(url.pathname, '/ecfc_shun_items_fixture_qa')
   const base = process.env.SHUN_ITEMS_BROWSER_BASE ?? 'http://127.0.0.1:3127'
@@ -75,13 +77,31 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
           assert.equal((await context.request.get(base + '/api/admin/shun-master/items')).status(), 403)
           const giftRequests: string[] = []
           let committedGift: { id: string; code: string } | undefined
+          const mysql = process.env.SHUN_ITEMS_MYSQL_CLIENT
+          assert.ok(mysql)
+          const trigger = 'shun_browser_notify_' + randomUUID().replaceAll('-', '')
+          const fixtureDdl = (input: string) => execFileSync(mysql, [
+            '--no-defaults', '--host=127.0.0.1', '--protocol=TCP', '--port=' + url.port,
+            '--user=' + decodeURIComponent(url.username), 'ecfc_shun_items_fixture_qa',
+          ], { input, env: { ...process.env, MYSQL_PWD: decodeURIComponent(url.password) } })
+          assert.match(receiver.id, /^[a-z0-9]+$/)
           await page.route('**/api/shun-master/gift', async (route) => {
             giftRequests.push(route.request().postDataJSON().requestId)
             if (giftRequests.length === 1) return route.abort('internetdisconnected')
+            if (giftRequests.length === 2) {
+              fixtureDdl(`CREATE TRIGGER ${trigger} BEFORE INSERT ON Notification FOR EACH ROW SET NEW.id = IF(NEW.recipientId = '${receiver.id}', NULL, NEW.id)`)
+              try {
+                const rolledBack = await route.fetch()
+                assert.equal(rolledBack.status(), 500)
+                return await route.abort('connectionreset')
+              } finally {
+                fixtureDdl(`DROP TRIGGER ${trigger}`)
+              }
+            }
             const response = await route.fetch()
             assert.equal(response.status(), 200)
             const delivery = await response.json()
-            if (giftRequests.length === 2) {
+            if (giftRequests.length === 3) {
               committedGift = delivery
               return route.abort('connectionreset')
             }
@@ -93,13 +113,20 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
           await box.getByText('网络连接中断，请重试。').waitFor()
           assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id } }), 0)
           await gift.click()
-          await gift.waitFor({ state: 'visible' })
+          await box.getByText('网络连接中断，请重试。').waitFor()
+          const persisted = await prisma.shunItemGiftIntent.findUniqueOrThrow({
+            where: { senderId_requestKey: { senderId: sender.id, requestKey: 'gift:' + giftRequests[0] } },
+          })
+          assert.equal(persisted.status, 'PENDING')
+          assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id } }), 0)
+          await gift.click()
           await box.getByText('网络连接中断，请重试。').waitFor()
           assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id } }), 1)
+          assert.equal(committedGift?.code, persisted.code)
           await page.reload()
           await gift.click()
           await box.getByText('幸运已经送达！').waitFor()
-          assert.equal(giftRequests.length, 3)
+          assert.equal(giftRequests.length, 4)
           assert.equal(new Set(giftRequests).size, 1)
           await box.getByText(new RegExp(receiver.nickname)).waitFor()
           assert.equal(await box.getByRole('region', { name: '通讯录好友' }).count(), 0)
