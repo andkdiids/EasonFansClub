@@ -99,10 +99,31 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
 
     const earnedAt = new Date()
     const earnedDay = shunDay(earnedAt)
-    await prisma.growthTaskCompletion.create({ data: {
+    const checkInFact = await prisma.growthTaskCompletion.create({ data: {
       userId: unrelated.id, taskCode: 'DAILY_CHECKIN', periodKey: earnedDay, sourceEventId: 'test-checkin', completedAt: earnedAt,
     } })
+    const receipt = { sourceType_sourceId: { sourceType: 'TASK', sourceId: checkInFact.id } }
+    const trigger = 'shun_qa_' + randomUUID().replaceAll('-', '')
+    assert.match(unrelated.id, /^[a-z0-9]+$/)
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON ShunItemEntry FOR EACH ROW SET NEW.availableDelta = IF(NEW.userId = '${unrelated.id}' AND NEW.type = 'COMMUNITY_DROP', 0, NEW.availableDelta)`,
+    )
+    let originalRolls: { dropRoll: number; itemRoll: number } | undefined
+    try {
+      for (let sweep = 0; sweep < 4; sweep++) await runShunItemRewardSweep()
+      const failed = await prisma.shunItemRewardEvent.findUniqueOrThrow({ where: receipt })
+      assert.equal(failed.processedAt, null)
+      assert.equal(failed.attempts, 1)
+      assert.equal(await prisma.shunItemInventory.count({ where: { userId: unrelated.id } }), 0)
+      originalRolls = { dropRoll: failed.dropRoll, itemRoll: failed.itemRoll }
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER ${trigger}`)
+    }
+    await prisma.shunItemRewardEvent.update({ where: receipt, data: { retryAt: new Date(0) } })
     await Promise.all([runShunItemRewardSweep(), runShunItemRewardSweep()])
+    assert.deepEqual(await prisma.shunItemRewardEvent.findUniqueOrThrow({
+      where: receipt, select: { dropRoll: true, itemRoll: true },
+    }), originalRolls)
     await runShunItemRewardSweep()
     assert.equal(await prisma.shunItemEntry.count({ where: { userId: unrelated.id, type: 'COMMUNITY_DROP' } }), 1)
     assert.equal(await prisma.shunItemEntry.count({ where: { userId: unrelated.id, type: 'DAILY_MAIN' } }), 0)
