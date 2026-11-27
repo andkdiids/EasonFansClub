@@ -35,3 +35,17 @@ export async function injectHttpFailure(
     await route.abort('connectionreset')
   }, { times: 1 })
 }
+
+export async function replayInterruptedHttp(page: Page, url: string) {
+  let verified = false
+  await page.route(url, async (route) => {
+    const original = await route.fetch({ maxRetries: 0 })
+    assert.ok(original.ok(), 'mutation must commit over HTTP')
+    const replay = await route.fetch({ maxRetries: 0 })
+    assert.equal(replay.status(), original.status())
+    assert.deepEqual(await replay.json(), await original.json())
+    verified = true
+    await route.fulfill({ response: replay })
+  }, { times: 1 })
+  return () => assert.ok(verified, 'the committed request must have been replayed')
+}
