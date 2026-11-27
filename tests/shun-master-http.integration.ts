@@ -80,6 +80,22 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
       return response.json()
     }))
     const [round] = rounds
+    const note = '隔离环境匿名问候'
+    const letterPath = 'letter/' + round.id
+    const sendPath = 'round/' + round.id + '/letter'
+    assert.equal((await request(sendPath, expired, { message: note })).status, 401)
+    assert.equal((await request(sendPath, { ...mobile, Origin: 'https://untrusted.example.invalid' }, { message: note })).status, 403)
+    const sent = await request(sendPath, mobile, { message: note })
+    assert.equal(sent.status, 200)
+    assert.equal((await sent.json()).status, 'SENT_LETTER')
+    assert.equal((await request(letterPath, expired)).status, 401)
+    assert.equal((await request(letterPath, mobile)).status, 404)
+    const opened = await request(letterPath, victimMobile)
+    assert.equal(opened.status, 200)
+    const receivedLetter = await opened.json()
+    assert.equal(receivedLetter.content, note)
+    assert.equal(receivedLetter.sender, undefined)
+    assert.equal(receivedLetter.senderId, undefined)
     assert.equal(round.id, rounds[1].id)
     assert.ok(round.amount >= 1 && round.amount <= 7)
     assert.equal(await prisma.shunMasterRound.count({ where: { actorId: actor.id } }), 1)
@@ -101,6 +117,8 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
     assert.equal(candidates.mode, 2)
     assert.equal(candidates.candidates.length, 2)
     assert.ok(candidates.candidates.every((candidate: Record<string, unknown>) => !('correct' in candidate)))
+    assert.ok(candidates.candidates.every((candidate: Record<string, unknown>) =>
+      Object.hasOwn(candidate, 'avatarUrl') && Object.keys(candidate).every(key => ['uid', 'nickname', 'avatarUrl'].includes(key))))
     const guesses = await Promise.all([victimSession, victimMobile].map(headers =>
       request('capture/' + round.id + '/guess', headers, { uid: actor.uid, mode: 2 })))
     for (const response of guesses) {
