@@ -11,6 +11,8 @@ import { shunPerson } from './shun-person'
 import { pickDecoys, type DecoyCandidate } from './shun-decoys'
 import { triggerBadgeEvaluation } from './badge-rule-engine'
 import { shunClosedMessage, shunOpenHoursState } from './shun-open-hours'
+import { drawShunItem, SHUN_GIFT_WEIGHTS, SHUN_ITEM_CATALOG } from './shun-item-rules'
+import { lockShunItemUsers, postShunItemMovement, ShunItemInventoryError } from './shun-item-inventory'
 
 // Re-exported for callers that historically imported it from the service.
 export { shunPerson } from './shun-person'
@@ -318,17 +320,18 @@ async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = fal
 export async function shunStatus(userId: string) {
   const serverNow = new Date()
   const day = shunDay(serverNow)
-  const [state, account, attempts, received] = await Promise.all([
+  const [state, account, attempts, received, itemDaily] = await Promise.all([
     prisma.shunMasterSettings.findUnique({ where: { id: 1 } }),
     prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { points: true, permanentlyOptedOutAt: true } }),
     prisma.shunMasterRound.count({ where: { actorId: userId, day } }),
     prisma.shunMasterRound.count({ where: { victimId: userId, day } }),
+    shunItemsFeatureEnabled() ? prisma.shunItemDaily.findUnique({ where: { userId_day: { userId, day } } }) : null,
   ])
   const config = validateShunConfig(state?.config) || defaultShunConfig
   const optedOut = account.permanentlyOptedOutAt !== null
   return { enabled: config.enabled, optedOut,
     balance: account.points,
-    remaining: Math.max(0, config.attempts - attempts), received, attempts: config.attempts,
+    remaining: Math.max(0, config.attempts + (itemDaily?.extraAttemptsGranted ?? 0) - attempts), received, attempts: config.attempts,
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes,
     // The page renders the closed state and its copy from this snapshot alone,
     // so a window changed in the admin panel shows up without a redeploy.
@@ -445,7 +448,12 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, avatarUrl: true, lastActiveAt: true } })
     if (!actor) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
     const played = await tx.shunMasterRound.findMany({ where: { actorId, day }, select: { victimId: true } })
-    if (played.length >= config.attempts) throw new ShunError('LIMIT', '今日收工，明天继续！')
+    const itemDaily = shunItemsFeatureEnabled()
+      ? await tx.shunItemDaily.findUnique({ where: { userId_day: { userId: actorId, day } } })
+      : null
+    if (played.length >= config.attempts + (itemDaily?.extraAttemptsGranted ?? 0)) {
+      throw new ShunError('LIMIT', '今日收工，明天继续！')
+    }
     const blocks = await tx.block.findMany({ where: { OR: [{ blockerId: actorId }, { blockedId: actorId }] },
       select: { blockerId: true, blockedId: true } })
     const capped = await tx.shunMasterRound.groupBy({ by: ['victimId'], where: { day }, _count: { _all: true } })
@@ -533,6 +541,12 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { reserved: { increment: amount } } })
     await ledger(tx, round.id, actorId, actorBalance, amount, 'take')
     await ledger(tx, round.id, victim.id, victimBalance, -amount, 'take')
+    if (itemDaily && played.length >= config.attempts && itemDaily.extraAttemptsUsed < itemDaily.extraAttemptsGranted) {
+      await tx.shunItemDaily.update({
+        where: { userId_day: { userId: actorId, day } },
+        data: { extraAttemptsUsed: { increment: 1 } },
+      })
+    }
     return present(tx, round, 'out')
   })
   if (!result) throw new ShunError('NO_TARGET', '暂时没有可顺取的 EF，今日次数不会扣除。')
@@ -862,4 +876,144 @@ export async function shunPermanentOptOut(userId: string) {
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { permanentlyOptedOutAt: true } })
     return { optedOut: user.permanentlyOptedOutAt !== null, permanentlyOptedOutAt: user.permanentlyOptedOutAt }
   })
+}
+
+export function shunItemsFeatureEnabled() {
+  return process.env.SHUN_ITEMS_ENABLED === 'true'
+}
+
+export async function useShunExtraAttempt(userId: string, requestId: string, clock = () => new Date()) {
+  if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+  try {
+    return await shunTransaction(async (tx) => {
+      const { config } = await settings(tx)
+      await lockShunItemUsers(tx, [userId])
+      const requestKey = `extra-attempt:${requestId}`
+      const existing = await tx.shunItemEntry.findUnique({
+        where: { userId_type_requestKey: { userId, type: 'USED', requestKey } },
+      })
+      if (existing) return { applied: true, day: existing.day }
+      const active = await tx.shunItemConfigVersion.findFirst({
+        orderBy: { version: 'desc' },
+        include: { definitions: { where: { code: 'EXTRA_ATTEMPT' } } },
+      })
+      if (!config.enabled || !active?.enabled || !active.definitions[0]?.enabled) {
+        throw new ShunError('DISABLED', '顺手牵羊暂不可使用。')
+      }
+      const account = await tx.user.findFirst({ where: { id: userId, ...transactionAccount }, select: { id: true } })
+      if (!account) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
+      const day = shunDay(clock())
+      const where = { userId_day: { userId, day } }
+      const daily = await tx.shunItemDaily.findUnique({ where })
+      if ((daily?.extraAttemptsGranted ?? 0) >= 2) {
+        throw new ShunError('LIMIT', '今天已使用两件顺手牵羊。')
+      }
+      await postShunItemMovement(tx, { userId, code: 'EXTRA_ATTEMPT', type: 'USED', requestKey, day, configVersion: active.version })
+      await tx.shunItemDaily.upsert({
+        where,
+        create: { userId, day, extraAttemptsGranted: 1 },
+        update: { extraAttemptsGranted: { increment: 1 } },
+      })
+      return { applied: true, day }
+    })
+  } catch (error) {
+    if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
+      throw new ShunError('ITEM_STOCK', '顺手牵羊库存不足。', 409)
+    }
+    throw error
+  }
+}
+
+export async function shunItemBox(userId: string) {
+  if (!shunItemsFeatureEnabled()) return { enabled: false }
+  return shunTransaction(async (tx) => {
+    await lockShunItemUsers(tx, [userId])
+    const active = await tx.shunItemConfigVersion.findFirst({
+      orderBy: { version: 'desc' },
+      include: { definitions: { select: { code: true, name: true, description: true, icon: true, rarity: true, enabled: true } } },
+    })
+    if (!active?.enabled) return { enabled: false }
+    const inventory = await tx.shunItemInventory.findMany({ where: { userId }, select: { code: true, available: true, pending: true } })
+    const history = await tx.shunItemEntry.findMany({
+      where: { userId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+      select: { id: true, code: true, type: true, availableDelta: true, pendingDelta: true, createdAt: true },
+    })
+    const items = active.definitions.map((definition) => {
+      const balance = inventory.find((row) => row.code === definition.code)
+      return { ...definition, available: balance?.available ?? 0, pending: balance?.pending ?? 0 }
+    })
+    return { enabled: true, items, history, total: inventory.reduce((sum, row) => sum + row.available + row.pending, 0) }
+  })
+}
+
+export async function sendShunItemGift(senderId: string, receiverId: string, requestId: string, clock = () => new Date()) {
+  if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+  const unavailable = () => new ShunError('FRIEND_UNAVAILABLE', '暂不可赠送给该好友。')
+  if (senderId === receiverId) throw unavailable()
+
+  try {
+    return await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [senderId, receiverId])
+      const requestKey = `gift:${requestId}`
+      const prior = await tx.shunItemEntry.findUnique({
+        where: { userId_type_requestKey: { userId: senderId, type: 'GIFT_SENT', requestKey } },
+        include: { sentGift: { include: { receivedEntry: { select: { code: true } } } } },
+      })
+      if (prior) {
+        if (prior.sentGift?.receiverId !== receiverId) throw new ShunError('REQUEST_CONFLICT', '该请求已用于另一笔赠送。')
+        return { id: prior.sentGift.id, code: prior.sentGift.receivedEntry.code }
+      }
+
+      const active = await tx.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })
+      if (!active?.enabled || !active.definitions.some((item) => item.code === 'FRIEND_GIFT' && item.enabled)) {
+        throw new ShunError('DISABLED', '天使的礼物暂不可使用。')
+      }
+      const [userAId, userBId] = [senderId, receiverId].sort()
+      const friendship = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM Friendship WHERE userAId = ${userAId} AND userBId = ${userBId} FOR UPDATE`
+      const block = await tx.block.findFirst({
+        where: { OR: [{ blockerId: senderId, blockedId: receiverId }, { blockerId: receiverId, blockedId: senderId }] },
+        select: { blockerId: true },
+      })
+      const eligibleCount = await tx.user.count({ where: { ...transactionAccount, id: { in: [senderId, receiverId] } } })
+      if (!friendship.length || block || eligibleCount !== 2) throw unavailable()
+
+      const day = shunDay(clock())
+      const where = { userId_day: { userId: receiverId, day } }
+      const daily = await tx.shunItemDaily.findUnique({ where })
+      if ((daily?.giftsReceived ?? 0) >= 2) throw new ShunError('GIFT_LIMIT', '好友今天已经收满两件礼物。')
+      const pool = (Object.keys(SHUN_GIFT_WEIGHTS) as Array<keyof typeof SHUN_GIFT_WEIGHTS>)
+        .map((code) => [code, SHUN_GIFT_WEIGHTS[code]] as const)
+      if (pool.some(([code]) => !active.definitions.some((item) => item.code === code && item.enabled))) {
+        throw new ShunError('DISABLED', '天使的礼物奖池暂不可用。')
+      }
+      const code = drawShunItem(pool)
+      const configVersion = active.version
+      const { entry: sent } = await postShunItemMovement(tx, {
+        userId: senderId, code: 'FRIEND_GIFT', type: 'GIFT_SENT', requestKey, day, configVersion,
+      })
+      const { entry: received } = await postShunItemMovement(tx, {
+        userId: receiverId, code, type: 'GIFT_RECEIVED', requestKey: sent.id, day, configVersion,
+      })
+      const gift = await tx.shunItemGift.create({
+        data: { senderId, receiverId, sentEntryId: sent.id, receivedEntryId: received.id },
+      })
+      await tx.shunItemDaily.upsert({
+        where,
+        create: { userId: receiverId, day, giftsReceived: 1 },
+        update: { giftsReceived: { increment: 1 } },
+      })
+      await notify(tx, gift.id, receiverId, '天使的礼物', `好友送给你一件顺大师道具 · ${SHUN_ITEM_CATALOG[code].name}`,
+        'item-gift', '/shun-master?items=1')
+      return { id: gift.id, code }
+    })
+  } catch (error) {
+    if (error instanceof ShunItemInventoryError && error.code === 'MISSING_USER') throw unavailable()
+    if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
+      throw new ShunError('ITEM_STOCK', '天使的礼物库存不足。', 409)
+    }
+    throw error
+  }
 }
