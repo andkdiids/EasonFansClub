@@ -295,10 +295,14 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     assert.equal(fields.filter((field) => field === index).length, 1)
     comparableBlocks.set(model, fields.filter((field) => field !== index))
   }
+  const approvedShunItems = blocks(execFileSync('git', ['show',
+    '1d5a266a833fb99c843900eb5dd96f7c0865ff60:prisma/schema.prisma'], { encoding: 'utf8' }))
   for (const name of ['ShunItemCode', 'ShunItemEventType', 'ShunItemConfigVersion', 'ShunItemDefinition',
     'ShunItemInventory', 'ShunItemPending', 'ShunItemEntry', 'ShunItemDaily', 'ShunItemDailyCounter',
     'ShunItemWeeklyGrant', 'ShunItemGift', 'ShunItemRoundEffect', 'ShunItemRewardEvent']) {
-    assert.ok(comparableBlocks.delete(name), `required Shun V4.2 schema block retained: ${name}`)
+    assert.ok(approvedShunItems.has(name), `approved Shun V4.2 source contains ${name}`)
+    assert.deepEqual(comparableBlocks.get(name), approvedShunItems.get(name), `Shun V4.2 schema block retained: ${name}`)
+    comparableBlocks.delete(name)
   }
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
   const pushMigration = read('prisma/migrations/20261126040000_add_mobile_push_tokens/migration.sql')
