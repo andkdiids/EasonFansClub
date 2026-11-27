@@ -13,10 +13,13 @@ import { getTodayEventDateKey } from '@/lib/today'
 import { getForumBoardDisplayName, mergeForumBoardOptions } from '@/lib/boards'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { postContentPlainText } from '@/lib/share-metadata'
+import { loadPostModerationHistoryByPostIds } from '@/lib/post-moderation-history'
+import { withReviewTargetHistory } from '@/lib/review-target-history'
 import { prisma } from '@/lib/prisma'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getSalonEditReviewPostIds } from '@/lib/salon-review-notifications'
-import { requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
+import { parseSalonCategory, type SalonCategoryValue } from '@/lib/salon-shared'
+import { rejectInvalidRequestOrigin, requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
 import {
   canApplyReviewDecision,
   parseReviewStatus,
@@ -104,10 +107,11 @@ function postWhere(status: ReviewStatus | 'ALL', keyword: string): Prisma.PostWh
   }
 }
 
-function salonWhere(status: ReviewStatus | 'ALL', keyword: string): Prisma.SalonPostWhereInput {
+function salonWhere(status: ReviewStatus | 'ALL', keyword: string, category?: SalonCategoryValue): Prisma.SalonPostWhereInput {
   const uid = numericKeyword(keyword)
   return {
     status: status === 'ALL' ? { in: reviewStatuses } : status,
+    ...(category ? { category } : {}),
     ...(keyword ? {
       OR: [
         { id: keyword },
@@ -186,7 +190,7 @@ function withTargetId<T>(where: T, targetId: string | null): T {
   return targetId ? ({ AND: [where, { id: targetId }] } as T) : where
 }
 
-async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, take: number, targetId: string | null = null): Promise<ReviewItem[]> {
+async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, take: number, targetId: string | null = null, salonCategory?: SalonCategoryValue): Promise<ReviewItem[]> {
   if (type === 'POST') {
     const [rows, boardRows] = await Promise.all([
       prisma.post.findMany({
@@ -240,7 +244,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
 
   if (type === 'SALON') {
     const rows = await prisma.salonPost.findMany({
-      where: withTargetId(salonWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }], take,
+      where: withTargetId(salonWhere(status, targetId ? '' : keyword, salonCategory), targetId), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }], take,
       select: {
         id: true, title: true, content: true, category: true, status: true, rejectReason: true, createdAt: true, updatedAt: true, approvedAt: true,
         author: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
@@ -261,6 +265,9 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
         return [{ id: `${row.id}:${index}`, src, previewSrc: publicImageUrl(media.thumbnailUrl) || undefined, alt: `沙龙图片 ${index + 1}` }]
       }),
       reviewer: row.approvedBy ? author({ id: row.approvedBy.id, uid: row.approvedBy.uid, nickname: row.approvedBy.nickname }) : null, reviewedAt: asIso(row.approvedAt), rejectReason: row.rejectReason,
+      editVersion: row.updatedAt.toISOString(),
+      salonCategoryCode: row.category,
+      salonCategoryEditable: !row.concert && row.category !== 'CONCERT',
     }))
   }
 
@@ -315,9 +322,9 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
   }))
 }
 
-async function countType(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string) {
+async function countType(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, salonCategory?: SalonCategoryValue) {
   if (type === 'POST') return prisma.post.count({ where: postWhere(status, keyword) })
-  if (type === 'SALON') return prisma.salonPost.count({ where: salonWhere(status, keyword) })
+  if (type === 'SALON') return prisma.salonPost.count({ where: salonWhere(status, keyword, salonCategory) })
   if (type === 'CREATION') return prisma.studioProject.count({ where: studioWhere(status, keyword) })
   if (type === 'STICKER') return prisma.stickerPack.count({ where: stickerWhere(status, keyword) })
   if (type === 'CONCERT') return prisma.concertContribution.count({ where: contributionWhere(status, keyword) })
@@ -334,13 +341,15 @@ export async function GET(request: Request) {
   if (!guard.user) return guard.response
   const params = new URL(request.url).searchParams
   const sourceType = parseReviewSourceType(params.get('type'))
+  const salonCategory = sourceType === 'SALON' ? parseSalonCategory(params.get('salonCategory')) || undefined : undefined
   const statusParam = params.get('status')
   const status = parseReviewStatus(statusParam)
   const keyword = sanitizeText(params.get('keyword'), 80).trim()
   const targetId = sanitizeText(params.get('targetId') || params.get('sourceId') || params.get('reviewId'), 200).trim() || null
   const rawPage = Number(params.get('page') || '1')
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
-  const definitions = await accessibleDefinitions(guard.user)
+  const definitions = (await accessibleDefinitions(guard.user)).filter(definition =>
+    params.get('excludeConcert') !== '1' || definition.type !== 'CONCERT')
   const selected = sourceType === 'ALL' ? definitions : definitions.filter((item) => item.type === sourceType)
   const prefetchSize = Math.max(PAGE_SIZE * 3, PAGE_SIZE * page)
   // The normal queue is always loaded from the requested type/status/page.
@@ -348,13 +357,16 @@ export async function GET(request: Request) {
   // client which status tab to use, but it must never replace the queue with
   // a target-only query.
   const [batches, targetBatches, countRows] = await Promise.all([
-    Promise.all(selected.map((definition) => loadTypeItems(definition.type, status, keyword, prefetchSize))),
+    Promise.all(selected.map((definition) => salonCategory
+      ? loadTypeItems(definition.type, status, keyword, prefetchSize, null, salonCategory)
+      : loadTypeItems(definition.type, status, keyword, prefetchSize))),
     targetId
       ? Promise.all(selected.map((definition) => loadTypeItems(definition.type, 'ALL', keyword, 1, targetId)))
       : Promise.resolve([] as ReviewItem[][]),
     Promise.all(definitions.map(async (definition) => {
       const [total, pending, approved, rejected] = await Promise.all([
-        countType(definition.type, 'ALL', keyword), countType(definition.type, 'PENDING', keyword), countType(definition.type, 'APPROVED', keyword), countType(definition.type, 'REJECTED', keyword),
+        countType(definition.type, 'ALL', keyword, salonCategory), countType(definition.type, 'PENDING', keyword, salonCategory),
+        countType(definition.type, 'APPROVED', keyword, salonCategory), countType(definition.type, 'REJECTED', keyword, salonCategory),
       ])
       return { type: definition.type, label: definition.label, total, pending, approved, rejected }
     })),
@@ -365,6 +377,7 @@ export async function GET(request: Request) {
   // adapter's bounded prefetch window.
   const scopedCounts = countRows.filter((row) => selected.some((definition) => definition.type === row.type))
   const targetItem = targetBatches.flat().find((item) => item.sourceId === targetId) || null
+  const targetWithHistory = await withReviewTargetHistory(targetItem, loadPostModerationHistoryByPostIds)
   const total = scopedCounts.reduce((sum, row) => sum + row[status.toLowerCase() as 'pending' | 'approved' | 'rejected'], 0)
   const start = (page - 1) * PAGE_SIZE
   const items = allItems.slice(start, start + PAGE_SIZE)
@@ -377,7 +390,7 @@ export async function GET(request: Request) {
     targetId,
     targetFound: targetId ? Boolean(targetItem) : undefined,
     targetStatus: targetItem?.status,
-    targetItem,
+    targetItem: targetWithHistory,
     type: sourceType,
     status,
     keyword,
@@ -428,6 +441,8 @@ async function performConcertDecision(sourceId: string, decision: ReviewDecision
 }
 
 export async function PATCH(request: Request) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
   const guard = await requireRequestAdmin(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
@@ -459,6 +474,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
   const guard = await requireAdmin()
   if (!guard.user) return guard.response
   const params = new URL(request.url).searchParams

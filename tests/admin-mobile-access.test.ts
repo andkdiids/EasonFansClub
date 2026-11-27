@@ -17,7 +17,7 @@ test('Admin Mobile capability discovery is guarded by the shared server role and
 
 test('Admin search never lists all administrators and caps each query page', () => {
   const route = read('app/api/admin/admins/route.ts')
-  assert.match(route, /requireAdmin\('admin_manage'\)/)
+  assert.match(route, /requireAdmin\('admin_manage', request\)/)
   assert.match(route, /AdminPermission: \{ where: \{ enabled: true \}, select: \{ permissionKey: true \} \}/)
   assert.match(route, /permissions: AdminPermission\.map\(\(\{ permissionKey \}\) => permissionKey\)/)
   assert.match(route, /if \(!query\) return NextResponse\.json\(\{ admins: \[\]/)
@@ -54,4 +54,19 @@ test('Mobile user directory requires a search and returns no contact or security
   assert.match(route, /if \(mobileDirectory\)[\s\S]*id: user\.id,[\s\S]*username: user\.username,[\s\S]*role: user\.role/)
   assert.match(route, /!mobileDirectory \? \[\{ email: \{ contains: keyword \} \}, \{ phone: \{ contains: keyword \} \}\]/)
   assert.doesNotMatch(route, /return \{[\s\S]{0,240}email: user\.email/)
+})
+
+test('Clinic admin preserves origin validation, server scopes and the existing service operations', () => {
+  const route = read('app/api/admin/clinic/route.ts')
+  const capabilities = read('app/api/admin/mobile-capabilities/route.ts')
+  const service = read('lib/clinic-service.ts')
+  assert.equal((route.match(/requireAdmin\('clinic_manage', request\)/g) ?? []).length, 2)
+  const patch = route.slice(route.indexOf('export async function PATCH'))
+  assert.ok(patch.indexOf('rejectInvalidRequestOrigin(request)') < patch.indexOf('requireAdmin('))
+  assert.match(capabilities, /id: 'clinic'.*permissions: \['clinic_manage'\]/)
+  assert.match(patch, /handleClinicReport\(/)
+  assert.match(patch, /updateClinicAdminContent\(/)
+  for (const operation of ['CLINIC_RECORD_STATUS', 'CLINIC_CONSULTATION_STATUS', 'CLINIC_REPORT_STATUS']) {
+    assert.match(service, new RegExp('tx\\.adminActionLog\\.create[^\\n]*' + operation))
+  }
 })

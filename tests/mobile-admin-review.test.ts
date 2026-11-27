@@ -18,7 +18,7 @@ test('anonymous and invalid Bearer cannot fall back to a browser cookie or read 
   assert.match(security, /if \(request\.headers\.has\('authorization'\)\)/)
   assert.match(security, /if \(!token\) return \{ user: null, response: unauthenticatedResponse\(\) \}/)
   assert.match(center, /export async function GET\(request: Request\) \{\s*const guard = await requireRequestAdmin\(request\)/)
-  assert.match(center, /export async function PATCH\(request: Request\) \{\s*const guard = await requireRequestAdmin\(request\)/)
+  assert.match(center, /export async function PATCH\(request: Request\) \{\s*const originError = rejectInvalidRequestOrigin\(request\)\s*if \(originError\) return originError\s*const guard = await requireRequestAdmin\(request\)/)
 })
 
 test('normal users and partial admins need post_manage, including delegated POST decision', () => {
@@ -34,7 +34,7 @@ test('normal users and partial admins need post_manage, including delegated POST
 test('native review payload keeps pagination, pending count, full post body and author image', () => {
   assert.match(center, /const PAGE_SIZE = 40/)
   assert.match(center, /hasMore: start \+ PAGE_SIZE < total/)
-  assert.match(center, /targetItem,/)
+  assert.match(center, /targetItem: targetWithHistory/)
   assert.match(center, /avatarUrl: row\.User\.Profile\?\.avatarUrl/)
   assert.match(center, /body: postContentPlainText\(row\.content, row\.richContent\)/)
   assert.match(center, /status = parseReviewStatus\(statusParam\)/)

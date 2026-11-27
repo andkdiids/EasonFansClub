@@ -152,7 +152,7 @@ test('33-38 补签统一重算连续挂号、长期患者幂等，且隔离每�
 
 test('39-48 管理员历史补签使用 checkin_manage、免费、不占额度并写 AdminActionLog', () => {
   const route = source('app/api/admin/checkin-makeup/route.ts')
-  assert.match(route, /requireAdmin\('checkin_manage'\)/)
+  assert.match(route, /requireAdmin\('checkin_manage', request\)/)
   assert.match(route, /type: 'MAKEUP_ADMIN'/)
   assert.match(route, /cost: 0/)
   assert.match(route, /CHECK_IN_ADMIN_MAKEUP/)

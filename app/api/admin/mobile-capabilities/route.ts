@@ -5,6 +5,11 @@ import { requireAdmin } from '@/lib/security'
 export const dynamic = 'force-dynamic'
 
 const MODULES = [
+  { id: 'clinic', label: '门诊部管理', permissions: ['clinic_manage'], apiAvailable: true },
+  { id: 'clinic-rankings', label: '门诊会诊榜', permissions: ['stats_view'], apiAvailable: true },
+  { id: 'daily-admin', label: '日常管理', permissions: ['checkin_manage'], apiAvailable: true },
+  { id: 'replies', label: '评论管理', permissions: ['reply_manage'], apiAvailable: true },
+  { id: 'posts', label: '帖子管理', permissions: ['post_manage'], apiAvailable: true },
   { id: 'content-safety', label: '内容安全', permissions: ['post_manage'], apiAvailable: true },
   { id: 'users', label: '用户管理', permissions: ['user_manage'], apiAvailable: true },
   { id: 'dashboard', label: '数据面板', permissions: ['stats_view'], apiAvailable: true },

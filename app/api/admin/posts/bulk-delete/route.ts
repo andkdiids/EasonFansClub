@@ -3,7 +3,7 @@ import { createAdminActionAudit } from '@/lib/admin-audit'
 import { deletePost } from '@/lib/post-deletion'
 import { prisma } from '@/lib/prisma'
 import { revalidatePath, revalidateTag } from 'next/cache'
-import { requireAdmin } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 
 export const dynamic = 'force-dynamic'
@@ -18,7 +18,9 @@ const MAX_BULK_SIZE = 100
  * - 返回真实的成功 / 失败数量，部分失败不影响其余帖子。
  */
 export async function POST(request: Request) {
-  const guard = await requireAdmin('post_manage')
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireAdmin('post_manage', request)
   if (!guard.user) return guard.response
 
   let body: unknown

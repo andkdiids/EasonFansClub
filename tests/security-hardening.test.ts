@@ -76,7 +76,7 @@ test('search, uploads, admin routes and realtime have abuse boundaries', () => {
   assert.doesNotMatch(search, /phone: true|email: true|experience: true|lastActiveAt: true/)
   assert.match(uploads, /sharp\(buffer/)
   assert.match(uploads, /randomUUID\(\)/)
-  assert.match(admin, /requireAdmin\('admin_manage'\)/)
+  assert.match(admin, /requireAdmin\('admin_manage', request\)/)
   assert.match(server, /maxPayload = 4096/)
   assert.match(server, /maxConnectionsPerUser = 8/)
   assert.match(server, /heartbeatIntervalMs = 30_000/)

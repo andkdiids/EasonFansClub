@@ -1107,14 +1107,18 @@ export async function listClinicAdminData(tab: ClinicAdminTab, page = 1, pageSiz
 
 export async function updateClinicAdminContent(input: { target: 'record' | 'consultation'; id: string; status: ClinicContentStatus; adminId: string }) {
   if (input.target === 'record') {
-    const record = await prisma.clinicRecord.findUnique({ where: { id: input.id }, select: { id: true, consultations: { select: { authorId: true } } } })
-    if (!record) throw new ClinicServiceError('RECORD_NOT_FOUND', '病历不存在。', 404)
-    const deletedAt = input.status === 'ACTIVE' ? null : new Date()
-    await prisma.$transaction([
-      prisma.clinicRecord.update({ where: { id: input.id }, data: { status: input.status, deletedAt } }),
-      ...(input.status === 'ACTIVE' ? [] : [prisma.clinicConsultation.updateMany({ where: { recordId: input.id, status: 'ACTIVE' }, data: { status: input.status, deletedAt } })]),
-    ])
-    for (const authorId of new Set(record.consultations.map((item) => item.authorId))) {
+    const affected = await prisma.$transaction(async (tx) => {
+      const record = await tx.clinicRecord.findUnique({ where: { id: input.id }, select: { authorId: true, status: true, consultations: { select: { authorId: true } } } })
+      if (!record) throw new ClinicServiceError('RECORD_NOT_FOUND', '病历不存在。', 404)
+      if (record.status === input.status) return []
+      const deletedAt = input.status === 'ACTIVE' ? null : new Date()
+      const changed = await tx.clinicRecord.updateMany({ where: { id: input.id, status: record.status }, data: { status: input.status, deletedAt } })
+      if (!changed.count) throw new ClinicServiceError('ADMIN_CONFLICT', '病历状态已更新，请刷新后重试。', 409)
+      if (input.status !== 'ACTIVE') await tx.clinicConsultation.updateMany({ where: { recordId: input.id, status: 'ACTIVE' }, data: { status: input.status, deletedAt } })
+      await tx.adminActionLog.create({ data: { adminId: input.adminId, targetUserId: record.authorId, action: 'CLINIC_RECORD_STATUS', detail: { id: input.id, from: record.status, to: input.status } } })
+      return record.consultations.map((item) => item.authorId)
+    })
+    for (const authorId of new Set(affected)) {
       void triggerBadgeEvaluation(authorId, 'CLINIC_CONSULTATION_CHANGED', input.id)
     }
     return
@@ -1128,10 +1132,12 @@ export async function updateClinicAdminContent(input: { target: 'record' | 'cons
     if (consultation.status === input.status) return { authorId: consultation.authorId, changed: false }
     const wasActive = consultation.status === 'ACTIVE'
     const willBeActive = input.status === 'ACTIVE'
-    await tx.clinicConsultation.update({
-      where: { id: input.id },
+    const changed = await tx.clinicConsultation.updateMany({
+      where: { id: input.id, status: consultation.status },
       data: { status: input.status, deletedAt: willBeActive ? null : new Date() },
     })
+    if (!changed.count) throw new ClinicServiceError('ADMIN_CONFLICT', '会诊状态已更新，请刷新后重试。', 409)
+    await tx.adminActionLog.create({ data: { adminId: input.adminId, targetUserId: consultation.authorId, action: 'CLINIC_CONSULTATION_STATUS', detail: { id: input.id, from: consultation.status, to: input.status } } })
     if (wasActive && !willBeActive) {
       await tx.clinicRecord.updateMany({
         where: { id: consultation.recordId, consultationCount: { gt: 0 } },
@@ -1154,8 +1160,31 @@ export async function updateClinicAdminContent(input: { target: 'record' | 'cons
   if (result.changed) void triggerBadgeEvaluation(result.authorId, 'CLINIC_CONSULTATION_CHANGED', input.id)
 }
 
+export async function removeReportedClinicConsultation(reportId: string, adminId: string) {
+  const report = await prisma.clinicReport.findUnique({
+    where: { id: reportId },
+    select: { consultationId: true, reason: true },
+  })
+  if (!report?.consultationId) {
+    throw new ClinicServiceError('REPORT_CONSULTATION_NOT_FOUND', '此举报没有关联会诊。', 404)
+  }
+  await removeClinicConsultation(report.consultationId, adminId, true, {
+    reason: `举报处理：${report.reason}`.slice(0, 200),
+  })
+  return handleClinicReport({ reportId, status: 'RESOLVED', adminId })
+}
+
 export async function handleClinicReport(input: { reportId: string; status: ReportStatus; adminId: string }) {
-  const report = await prisma.clinicReport.findUnique({ where: { id: input.reportId }, select: { id: true } })
-  if (!report) throw new ClinicServiceError('REPORT_NOT_FOUND', '举报不存在。', 404)
-  return prisma.clinicReport.update({ where: { id: input.reportId }, data: { status: input.status, handledById: input.adminId, handledAt: new Date() }, select: { id: true, status: true } })
+  return prisma.$transaction(async (tx) => {
+    const report = await tx.clinicReport.findUnique({ where: { id: input.reportId }, select: { id: true, status: true, reporterId: true } })
+    if (!report) throw new ClinicServiceError('REPORT_NOT_FOUND', '举报不存在。', 404)
+    if (report.status === input.status) return { id: report.id, status: report.status }
+    const changed = await tx.clinicReport.updateMany({
+      where: { id: report.id, status: report.status },
+      data: { status: input.status, handledById: input.adminId, handledAt: new Date() },
+    })
+    if (!changed.count) throw new ClinicServiceError('ADMIN_CONFLICT', '举报状态已更新，请刷新后重试。', 409)
+    await tx.adminActionLog.create({ data: { adminId: input.adminId, targetUserId: report.reporterId, action: 'CLINIC_REPORT_STATUS', detail: { id: report.id, from: report.status, to: input.status } } })
+    return { id: report.id, status: input.status }
+  })
 }

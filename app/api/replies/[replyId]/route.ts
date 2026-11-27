@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { reverseCommunityCommentRewards } from '@/lib/community-rewards'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, sanitizeText } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
 
@@ -41,7 +41,7 @@ function replyDeleteErrorResponse(error: unknown, replyId: string, userId: strin
     return NextResponse.json({ message: '只能删除自己的评论' }, { status: 403 })
   }
   if (errorMessage === 'REPLY_NOT_FOUND' || errorMessage === 'REPLY_ALREADY_DELETED' || errorCode === 'P2025') {
-    return NextResponse.json({ message: '评论不存在或已经被删除' }, { status: 404 })
+    return NextResponse.json({ message: '评论不存在或已经被删除', ...(errorMessage === 'REPLY_ALREADY_DELETED' ? { code: errorMessage } : {}) }, { status: 404 })
   }
   return NextResponse.json({ message: '删除评论失败，请稍后重试' }, { status: 500 })
 }
@@ -70,11 +70,14 @@ function collectThreadIds(rows: Array<{ id: string; parentId: string | null }>, 
   return ids
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function DELETE(request: Request, context: RouteContext) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const { replyId } = await context.params
+  const reason = sanitizeText((await request.json().catch(() => null))?.reason, 180).trim()
 
   try {
     const reply = await prisma.reply.findUnique({
@@ -177,6 +180,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
             adminId: guard.user.id,
             replyId,
             action: 'DELETE_REPLY',
+            ...(reason ? { reason } : {}),
             metadata: { deletedBy: 'admin', deletedReplyIds: result.deletedReplyIds },
           },
         }))

@@ -49,7 +49,10 @@ test('审核历史异常不会污染列表响应模型', () => {
   assert.match(reviewRoute, /PostModerationHistory: history\.map/)
   assert.match(reviewRoute, /historyByPostId\.get\(post\.id\) \|\| \[\]/)
   assert.match(history, /const result = new Map<string, PostModerationHistoryRow\[\]>\(\)/)
-  assert.doesNotMatch(reviewCenterRoute, /PostModerationHistory/)
+  assert.doesNotMatch(reviewCenterRoute, /prisma\.postModerationHistory\.|PostModerationHistory:\s*true/)
+  assert.match(reviewCenterRoute, /const selected = sourceType === 'ALL' \? definitions : definitions.filter/)
+  assert.match(reviewCenterRoute, /targetItem = targetBatches\.flat\(\)\.find[\s\S]*withReviewTargetHistory\(targetItem, loadPostModerationHistoryByPostIds\)/)
+  assert.match(reviewCenterRoute, /items,\s*page,/)
 })
 
 test('审核列表第一页、第二页和空状态使用同一分页契约', () => {

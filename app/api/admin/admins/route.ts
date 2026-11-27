@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
-import { allAdminPermissionKeys, invalidateAdminPermissionCache, type AdminPermissionKey } from '@/lib/admin-permissions'
+import { adminPermissionGroups, allAdminPermissionKeys, invalidateAdminPermissionCache, type AdminPermissionKey } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { USER_REWARD_PERMISSION } from '@/lib/user-reward-constants'
-import { enforceApiRateLimit, requireAdmin, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,10 +15,25 @@ const MAX_SEARCH_PAGE_SIZE = 30
  * touch the database, and the response omits contact and credential fields.
  */
 export async function GET(request: Request) {
-  const guard = await requireAdmin('admin_manage')
+  const guard = await requireAdmin('admin_manage', request)
   if (!guard.user) return guard.response
 
   const params = new URL(request.url).searchParams
+  if (params.get('view') === 'permission-options') {
+    const actor = await prisma.user.findUnique({
+      where: { id: guard.user.id },
+      select: { role: true, status: true, isDeleted: true, AdminPermission: { where: { enabled: true }, select: { permissionKey: true } } },
+    })
+    const keys = actor?.AdminPermission.map(row => row.permissionKey) ?? []
+    const superAdmin = actor?.role === 'SUPER_ADMIN'
+    if (!actor || actor.status !== 'ACTIVE' || actor.isDeleted || (!superAdmin && (actor.role !== 'ADMIN' || !keys.includes('admin_manage')))) {
+      return NextResponse.json({ message: '当前账号没有管理员管理权限' }, { status: 403 })
+    }
+    return NextResponse.json({
+      options: adminPermissionGroups.filter(item => superAdmin || (keys.includes(item.key) && item.key !== USER_REWARD_PERMISSION))
+        .map(({ key, label }) => ({ key, label })),
+    }, { headers: { 'Cache-Control': 'private, no-store' } })
+  }
   const query = sanitizeText(params.get('q'), 80).trim()
   const rawPage = Number(params.get('page') || 1)
   const rawPageSize = Number(params.get('pageSize') || 20)
@@ -74,7 +89,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const guard = await requireAdmin('admin_manage')
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireAdmin('admin_manage', request)
   if (!guard.user) return guard.response
   const currentUser = guard.user
   const limited = await enforceApiRateLimit(request, currentUser.id, {
@@ -86,6 +103,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null)
   const userId = String(body?.userId || '')
+  if (userId === currentUser.id) return NextResponse.json({ message: '不能修改自己的管理员权限' }, { status: 403 })
   const permissions: AdminPermissionKey[] = Array.isArray(body?.permissions)
     ? body.permissions.filter((key: unknown): key is AdminPermissionKey => typeof key === 'string' && allAdminPermissionKeys.includes(key as AdminPermissionKey))
     : []
@@ -99,16 +117,27 @@ export async function POST(request: Request) {
       uid: true,
       nickname: true,
       canPlayFullMusic: true,
+      updatedAt: true,
       AdminPermission: {
-        where: { permissionKey: USER_REWARD_PERMISSION },
-        select: { enabled: true },
+        where: { enabled: true },
+        select: { permissionKey: true, enabled: true },
       },
     },
   })
   if (!target) return NextResponse.json({ message: '用户不存在或状态不可用' }, { status: 404 })
   if (target.role === 'SUPER_ADMIN') return NextResponse.json({ message: '不能修改超级管理员权限' }, { status: 400 })
   if (currentUser.role !== 'SUPER_ADMIN') {
-    const currentlyEnabled = target.AdminPermission.some((permission) => permission.enabled)
+    const actor = await prisma.user.findFirst({
+      where: { id: currentUser.id, role: 'ADMIN', status: 'ACTIVE', isDeleted: false },
+      select: { AdminPermission: { where: { enabled: true }, select: { permissionKey: true } } },
+    })
+    const allowed = new Set(actor?.AdminPermission.map(row => row.permissionKey))
+    if (!allowed.has('admin_manage') || permissions.some(key => !allowed.has(key))
+      || target.AdminPermission.some(row => !allowed.has(row.permissionKey))
+      || (requestedFullMusic !== undefined && requestedFullMusic !== target.canPlayFullMusic)) {
+      return NextResponse.json({ message: '不能修改超出自身权限范围的管理员设置' }, { status: 403 })
+    }
+    const currentlyEnabled = target.AdminPermission.some((permission) => permission.permissionKey === USER_REWARD_PERMISSION)
     const requestedEnabled = permissions.includes(USER_REWARD_PERMISSION)
     if (currentlyEnabled !== requestedEnabled) {
       return NextResponse.json({ message: '只有超级管理员可以调整用户奖励权限' }, { status: 403 })
@@ -116,8 +145,12 @@ export async function POST(request: Request) {
   }
   const canPlayFullMusic = requestedFullMusic ?? target.canPlayFullMusic
 
-  await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: target.id }, data: { role: 'ADMIN', canPlayFullMusic } })
+  const saved = await prisma.$transaction(async (tx) => {
+    const changed = await tx.user.updateMany({
+      where: { id: target.id, updatedAt: target.updatedAt, role: target.role, status: 'ACTIVE', isDeleted: false },
+      data: { role: 'ADMIN', canPlayFullMusic, updatedAt: new Date(Math.max(Date.now(), target.updatedAt.getTime() + 1)) },
+    })
+    if (changed.count !== 1) return false
     await tx.adminPermission.deleteMany({ where: { userId: target.id } })
     if (permissions.length) {
       await tx.adminPermission.createMany({
@@ -134,7 +167,9 @@ export async function POST(request: Request) {
         metadata: { role: 'ADMIN', permissions, canPlayFullMusic },
       },
     })
+    return true
   })
+  if (!saved) return NextResponse.json({ message: '管理员状态已更新，请刷新后重试' }, { status: 409 })
 
   invalidateCurrentUserCache(target.id)
   invalidateAdminPermissionCache(target.id)

@@ -35,6 +35,7 @@ export type AdminUserProfilePatch = {
 
 const adminUserProfileSelect = {
   id: true,
+  updatedAt: true,
   uid: true,
   username: true,
   usernameNormalized: true,
@@ -80,6 +81,7 @@ export type UpdateAdminUserProfileOptions = {
   adminId: string
   patch: AdminUserProfilePatch
   reason: string
+  expectedUpdatedAt?: Date
 }
 
 function hasOwn(value: object, key: string) {
@@ -140,6 +142,9 @@ export async function updateAdminUserProfile(
       select: adminUserProfileSelect,
     })
     if (!target) throw new Error('USER_NOT_FOUND')
+    if (options.expectedUpdatedAt && target.updatedAt.getTime() !== options.expectedUpdatedAt.getTime()) {
+      throw new Error('PROFILE_STALE')
+    }
 
     const builtContact = (hasOwn(contactPatch, 'email') || hasOwn(contactPatch, 'phone'))
       ? buildAdminUserContactUpdate(target, contactPatch)
@@ -204,17 +209,7 @@ export async function updateAdminUserProfile(
 
     const oldBirthday = birthdayFromRecord(target)
     let birthdayResult: Awaited<ReturnType<typeof updateUserBirthdate>> | null = null
-    if (hasOwn(options.patch, 'birthday')) {
-      const birthdayOptions: UpdateUserBirthdateOptions = {
-        targetUserId: options.userId,
-        birthdate: options.patch.birthday || null,
-        actor: 'ADMIN',
-        now,
-      }
-      birthdayResult = await updateUserBirthdate(tx, birthdayOptions)
-    }
-
-    const userData: Prisma.UserUpdateInput = {}
+    const userData: Prisma.UserUpdateManyMutationInput = {}
     if (options.patch.username && options.patch.username.usernameNormalized !== target.usernameNormalized) {
       userData.username = options.patch.username.account
       userData.usernameNormalized = options.patch.username.usernameNormalized
@@ -240,8 +235,24 @@ export async function updateAdminUserProfile(
     if (options.patch.showBadgeActivity !== undefined) userData.showBadgeActivity = options.patch.showBadgeActivity
     if (options.patch.showBadgeProgressNotifications !== undefined) userData.showBadgeProgressNotifications = options.patch.showBadgeProgressNotifications
 
-    if (Object.keys(userData).length) {
+    if (options.expectedUpdatedAt) {
+      const result = await tx.user.updateMany({
+        where: { id: options.userId, updatedAt: options.expectedUpdatedAt },
+        data: { ...userData, updatedAt: new Date(Math.max(Date.now(), options.expectedUpdatedAt.getTime() + 1)) },
+      })
+      if (result.count !== 1) throw new Error('PROFILE_STALE')
+    } else if (Object.keys(userData).length) {
       await tx.user.update({ where: { id: options.userId }, data: userData, select: { id: true } })
+    }
+
+    if (hasOwn(options.patch, 'birthday')) {
+      const birthdayOptions: UpdateUserBirthdateOptions = {
+        targetUserId: options.userId,
+        birthdate: options.patch.birthday || null,
+        actor: 'ADMIN',
+        now,
+      }
+      birthdayResult = await updateUserBirthdate(tx, birthdayOptions)
     }
 
     const shouldTouchProfile = hasOwn(options.patch, 'nickname')

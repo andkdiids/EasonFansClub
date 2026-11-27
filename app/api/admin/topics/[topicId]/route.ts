@@ -2,7 +2,7 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { normalizeTopicName } from '@/lib/post-topics'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 
 type Params = { params: Promise<{ topicId: string }> }
 
@@ -14,7 +14,9 @@ function parseOptionalDate(value: unknown) {
 }
 
 export async function PATCH(request: Request, { params }: Params) {
-  const guard = await requireAdmin('post_manage')
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireAdmin('post_manage', request)
   if (!guard.user) return guard.response
   const { topicId } = await params
   const existing = await prisma.topic.findUnique({ where: { id: topicId }, select: { id: true } })

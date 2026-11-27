@@ -134,7 +134,7 @@ test('审核页的单条审核与其他合法管理操作仍保留', () => {
 // ADMIN BULK DELETE API（权限 / 服务复用 / 审计 / 幂等）
 // ---------------------------------------------------------------------------
 test('管理员批量删除：登录 + post_manage 权限、非空校验、逐篇复用 deletePost', () => {
-  assert.match(adminBulkRoute, /requireAdmin\('post_manage'\)/)
+  assert.match(adminBulkRoute, /rejectInvalidRequestOrigin\(request\)[\s\S]*requireAdmin\('post_manage', request\)/)
   assert.match(adminBulkRoute, /postIds 必须是数组/)
   assert.match(adminBulkRoute, /请至少选择一篇帖子/)
   assert.match(adminBulkRoute, /单次最多删除/)

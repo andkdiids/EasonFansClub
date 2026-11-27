@@ -12,15 +12,15 @@ import { adjustRegistrationFeeBalance } from '@/lib/registration-fee'
 import { publicImageUrl } from '@/lib/images'
 import { validateLoginAccountValue, validateNicknameValue } from '@/lib/login-account'
 import { checkBannedWords, NICKNAME_BANNED_WORD_MESSAGE, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD } from '@/lib/content-moderation'
-import { normalizeUserLocationInput } from '@/lib/user-location'
-import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput } from '@/lib/gender'
+import { getLocationRegions, LOCATION_COUNTRIES, locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
+import { CUSTOM_GENDER_MAX_LENGTH, GENDER_VALUES, validateGenderInput } from '@/lib/gender'
 import { isValidBirthdayParts, type BirthdayParts } from '@/lib/zodiac'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getEquippedBadgesForUser } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
 import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import {
   normalizeUserContactPatch,
   UserContactValidationError,
@@ -59,7 +59,31 @@ function deletionErrorResponse(error: unknown) {
   return NextResponse.json({ message: messages[message] || '删除失败，请稍后重试' }, { status: message === 'USER_NOT_FOUND' ? 404 : 400 })
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  if (new URL(request.url).searchParams.get('view') === 'profile-edit') {
+    const guard = await requireAdmin('user_manage', request)
+    if (!guard.user) return guard.response
+    const { userId } = await context.params
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true, uid: true, nickname: true, bio: true, birthdayPublic: true, showBadgeActivity: true, showBadgeProgressNotifications: true, updatedAt: true,
+        birthMonth: true, birthDay: true, gender: true, customGender: true,
+        Profile: { select: { locationCountryCode: true, locationCountry: true, locationRegionCode: true, locationRegion: true } },
+      },
+    })
+    if (!user) return NextResponse.json({ message: '用户不存在' }, { status: 404, headers: noStoreHeaders })
+    const { Profile, ...fields } = user
+    return NextResponse.json({
+      user: { ...fields, location: locationFromProfile(Profile) },
+      options: {
+        genders: GENDER_VALUES,
+        countries: LOCATION_COUNTRIES.map(({ code, name }) => ({
+          code, name, regions: getLocationRegions(code).map(({ code, name }) => ({ code, name })),
+        })),
+      },
+    }, { headers: noStoreHeaders })
+  }
   const guard = await requireUserDeletionPermission()
   if (!guard.user) return guard.response
 
@@ -71,14 +95,34 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const guard = await requireAdmin('user_manage')
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireAdmin('user_manage', request)
   if (!guard.user) return guard.response
 
   const { userId } = await context.params
   const body = await request.json().catch(() => null)
   const action = sanitizeText(body?.action, 40)
+  const mobileProfile = action === 'updateMobileProfile'
+  let expectedUpdatedAt: Date | undefined
+  if (mobileProfile) {
+    const settings = ['birthdayPublic', 'showBadgeActivity', 'showBadgeProgressNotifications', 'birthMonth', 'birthDay', 'gender', 'customGender', 'location']
+    const allowedFields = new Set(['action', 'nickname', 'bio', 'reason', 'expectedUpdatedAt', ...settings])
+    if (Object.keys(body).some((key) => !allowedFields.has(key))
+      || (body.nickname === undefined && body.bio === undefined && settings.every(key => body[key] === undefined))
+      || ((body.birthMonth === undefined) !== (body.birthDay === undefined))
+      || (body.customGender !== undefined && body.gender === undefined)
+      || (body.bio !== undefined && (typeof body.bio !== 'string' || body.bio.length > 300))
+      || typeof body.expectedUpdatedAt !== 'string') {
+      return NextResponse.json({ message: '资料编辑参数无效' }, { status: 400 })
+    }
+    expectedUpdatedAt = new Date(body.expectedUpdatedAt)
+    if (!Number.isFinite(expectedUpdatedAt.getTime()) || expectedUpdatedAt.toISOString() !== body.expectedUpdatedAt) {
+      return NextResponse.json({ message: '请重新读取用户资料' }, { status: 400 })
+    }
+  }
 
-  if (action === 'updateProfile') {
+  if (action === 'updateProfile' || mobileProfile) {
     const hasOwn = (key: string) => Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, key))
     const patch: AdminUserProfilePatch = {}
 
@@ -189,6 +233,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         userId,
         adminId: guard.user.id,
         patch,
+        expectedUpdatedAt,
         reason: sanitizeText(body?.reason, 180) || '管理员编辑用户资料',
       }))
       invalidateCurrentUserCache(userId)
@@ -210,6 +255,9 @@ export async function PATCH(request: Request, context: RouteContext) {
       if (result.birthdayChanged) {
         await triggerBadgeEvaluation(userId, 'USER_BIRTHDAY_UPDATED', new Date().toISOString())
       }
+      if (mobileProfile) {
+        return NextResponse.json({ message: result.changed ? '用户资料已更新' : '用户资料未发生变化' }, { headers: noStoreHeaders })
+      }
       const equippedBadges = result.birthdayChanged
         ? await getEquippedBadgesForUser(userId).catch((error) => {
           console.error('[admin.users.birthday.equipped-badges]', { userId, error })
@@ -224,6 +272,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       })
     } catch (error) {
       const code = error instanceof Error ? error.message : ''
+      if (code === 'PROFILE_STALE') return NextResponse.json({ message: '资料已被更新，请重新读取后再编辑', code }, { status: 409 })
       if (code === 'USER_NOT_FOUND') return NextResponse.json({ message: '用户不存在' }, { status: 404 })
       if (code === 'USERNAME_ALREADY_EXISTS') return NextResponse.json({ message: '该用户名已被使用', code }, { status: 409 })
       if (code === 'EMAIL_ALREADY_EXISTS') return NextResponse.json({ message: '该邮箱已绑定其他账号', code }, { status: 409 })
@@ -317,6 +366,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   } = {}
 
   if (body?.role) {
+    if (guard.user.role !== 'SUPER_ADMIN') {
+      return NextResponse.json({ message: '角色变更需要超级管理员权限' }, { status: 403 })
+    }
     data.role = body.role
     if (body.role !== 'ADMIN' && body.role !== 'SUPER_ADMIN') data.canPlayFullMusic = false
   }
