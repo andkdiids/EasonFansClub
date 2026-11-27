@@ -19,12 +19,13 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
   const url = new URL(process.env.DATABASE_URL ?? '')
   assert.equal(url.protocol, 'mysql:')
   assert.equal(url.hostname, '127.0.0.1')
-  assert.equal(url.pathname, '/ecfc_shun_items_fixture_qa')
+  assert.ok(['/ecfc_shun_items_fixture_qa', '/ecfc_shun_bootstrap_qa'].includes(url.pathname))
+  const fixtureSchema = url.pathname.slice(1)
   const mysql = process.env.SHUN_ITEMS_MYSQL_CLIENT
   assert.ok(mysql, 'The isolated MySQL client is required for trigger-based failure injection')
   const fixtureDdl = (input: string) => execFileSync(mysql, [
     '--no-defaults', '--host=127.0.0.1', '--protocol=TCP', '--port=' + url.port,
-    '--user=' + decodeURIComponent(url.username), 'ecfc_shun_items_fixture_qa',
+    '--user=' + decodeURIComponent(url.username), fixtureSchema,
   ], { input, env: { ...process.env, MYSQL_PWD: decodeURIComponent(url.password) } })
   async function withNotificationFailure(recipientId: string, operation: () => Promise<unknown>) {
     assert.match(recipientId, /^[a-z0-9]+$/)
