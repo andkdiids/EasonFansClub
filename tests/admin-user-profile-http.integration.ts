@@ -53,7 +53,20 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   const browserRead = await read(browser)
   assert.equal(browserRead.status, 200)
   assert.equal((await browserRead.json()).user.bio, patch.bio)
-  assert.equal(await prisma.userOperationLog.count({
-    where: { userId: target.id, operatorUserId: admin.id, action: 'UPDATE_USER_PROFILE' },
+  assert.equal(await prisma.adminActionLog.count({
+    where: { targetUserId: target.id, adminId: admin.id, action: 'UPDATE_USER_PROFILE' },
   }), 1)
+  const timeline = (headers: Record<string, string>) => fetch(
+    origin + '/api/admin/user-operations?' + new URLSearchParams({ view: 'timeline', projection: 'mobile', userId: target.id, pageSize: '1' }),
+    { headers, redirect: 'manual' },
+  )
+  assert.equal((await timeline(targetBearer)).status, 403)
+  const history = await timeline(adminBearer)
+  assert.equal(history.status, 200)
+  const { events, pagination } = await history.json()
+  assert.equal(pagination.page, 1)
+  assert.equal(events[0].action, 'UPDATE_USER_PROFILE')
+  assert.equal(events[0].operator.uid, admin.uid)
+  assert.equal(events[0].detail.changedFields, 'bio')
+  assert.equal(events[0].detail.oldValue, undefined)
 })

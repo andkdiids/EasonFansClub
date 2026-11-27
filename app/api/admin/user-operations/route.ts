@@ -11,7 +11,7 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' }
 
 function parseView(value: string | null): UserOperationView {
   return value === 'risk' || value === 'timeline' || value === 'users' ? value : 'today'
@@ -23,7 +23,7 @@ function parsePage(value: string | null, fallback: number, max = 10_000) {
 }
 
 export async function GET(request: Request) {
-  const guard = await requireAdmin('user_manage')
+  const guard = await requireAdmin('user_manage', request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/admin/user-operations',
@@ -51,6 +51,15 @@ export async function GET(request: Request) {
     if (!userId) return NextResponse.json({ message: '用户不能为空', code: 'USER_REQUIRED' }, { status: 400, headers: privateHeaders })
     const result = await getUserOperationTimeline({ userId, category, campaignId, days, page, pageSize })
     if (!result) return NextResponse.json({ message: '用户不存在', code: 'USER_NOT_FOUND' }, { status: 404, headers: privateHeaders })
+    if (params.get('projection') === 'mobile') {
+      const events = result.events.map(({ id, occurredAt, action, source, summary, operator, target, detail }) => ({
+        id, occurredAt, action, source, summary,
+        operator: operator && { type: operator.type, uid: operator.uid, nickname: operator.nickname },
+        target: target && { type: target.type, id: target.id, title: target.title },
+        detail: { status: detail.status, result: detail.result, changedFields: detail.changedFields },
+      }))
+      return NextResponse.json({ events, pagination: result.pagination }, { headers: privateHeaders })
+    }
     return NextResponse.json(result, { headers: privateHeaders })
   }
   if (view === 'risk') {

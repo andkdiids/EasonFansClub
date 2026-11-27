@@ -22,6 +22,7 @@ on:
       - 'app/api/admin/activities/**'
       - 'app/api/admin/clinic/**'
       - 'app/api/admin/users/**'
+      - 'app/api/admin/user-operations/**'
       - 'lib/admin-user-profile.ts'
       - 'lib/clinic-service.ts'
       - 'tests/clinic-moderation-delete-mysql.test.ts'

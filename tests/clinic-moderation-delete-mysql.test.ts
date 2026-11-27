@@ -95,6 +95,7 @@ async function cleanup() {
     createdRecords.length = 0
   }
   if (createdUsers.length) {
+    await prisma.adminActionLog.deleteMany({ where: { adminId: { in: createdUsers } } })
     await prisma.userOperationLog.deleteMany({ where: { operatorUserId: { in: createdUsers } } })
     await prisma.userOperationLog.deleteMany({ where: { userId: { in: createdUsers } } })
     await prisma.profile.deleteMany({ where: { userId: { in: createdUsers } } })
@@ -125,8 +126,8 @@ qaTest('移动端资料版本只允许一次并发写入，并保留用户操作
   const current = await prisma.user.findUniqueOrThrow({ where: { id: user.id }, include: { Profile: true } })
   assert.ok(['第一份简介', '第二份简介'].includes(current.bio ?? ''))
   assert.equal(current.Profile?.bio, current.bio)
-  assert.equal(await prisma.userOperationLog.count({
-    where: { operatorUserId: admin.id, userId: user.id, action: 'UPDATE_USER_PROFILE' },
+  assert.equal(await prisma.adminActionLog.count({
+    where: { adminId: admin.id, targetUserId: user.id, action: 'UPDATE_USER_PROFILE' },
   }), 1)
 })
 
