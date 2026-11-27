@@ -45,6 +45,7 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
   const [selecting, setSelecting] = useState(false)
   const [friends, setFriends] = useState<Friend[]>()
   const [error, setError] = useState('')
+  const receiverAvatar = publicImageUrl(delivery?.receiver?.avatarUrl)
   useEffect(() => {
     if (open && !dialog.current?.open) dialog.current?.showModal()
     if (!open && dialog.current?.open) dialog.current.close()
@@ -91,9 +92,9 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
     {gifting && <p role="status">寻找一位幸运的 EF...</p>}
     {!gifting && delivery && <section className={styles.giftDelivery} role="status">
       <h3>幸运已经送达！</h3>
-      {publicImageUrl(delivery.receiver?.avatarUrl) && (
+      {receiverAvatar && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={publicImageUrl(delivery.receiver?.avatarUrl)} alt="" width={32} height={32} />
+        <img src={receiverAvatar} alt="" width={32} height={32} />
       )}
       <p>{delivery.receiver?.nickname ?? 'EF'} 获得了道具『{delivery.name}』</p>
     </section>}

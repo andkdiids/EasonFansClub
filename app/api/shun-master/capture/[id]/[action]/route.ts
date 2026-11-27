@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
-import { useShunRevenge, retryShunCapture, ShunError, shunCapture } from '@/lib/shun-master'
+import { settleShunRevenge, retryShunCapture, ShunError, shunCapture } from '@/lib/shun-master'
 
 export const runtime = 'nodejs'
 
@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   })
   if (limited) return limited
   try {
-    if (action === 'revenge-item') return json(await useShunRevenge(guard.user.id, id))
+    if (action === 'revenge-item') return json(await settleShunRevenge(guard.user.id, id))
     if (action === 'retry-item') return json(await retryShunCapture(guard.user.id, id))
     if (action === 'start') return json(await shunCapture(guard.user.id, id))
     const body = await request.json().catch(() => null)

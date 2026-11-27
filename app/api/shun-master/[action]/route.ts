@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
-import { recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, useShunExtraAttempt } from '@/lib/shun-master'
+import { recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, applyShunExtraAttempt } from '@/lib/shun-master'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -82,7 +82,7 @@ export async function POST(request: Request, { params }: Context) {
         if (Object.keys(body).some((key) => key !== 'requestId')) return json({ message: '赠送不接受指定接收者。' }, 400)
         return json(await sendShunItemGift(guard.user.id, body.requestId))
       }
-      if (action === 'extra-attempt') return json(await useShunExtraAttempt(guard.user.id, body.requestId))
+      if (action === 'extra-attempt') return json(await applyShunExtraAttempt(guard.user.id, body.requestId))
       // The take is settled here and now; the optional letter is a separate,
       // later decision (`POST /api/shun-master/round/<id>/letter`).
       if (body.friendId !== undefined && (typeof body.friendId !== 'string' || !/^[a-z0-9]{1,40}$/.test(body.friendId))) {

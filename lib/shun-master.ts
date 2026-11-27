@@ -931,7 +931,7 @@ export async function shunPermanentOptOut(userId: string) {
   })
 }
 
-export async function useShunExtraAttempt(userId: string, requestId: string, clock = () => new Date()) {
+export async function applyShunExtraAttempt(userId: string, requestId: string, clock = () => new Date()) {
   if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
   try {
     return await shunTransaction(async (tx) => {
@@ -1214,7 +1214,7 @@ function revengeReceivedWhere(day: string, actorId?: string): Prisma.ShunItemRou
   return { code: 'REVENGE', entry: { day }, ...(actorId ? { round: { actorId } } : {}) }
 }
 
-export async function useShunRevenge(userId: string, roundId: string, clock = () => new Date()) {
+export async function settleShunRevenge(userId: string, roundId: string, clock = () => new Date()) {
   if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
   const roll = randomInt(100)
   const rolled = roll < 40 ? 1 : roll < 75 ? 2 : 3

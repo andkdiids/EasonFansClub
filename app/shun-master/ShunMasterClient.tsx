@@ -319,7 +319,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   }
   const usableItem = (code: string) => box?.enabled && box.items.some((item) => item.code === code && item.enabled && item.available > 0)
 
-  async function useBoxItem(action: string, fields: Record<string, unknown> = {}) {
+  async function submitBoxItem(action: string, fields: Record<string, unknown> = {}) {
     await perform(action, async () => {
       setBoxError('')
       const key = JSON.stringify([action, fields])
@@ -696,7 +696,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       {box?.enabled && <button type="button" className={styles.itemToggle} onClick={() => { setBoxError(''); setBoxOpen(true); void loadItems() }}>百宝箱 · {box.total}{newItems && <span className={styles.itemDot} aria-label="有新道具" />}</button>}
     </header>
     {box?.enabled && <ShunItemBox box={box} open={boxOpen} busy={!!busy} errorMessage={boxError} gifting={busy === 'gift'} delivery={delivery}
-      onClose={() => setBoxOpen(false)} onUse={useBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId) }} />}
+      onClose={() => setBoxOpen(false)} onUse={submitBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId) }} />}
     {error && <p className={styles.alert} role="alert">{error}</p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     <div className={styles.columns}>
@@ -776,10 +776,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             {effect.code === 'RETRY_CAPTURE' ? `时光倒流 · 已追回 ${effect.amount} 挂号费` : `最佳损友 · 反击 ${effect.amount} 挂号费`}
           </p>)}
           {side === 'in' && row.result === 'FAILED' && !row.itemOutcomes?.some(({ code }) => code === 'RETRY_CAPTURE') && usableItem('RETRY_CAPTURE') &&
-            <button type="button" disabled={!!busy} onClick={() => void useBoxItem(`capture/${row.id}/retry-item`)}>使用时光倒流</button>}
+            <button type="button" disabled={!!busy} onClick={() => void submitBoxItem(`capture/${row.id}/retry-item`)}>使用时光倒流</button>}
           {side === 'in' && (row.result === 'SUCCESS' || row.itemOutcomes?.some(({ code }) => code === 'RETRY_CAPTURE')) &&
             !row.itemOutcomes?.some(({ code }) => code === 'REVENGE') && usableItem('REVENGE') &&
-            <button type="button" disabled={!!busy} onClick={() => void useBoxItem(`capture/${row.id}/revenge-item`)}>使用最佳损友</button>}
+            <button type="button" disabled={!!busy} onClick={() => void submitBoxItem(`capture/${row.id}/revenge-item`)}>使用最佳损友</button>}
           {investigation(row.id)}
         </article>)}
         {![capture?.id, caught?.id].some((id) => id && rows.some((row) => row.id === id)) && investigation(capture?.id ?? caught?.id)}
