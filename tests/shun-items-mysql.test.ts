@@ -172,7 +172,7 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     await setShunItemPending(sender.id, 'EXTRA_SUSPECT', randomUUID(), false)
     await prisma.shunItemPending.update({ where: { userId: sender.id }, data: { day: shunDay(new Date(now.getTime() - 86_400_000)) } })
     const restored = await shunItemBox(sender.id)
-    assert.ok(restored.enabled && restored.items)
+    assert.ok(restored.enabled && 'items' in restored)
     assert.equal(restored.items.find(({ code }) => code === 'EXTRA_SUSPECT')?.available, 1)
 
     const trapVictim = await fixture(40)

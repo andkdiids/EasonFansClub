@@ -58,6 +58,11 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
         const boxFits = await box.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)
         assert.ok(boxFits, label + ' horizontal overflow')
         if (label === 'pc') {
+          const forbidden = await context.request.post(base + '/api/shun-master/gift', {
+            headers: { Origin: base }, data: { requestId: randomUUID(), friendId: receiver.id },
+          })
+          assert.equal(forbidden.status(), 400)
+          assert.equal((await context.request.get(base + '/api/admin/shun-master/items')).status(), 403)
           await box.getByRole('button', { name: '随机赠送' }).click()
           await box.getByText('幸运已经送达！').waitFor()
           await box.getByText(new RegExp(receiver.nickname)).waitFor()
@@ -132,6 +137,23 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
     } finally {
       await actorContext.close()
       await victimContext.close()
+    }
+    const admin = await fixture()
+    const operator = await prisma.user.update({ where: { id: admin.id }, data: { role: 'SUPER_ADMIN' } })
+    const adminContext = await browser.newContext({ viewport: { width: 1440, height: 960 } })
+    try {
+      await adminContext.addCookies([{ name: authCookieName, value: await createSessionToken(operator), url: base }])
+      const adminPage = await adminContext.newPage()
+      await adminPage.goto(base + '/admin/shun-master')
+      const management = adminPage.getByRole('region', { name: '顺大师道具管理' })
+      await management.getByRole('textbox', { name: '道具配置' }).waitFor()
+      await management.getByRole('textbox', { name: '用户 ID' }).fill(sender.id)
+      await management.getByRole('button', { name: '查询库存和流水' }).click()
+      await management.getByText('好友赠送', { exact: true }).click()
+      await management.getByText(sender.id, { exact: false }).first().waitFor()
+      await adminPage.screenshot({ path: join(output, 'v42-pc-admin-items.png'), fullPage: true })
+    } finally {
+      await adminContext.close()
     }
   } finally {
     await browser.close()
