@@ -176,6 +176,43 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, sender.id)), [])
     assert.equal(await prisma.pointLog.count({ where: { userId: { in: [sender.id, receiver.id, blocked.id, unrelated.id] } } }), 0)
 
+    // Sunday-to-Monday boundary in Asia/Shanghai, with a one-millisecond gap.
+    const boundaryUser = await fixture()
+    const sunday = new Date('2026-11-29T15:59:59.999Z')
+    const mondayBoundary = new Date('2026-11-29T16:00:00.000Z')
+    assert.equal(shunDay(sunday), '2026-11-29')
+    assert.equal(shunDay(mondayBoundary), '2026-11-30')
+    assert.equal(getShanghaiWeekKey(sunday), '2026-11-23')
+    assert.equal(getShanghaiWeekKey(mondayBoundary), '2026-11-30')
+    await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [boundaryUser.id])
+      for (let n = 0; n < 6; n++) await postShunItemMovement(tx, {
+        userId: boundaryUser.id, code: 'EXTRA_ATTEMPT', day: shunDay(sunday),
+        configVersion: config.version, type: 'WEEKLY_REWARD', requestKey: 'midnight-seed-' + n,
+      })
+    })
+    const midnightKey = randomUUID()
+    const sundayResult = await applyShunExtraAttempt(boundaryUser.id, midnightKey, () => sunday)
+    const [midnightReplay, ...midnightAttempts] = await Promise.allSettled([
+      applyShunExtraAttempt(boundaryUser.id, midnightKey, () => mondayBoundary),
+      ...Array.from({ length: 3 }, () => applyShunExtraAttempt(boundaryUser.id, randomUUID(), () => mondayBoundary)),
+    ])
+    assert.deepEqual(midnightReplay, { status: 'fulfilled', value: sundayResult })
+    assert.equal(midnightAttempts.filter(({ status }) => status === 'fulfilled').length, 2)
+    const boundaryDays = await prisma.shunItemDaily.findMany({
+      where: { userId: boundaryUser.id }, orderBy: { day: 'asc' },
+      select: { day: true, extraAttemptsGranted: true, extraAttemptsUsed: true },
+    })
+    assert.deepEqual(boundaryDays, [
+      { day: '2026-11-29', extraAttemptsGranted: 1, extraAttemptsUsed: 0 },
+      { day: '2026-11-30', extraAttemptsGranted: 2, extraAttemptsUsed: 0 },
+    ])
+    assert.equal(await prisma.shunItemInventory.findUniqueOrThrow({
+      where: { userId_code: { userId: boundaryUser.id, code: 'EXTRA_ATTEMPT' } },
+    }).then(({ available }) => available), 3)
+    assert.equal(await prisma.pointLog.count({ where: { userId: boundaryUser.id } }), 0)
+    console.log('PASS EXTRA-MIDNIGHT-WEEK', JSON.stringify(boundaryDays))
+
     const earnedAt = new Date()
     const earnedDay = shunDay(earnedAt)
     const checkInFact = await prisma.growthTaskCompletion.create({ data: {

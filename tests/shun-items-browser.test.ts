@@ -137,7 +137,7 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
             before: { gifts: 0 },
             after: { gifts: 1, requestKeys: [...new Set(giftRequests)], intentId: persisted.id, code: persisted.code },
             result: 'PASS',
-            logPath: join(output, '..', 'gift-intent-browser.log'),
+            logPath: process.env.SHUN_ITEMS_BROWSER_LOG ?? join(output, '..', 'gift-intent-browser.log'),
           })
           await box.getByText(new RegExp(receiver.nickname)).waitFor()
           assert.equal(await box.getByRole('region', { name: '通讯录好友' }).count(), 0)
