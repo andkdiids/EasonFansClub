@@ -17,7 +17,9 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
   assert.equal(url.port, process.env.GITHUB_ACTIONS === 'true' ? '3306' : '33326')
   assert.equal(url.pathname, '/ecfc_shun_qa')
   assert.equal(await prisma.shunMasterRound.count(), 0, 'requires an empty isolated fixture')
-  const seedRefusal = (userId: string) => prisma.shunMasterProtection.create({ data: { userId, protected: true } })
+  const seedRefusal = (userId: string) => prisma.shunMasterProtection.upsert({
+    where: { userId }, create: { userId, protected: true }, update: { protected: true },
+  })
   const createUser = async (points = 0, contact?: string, age = 9) => {
     const name = 'shun-qa-' + randomUUID()
     return prisma.user.create({ data: { username: name, usernameNormalized: name, nickname: name,

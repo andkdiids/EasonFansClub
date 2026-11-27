@@ -150,7 +150,12 @@ test('friend-first pool honours the chance, the real friendship relation and eve
   const loyalActor = await createUser()
   const loyalFriends = await Promise.all([createUser(80), createUser(80)])
   for (const friend of loyalFriends) await befriend(loyalActor.id, friend.id)
-  await prisma.shunMasterProtection.createMany({ data: loyalFriends.map(({ id: userId }, index) => ({ userId, protected: index === 0 })) })
+  for (const [index, { id: userId }] of loyalFriends.entries()) {
+    const protectedFlag = index === 0
+    await prisma.shunMasterProtection.upsert({
+      where: { userId }, create: { userId, protected: protectedFlag }, update: { protected: protectedFlag },
+    })
+  }
   await pinFundedTo(...loyalFriends.map((friend) => friend.id))
   const loyalRounds = await Promise.all([shunAttempt(loyalActor.id, randomUUID()), shunAttempt(loyalActor.id, randomUUID())])
   const storedLoyal = await prisma.shunMasterRound.findMany({ where: { id: { in: loyalRounds.map((round) => round.id) } } })
