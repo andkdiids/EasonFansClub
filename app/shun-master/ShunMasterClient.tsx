@@ -12,6 +12,7 @@ import { publicImageUrl } from '@/lib/images'
 // state flips at exactly the boundary the server enforces.
 import { SHUN_CLOSED_TITLE, isShunOpen, shunOpenHoursHelp, shunOpenHoursHint, shunOpenHoursLine } from '@/lib/shun-open-hours'
 import { formatUid } from '@/lib/uid'
+import { ShunItemBox, type ShunBoxData } from './ShunItemBox'
 import styles from './shun.module.css'
 
 const MESSAGE_MAX = 60
@@ -22,7 +23,7 @@ type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' 
   /** Platform bonus granted on a successful capture (0 when the roll lost). */
   bonusAwarded?: number
   /** Capturer side: this capture already carries a delivered counter note. */
-  hasCaptureLetter?: boolean }
+  hasCaptureLetter?: boolean; itemOutcomes?: { code: string; amount: number }[] }
 type OpenHours = { openHoursEnabled: boolean; openTime: string; closeTime: string; label: string; open: boolean; nextOpenAt: string | null }
 type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number
   /** V6: the daily window exactly as the server judged it for `serverNow`. */
@@ -64,6 +65,11 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   autoCaptureLetterId?: string
 }) {
   const [status, setStatus] = useState<Status>()
+  const [box, setBox] = useState<ShunBoxData>()
+  const [boxOpen, setBoxOpen] = useState(false)
+  const [boxError, setBoxError] = useState('')
+  const boxRequests = useRef(new Map<string, string>())
+  const targetRequest = useRef<string | undefined>(undefined)
   const [side, setSide] = useState<Side>(initialSide)
   const [range, setRange] = useState('all')
   const [dateKey, setDateKey] = useState('')
@@ -115,6 +121,13 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const captureLetterRequested = useRef(false)
   // A notification deep link must land on its record once, not on every render.
   const focusOnce = useRef(false)
+  const loadItems = useCallback(async () => {
+    try {
+      setBox(await api<ShunBoxData>('items'))
+    } catch {
+      // A box refresh is independent of fee settlement and the letter flow.
+    }
+  }, [])
   const loadStatus = useCallback(async () => {
     try {
       const response = await api<Status>('status')
@@ -148,7 +161,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       if (version === sequence.current) setLoading(false)
     }
   }, [side, focusedRecord, initialSide, range, dateKey])
-  useEffect(() => { if (!initialGuest) void loadStatus() }, [initialGuest, loadStatus])
+  useEffect(() => { if (!initialGuest) { void loadStatus(); void loadItems() } }, [initialGuest, loadStatus, loadItems])
+  useEffect(() => { if (new URLSearchParams(window.location.search).get('items') === '1') setBoxOpen(true) }, [])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
   // 「前往调查」从通知里带着 roundId 进来：记录加载完成后滚到对应那条，
@@ -281,18 +295,44 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       if (!response.optedOut) setError('退出未生效，请稍后重试。')
     })
   }
-  function attempt() {
+  const usableItem = (code: string) => box?.enabled && box.items.some((item) => item.code === code && item.enabled && item.available > 0)
+
+  async function useBoxItem(action: string, fields: Record<string, unknown> = {}) {
+    await perform(action, async () => {
+      setBoxError('')
+      const key = JSON.stringify([action, fields])
+      const itemRequestId = boxRequests.current.get(key) ?? crypto.randomUUID()
+      boxRequests.current.set(key, itemRequestId)
+      try {
+        await api(action, { ...fields, requestId: itemRequestId })
+        boxRequests.current.delete(key)
+        await Promise.all([loadStatus(), loadItems(), ...(action.startsWith('capture/') ? [loadRecords()] : [])])
+      } catch (error) {
+        if (error instanceof RequestError && error.status && error.status < 500 && error.status !== 429) boxRequests.current.delete(key)
+        if (boxOpen) setBoxError(error instanceof Error ? error.message : '暂时无法使用道具。')
+        else throw error
+      }
+    })
+  }
+
+  function attempt(friendId?: string) {
     return perform('attempt', async () => {
       setResult(undefined)
       setStep('result')
       setError('')
-      requestId.current ||= crypto.randomUUID()
+      if (requestId.current && friendId && friendId !== targetRequest.current) {
+        throw new RequestError('请先重试上一笔顺取。')
+      }
+      if (!requestId.current) {
+        targetRequest.current = friendId
+        requestId.current = crypto.randomUUID()
+      }
       try {
-        const round = await api<Round>('attempt', { requestId: requestId.current })
+        const round = await api<Round>('attempt', { requestId: requestId.current, friendId: targetRequest.current })
         setBusy('animation')
         const wait = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1600
         await Promise.all([
-          loadStatus(), loadRecords(),
+          loadStatus(), loadRecords(), loadItems(),
           new Promise((resolve) => window.setTimeout(resolve, wait)),
         ])
         requestId.current = null
@@ -625,7 +665,11 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         </div>}
   </>
   return <main className={styles.page}>
-    <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div></header>
+    <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div>
+      {box?.enabled && <button type="button" className={styles.itemToggle} onClick={() => { setBoxError(''); setBoxOpen(true); void loadItems() }}>百宝箱 · {box.total}</button>}
+    </header>
+    {box?.enabled && <ShunItemBox box={box} open={boxOpen} busy={!!busy} errorMessage={boxError}
+      onClose={() => setBoxOpen(false)} onUse={useBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId) }} />}
     {error && <p className={styles.alert} role="alert">{error}</p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     <div className={styles.columns}>
@@ -701,6 +745,14 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             {remaining(row.goldenUntil) > 0 && <span>黄金抓捕期 · {countdown(remaining(row.goldenUntil))}</span>}
             <button disabled={!!busy} onClick={() => capture?.id === row.id ? setCapture(undefined) : void perform('start', () => openCapture(row.id))}>{capture?.id === row.id ? '收起调查' : '立即调查'}</button>
           </> : <p>可用嫌疑人不足，本次不可抓捕。</p>)}
+          {row.itemOutcomes?.map((effect) => <p key={effect.code} role="status">
+            {effect.code === 'RETRY_CAPTURE' ? `时光倒流 · 已追回 ${effect.amount} 挂号费` : `最佳损友 · 反击 ${effect.amount} 挂号费`}
+          </p>)}
+          {side === 'in' && row.result === 'FAILED' && !row.itemOutcomes?.some(({ code }) => code === 'RETRY_CAPTURE') && usableItem('RETRY_CAPTURE') &&
+            <button type="button" disabled={!!busy} onClick={() => void useBoxItem(`capture/${row.id}/retry-item`)}>使用时光倒流</button>}
+          {side === 'in' && (row.result === 'SUCCESS' || row.itemOutcomes?.some(({ code }) => code === 'RETRY_CAPTURE')) &&
+            !row.itemOutcomes?.some(({ code }) => code === 'REVENGE') && usableItem('REVENGE') &&
+            <button type="button" disabled={!!busy} onClick={() => void useBoxItem(`capture/${row.id}/revenge-item`)}>使用最佳损友</button>}
           {investigation(row.id)}
         </article>)}
         {![capture?.id, caught?.id].some((id) => id && rows.some((row) => row.id === id)) && investigation(capture?.id ?? caught?.id)}

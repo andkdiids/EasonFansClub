@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
-import { retryShunCapture, ShunError, shunCapture } from '@/lib/shun-master'
+import { useShunRevenge, retryShunCapture, ShunError, shunCapture } from '@/lib/shun-master'
 
 export const runtime = 'nodejs'
 
@@ -11,12 +11,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { id, action } = await params
-  if (!/^[a-z0-9]{1,40}$/.test(id) || (action !== 'start' && action !== 'guess' && action !== 'retry-item')) return json({ message: '未找到操作。' }, 404)
+  if (!/^[a-z0-9]{1,40}$/.test(id) || (action !== 'start' && action !== 'guess' && action !== 'retry-item' && action !== 'revenge-item')) return json({ message: '未找到操作。' }, 404)
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'shun-master:capture', user: { limit: 25, windowSeconds: 60 }, ip: { limit: 150, windowSeconds: 60 },
   })
   if (limited) return limited
   try {
+    if (action === 'revenge-item') return json(await useShunRevenge(guard.user.id, id))
     if (action === 'retry-item') return json(await retryShunCapture(guard.user.id, id))
     if (action === 'start') return json(await shunCapture(guard.user.id, id))
     const body = await request.json().catch(() => null)

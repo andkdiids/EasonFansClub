@@ -11,6 +11,7 @@ import { shunPerson } from './shun-person'
 import { pickDecoys, type DecoyCandidate } from './shun-decoys'
 import { triggerBadgeEvaluation } from './badge-rule-engine'
 import { shunClosedMessage, shunOpenHoursState } from './shun-open-hours'
+import { defaultShunItemRules, shunItemsFeatureEnabled, validateShunItemDraft } from './shun-item-config'
 import { drawShunItem, SHUN_GIFT_WEIGHTS, SHUN_ITEM_CATALOG } from './shun-item-rules'
 import { lockShunItemUsers, postShunItemMovement, ShunItemInventoryError } from './shun-item-inventory'
 
@@ -299,12 +300,17 @@ function notify(tx: Tx, id: string, recipientId: string, title: string, content:
 }
 async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = false, hasCaptureLetter = false) {
   const visible = side === 'out' || round.result !== null
+  const outcomes = round.result && shunItemsFeatureEnabled() ? await tx.shunItemRoundEffect.findMany({
+    where: { roundId: round.id, code: { in: ['RETRY_CAPTURE', 'REVENGE'] } },
+    select: { code: true, amount: true },
+  }) : []
   return {
     id: round.id, amount: round.amount, recovered: round.recovered, result: round.result,
     createdAt: round.createdAt, goldenUntil: round.goldenUntil, canCapture: [3, 4].includes((round.candidates as string[]).length),
     // The platform bonus is part of the capturer's own settlement view. It is
     // never shown to anybody else and never leaks into the caught player's copy.
     bonusAwarded: round.bonusAwarded,
+    ...(outcomes.length ? { itemOutcomes: outcomes } : {}),
     person: visible ? await shunPerson(tx, side === 'out' ? round.victimId : round.actorId) : null,
     // Recipient-side flag only: the sender never learns whether a letter exists
     // from anybody else's view, and it is derived from an ownership-scoped query.
@@ -320,18 +326,19 @@ async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = fal
 export async function shunStatus(userId: string) {
   const serverNow = new Date()
   const day = shunDay(serverNow)
-  const [state, account, attempts, received, itemDaily] = await Promise.all([
+  const [state, account, attempts, received, itemDaily, revengesReceived] = await Promise.all([
     prisma.shunMasterSettings.findUnique({ where: { id: 1 } }),
     prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { points: true, permanentlyOptedOutAt: true } }),
     prisma.shunMasterRound.count({ where: { actorId: userId, day } }),
     prisma.shunMasterRound.count({ where: { victimId: userId, day } }),
     shunItemsFeatureEnabled() ? prisma.shunItemDaily.findUnique({ where: { userId_day: { userId, day } } }) : null,
+    shunItemsFeatureEnabled() ? prisma.shunItemRoundEffect.count({ where: revengeReceivedWhere(day, userId) }) : 0,
   ])
   const config = validateShunConfig(state?.config) || defaultShunConfig
   const optedOut = account.permanentlyOptedOutAt !== null
   return { enabled: config.enabled, optedOut,
     balance: account.points,
-    remaining: Math.max(0, config.attempts + (itemDaily?.extraAttemptsGranted ?? 0) - attempts), received, attempts: config.attempts,
+    remaining: Math.max(0, config.attempts + (itemDaily?.extraAttemptsGranted ?? 0) - attempts), received: received + revengesReceived, attempts: config.attempts,
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes,
     // The page renders the closed state and its copy from this snapshot alone,
     // so a window changed in the admin panel shows up without a redeploy.
@@ -461,8 +468,15 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     const blocks = await tx.block.findMany({ where: { OR: [{ blockerId: actorId }, { blockedId: actorId }] },
       select: { blockerId: true, blockedId: true } })
     const capped = await tx.shunMasterRound.groupBy({ by: ['victimId'], where: { day }, _count: { _all: true } })
+    const hitsByUser = new Map(capped.map((row) => [row.victimId, row._count._all]))
+    if (shunItemsFeatureEnabled()) {
+      const revenges = await tx.shunItemRoundEffect.findMany({
+        where: revengeReceivedWhere(day), select: { round: { select: { actorId: true } } },
+      })
+      for (const { round } of revenges) hitsByUser.set(round.actorId, (hitsByUser.get(round.actorId) ?? 0) + 1)
+    }
     const excluded = new Set([actorId, ...played.map((round) => round.victimId),
-      ...capped.filter((row) => row._count._all >= config.victimCap).map((row) => row.victimId),
+      ...[...hitsByUser].filter(([, count]) => count >= config.victimCap).map(([id]) => id),
       ...blocks.map((block) => block.blockerId === actorId ? block.blockedId : block.blockerId)])
     const linked = [
       ...(actor.email && actor.emailVerifiedAt ? [{ email: actor.email, emailVerifiedAt: { not: null } }] : []),
@@ -916,10 +930,6 @@ export async function shunPermanentOptOut(userId: string) {
   })
 }
 
-export function shunItemsFeatureEnabled() {
-  return process.env.SHUN_ITEMS_ENABLED === 'true'
-}
-
 export async function useShunExtraAttempt(userId: string, requestId: string, clock = () => new Date()) {
   if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
   try {
@@ -933,9 +943,9 @@ export async function useShunExtraAttempt(userId: string, requestId: string, clo
       if (existing) return { applied: true, day: existing.day }
       const active = await tx.shunItemConfigVersion.findFirst({
         orderBy: { version: 'desc' },
-        include: { definitions: { where: { code: 'EXTRA_ATTEMPT' } } },
+        include: { definitions: true },
       })
-      if (!config.enabled || !active?.enabled || !active.definitions[0]?.enabled) {
+      if (!config.enabled || !active?.enabled || !active.definitions.some((item) => item.code === 'EXTRA_ATTEMPT' && item.enabled)) {
         throw new ShunError('DISABLED', '顺手牵羊暂不可使用。')
       }
       const account = await tx.user.findFirst({ where: { id: userId, ...transactionAccount }, select: { id: true } })
@@ -943,8 +953,9 @@ export async function useShunExtraAttempt(userId: string, requestId: string, clo
       const day = shunDay(clock())
       const where = { userId_day: { userId, day } }
       const daily = await tx.shunItemDaily.findUnique({ where })
-      if ((daily?.extraAttemptsGranted ?? 0) >= 2) {
-        throw new ShunError('LIMIT', '今天已使用两件顺手牵羊。')
+      const limit = (validateShunItemDraft(active)?.rules ?? defaultShunItemRules).extraAttempts
+      if ((daily?.extraAttemptsGranted ?? 0) >= limit) {
+        throw new ShunError('LIMIT', '今天已达到顺手牵羊使用上限。')
       }
       await postShunItemMovement(tx, { userId, code: 'EXTRA_ATTEMPT', type: 'USED', requestKey, day, configVersion: active.version })
       await tx.shunItemDaily.upsert({
@@ -1022,10 +1033,11 @@ export async function sendShunItemGift(senderId: string, receiverId: string, req
       const day = shunDay(clock())
       const where = { userId_day: { userId: receiverId, day } }
       const daily = await tx.shunItemDaily.findUnique({ where })
-      if ((daily?.giftsReceived ?? 0) >= 2) throw new ShunError('GIFT_LIMIT', '好友今天已经收满两件礼物。')
+      const rules = validateShunItemDraft(active)?.rules ?? defaultShunItemRules
+      if ((daily?.giftsReceived ?? 0) >= rules.giftsReceived) throw new ShunError('GIFT_LIMIT', '好友今天已达到接收礼物上限。')
       const pool = (Object.keys(SHUN_GIFT_WEIGHTS) as Array<keyof typeof SHUN_GIFT_WEIGHTS>)
-        .map((code) => [code, SHUN_GIFT_WEIGHTS[code]] as const)
-      if (pool.some(([code]) => !active.definitions.some((item) => item.code === code && item.enabled))) {
+        .map((code) => [code, rules.gifts[code]] as const)
+      if (pool.some(([code, weight]) => weight > 0 && !active.definitions.some((item) => item.code === code && item.enabled))) {
         throw new ShunError('DISABLED', '天使的礼物奖池暂不可用。')
       }
       const code = drawShunItem(pool)
@@ -1175,6 +1187,66 @@ export async function retryShunCapture(userId: string, roundId: string) {
   } catch (error) {
     if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
       throw new ShunError('ITEM_STOCK', '时光倒流库存不足。', 409)
+    }
+    throw error
+  }
+}
+
+function revengeReceivedWhere(day: string, actorId?: string): Prisma.ShunItemRoundEffectWhereInput {
+  return { code: 'REVENGE', entry: { day }, ...(actorId ? { round: { actorId } } : {}) }
+}
+
+export async function useShunRevenge(userId: string, roundId: string, clock = () => new Date()) {
+  if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+  const roll = randomInt(100)
+  const rolled = roll < 40 ? 1 : roll < 75 ? 2 : 3
+  try {
+    return await shunTransaction(async (tx) => {
+      const { config } = await settings(tx)
+      const round = await tx.shunMasterRound.findFirst({ where: { id: roundId, victimId: userId } })
+      if (!round) throw new ShunError('NOT_FOUND', '未找到这条记录。', 404)
+      const effects = await tx.shunItemRoundEffect.findMany({
+        where: { roundId, code: { in: ['REVENGE', 'RETRY_CAPTURE'] } },
+      })
+      const prior = effects.find(({ code }) => code === 'REVENGE')
+      if (prior) return { amount: prior.amount }
+      if (round.result !== 'SUCCESS' && !effects.some(({ code }) => code === 'RETRY_CAPTURE')) {
+        throw new ShunError('INVALID_RESULT', '抓捕成功后才可以使用最佳损友。')
+      }
+      const active = await tx.shunItemConfigVersion.findFirst({
+        orderBy: { version: 'desc' }, include: { definitions: { where: { code: 'REVENGE', enabled: true } } },
+      })
+      if (!config.enabled || !active?.enabled || !active.definitions.length) {
+        throw new ShunError('DISABLED', '最佳损友暂不可使用。')
+      }
+      const accounts = await lockAccounts(tx, [round.actorId, userId])
+      const target = accounts.get(round.actorId)
+      const receiver = accounts.get(userId)
+      if (!target || target < 0 || receiver === undefined) throw new ShunError('REVENGE_UNAVAILABLE', '暂不可反击。')
+      const eligibility = await tx.user.count({ where: { ...transactionAccount, id: { in: [round.actorId, userId] } } })
+      if (eligibility !== 2) throw new ShunError('REVENGE_UNAVAILABLE', '暂不可反击。')
+      const day = shunDay(clock())
+      const pending = await currentShunPending(tx, userId, day)
+      if (pending) throw new ShunError('ITEM_PENDING', '请先取消待生效道具。')
+      const takes = await tx.shunMasterRound.count({ where: { day, victimId: round.actorId } })
+      const revenges = await tx.shunItemRoundEffect.count({ where: revengeReceivedWhere(day, round.actorId) })
+      if (takes + revenges >= config.victimCap) throw new ShunError('REVENGE_UNAVAILABLE', '暂不可反击。')
+
+      const amount = Math.min(rolled, target)
+      const { entry } = await postShunItemMovement(tx, {
+        userId, code: 'REVENGE', type: 'USED', requestKey: `round:${roundId}`, day, configVersion: active.version,
+      })
+      await ledger(tx, `${roundId}:revenge`, userId, receiver, amount, 'take')
+      await ledger(tx, `${roundId}:revenge`, round.actorId, target, -amount, 'take')
+      await tx.shunItemRoundEffect.create({ data: { roundId, code: 'REVENGE', entryId: entry.id, amount } })
+      const person = await shunPerson(tx, userId)
+      await notify(tx, roundId, round.actorId, '最佳损友', `「${person?.nickname ?? 'EF'}」反击，顺走了 ${amount} 挂号费。`,
+        'item-revenge', `/shun-master?record=${roundId}&side=out`)
+      return { amount }
+    })
+  } catch (error) {
+    if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
+      throw new ShunError('ITEM_STOCK', '最佳损友库存不足。', 409)
     }
     throw error
   }
