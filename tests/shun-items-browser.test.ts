@@ -8,6 +8,7 @@ import { authCookieName, createSessionToken } from '../lib/auth'
 import { prisma } from '../lib/prisma'
 import { validateShunItemDraft } from '../lib/shun-item-config'
 import { runShunItemRewardSweep } from '../lib/shun-item-rewards'
+import { getTodayTasks } from '../lib/growth-tasks/registry'
 import { lockShunItemUsers, postShunItemMovement } from '../lib/shun-item-inventory'
 import { shunTransaction, updateShunConfig } from '../lib/shun-master'
 import { shunDay, validateShunConfig } from '../lib/shun-master-rules'
@@ -267,6 +268,20 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       rules: { ...draft.rules, community: true, drops: { ...draft.rules.drops, CHECK_IN: { chance: 100, dailyChecks: 1 } } },
     } })
     const checkInUser = await fixture()
+    const now = new Date()
+    const dateKey = shunDay(now)
+    const otherTasks = getTodayTasks().filter(({ code }) => code !== 'DAILY_CHECKIN')
+    await prisma.growthTaskCompletion.createMany({ data: otherTasks.flatMap((task) =>
+      Array.from({ length: task.dailyCap ?? task.completionThreshold ?? 1 }, (_, index) => ({
+        userId: checkInUser.id, taskCode: task.code, periodKey: dateKey,
+        sourceEventId: `browser-progress:${task.code}:${index}`, completedAt: now,
+      }))) })
+    const commentCount = otherTasks.find(({ code }) => code === 'DAILY_COMMENT')?.dailyCap ?? 1
+    await prisma.pointLog.createMany({ data: Array.from({ length: commentCount }, (_, index) => ({
+      userId: checkInUser.id, action: 'COMMENT_POST' as const, points: 1, before: index, after: index + 1,
+      dateKey, businessKey: `browser-progress:${checkInUser.id}:${index}`, createdAt: now,
+    })) })
+    await prisma.user.update({ where: { id: checkInUser.id }, data: { points: commentCount } })
     const dropContext = await browser.newContext({ viewport: { width: 1440, height: 960 } })
     const previousGate = process.env.SHUN_ITEMS_ENABLED
     try {
@@ -286,6 +301,12 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       await toast.click()
       const box = page.getByRole('dialog', { name: /百宝箱/ })
       await box.getByText(/意外收获/).waitFor()
+      await box.getByText(/每日主线 ·/).waitFor()
+      assert.deepEqual(await prisma.shunItemDaily.findUnique({
+        where: { userId_day: { userId: checkInUser.id, day: dateKey } },
+        select: { mainGranted: true, behaviorGranted: true },
+      }), { mainGranted: true, behaviorGranted: true })
+      await page.screenshot({ path: join(output, 'v42-pc-independent-rewards.png') })
     } finally {
       if (previousGate === undefined) delete process.env.SHUN_ITEMS_ENABLED
       else process.env.SHUN_ITEMS_ENABLED = previousGate
