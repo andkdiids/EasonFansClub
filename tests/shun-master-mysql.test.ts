@@ -30,7 +30,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     const [operator, victim, ...actors] = await Promise.all([
       createUser(), createUser(40, undefined, 0), ...Array.from({ length: 8 }, () => createUser()),
     ])
-    const config = { ...defaultShunConfig, enabled: false, openHoursEnabled: false }
+    const config = { ...defaultShunConfig, enabled: false, openHoursEnabled: false, bonusChance: 0 }
     await updateShunConfig(operator.id, config)
     assert.equal((await shunStatus(operator.id)).enabled, false)
     const beforeNoticeId = (await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).launchNoticeId
