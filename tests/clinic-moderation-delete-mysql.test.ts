@@ -4,6 +4,7 @@ import test from 'node:test'
 import { prisma } from '../lib/prisma'
 import { getDashboardRankings } from '../lib/admin-dashboard-rankings'
 import { removeClinicConsultation } from '../lib/clinic-service'
+import { updateAdminUserProfile } from '../lib/admin-user-profile'
 
 /**
  * Isolated-MySQL acceptance for moderator consultation deletion.
@@ -107,6 +108,27 @@ const qaTest = (name: string, fn: () => Promise<void>) =>
     assertIsolatedFixture()
     try { await fn() } finally { await cleanup() }
   })
+
+qaTest('移动端资料版本只允许一次并发写入，并保留用户操作日志', async () => {
+  const [admin, user] = await Promise.all([createUser(), createUser()])
+  const written = await prisma.user.update({
+    where: { id: user.id }, data: { updatedAt: new Date('2025-01-01T00:00:00Z') },
+  })
+  const save = (bio: string) => prisma.$transaction(tx => updateAdminUserProfile(tx, {
+    userId: user.id, adminId: admin.id, expectedUpdatedAt: written.updatedAt,
+    patch: { bio }, reason: '并发编辑测试',
+  }))
+  const results = await Promise.allSettled([save('第一份简介'), save('第二份简介')])
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+  const rejected = results.find(result => result.status === 'rejected')
+  assert.match(String(rejected?.reason), /PROFILE_STALE/)
+  const current = await prisma.user.findUniqueOrThrow({ where: { id: user.id }, include: { Profile: true } })
+  assert.ok(['第一份简介', '第二份简介'].includes(current.bio ?? ''))
+  assert.equal(current.Profile?.bio, current.bio)
+  assert.equal(await prisma.userOperationLog.count({
+    where: { operatorUserId: admin.id, userId: user.id, action: 'UPDATE_USER_PROFILE' },
+  }), 1)
+})
 
 qaTest('管理员删除唯一有效会诊：榜单 -1，病例计数 -1，写审计', async () => {
   const [admin, author, patientA, patientB] = await Promise.all([createUser(), createUser(), createUser(), createUser()])

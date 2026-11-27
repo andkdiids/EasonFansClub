@@ -20,7 +20,7 @@ import { getEquippedBadgesForUser } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
 import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import {
   normalizeUserContactPatch,
   UserContactValidationError,
@@ -59,7 +59,18 @@ function deletionErrorResponse(error: unknown) {
   return NextResponse.json({ message: messages[message] || '删除失败，请稍后重试' }, { status: message === 'USER_NOT_FOUND' ? 404 : 400 })
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  if (new URL(request.url).searchParams.get('view') === 'profile-edit') {
+    const guard = await requireAdmin('user_manage', request)
+    if (!guard.user) return guard.response
+    const { userId } = await context.params
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, uid: true, nickname: true, bio: true, updatedAt: true },
+    })
+    if (!user) return NextResponse.json({ message: '用户不存在' }, { status: 404, headers: noStoreHeaders })
+    return NextResponse.json({ user }, { headers: noStoreHeaders })
+  }
   const guard = await requireUserDeletionPermission()
   if (!guard.user) return guard.response
 
@@ -71,14 +82,31 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const guard = await requireAdmin('user_manage')
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireAdmin('user_manage', request)
   if (!guard.user) return guard.response
 
   const { userId } = await context.params
   const body = await request.json().catch(() => null)
   const action = sanitizeText(body?.action, 40)
+  const mobileProfile = action === 'updateMobileProfile'
+  let expectedUpdatedAt: Date | undefined
+  if (mobileProfile) {
+    const allowedFields = new Set(['action', 'nickname', 'bio', 'reason', 'expectedUpdatedAt'])
+    if (Object.keys(body).some((key) => !allowedFields.has(key))
+      || (body.nickname === undefined && body.bio === undefined)
+      || (body.bio !== undefined && (typeof body.bio !== 'string' || body.bio.length > 300))
+      || typeof body.expectedUpdatedAt !== 'string') {
+      return NextResponse.json({ message: '资料编辑参数无效' }, { status: 400 })
+    }
+    expectedUpdatedAt = new Date(body.expectedUpdatedAt)
+    if (!Number.isFinite(expectedUpdatedAt.getTime()) || expectedUpdatedAt.toISOString() !== body.expectedUpdatedAt) {
+      return NextResponse.json({ message: '请重新读取用户资料' }, { status: 400 })
+    }
+  }
 
-  if (action === 'updateProfile') {
+  if (action === 'updateProfile' || mobileProfile) {
     const hasOwn = (key: string) => Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, key))
     const patch: AdminUserProfilePatch = {}
 
@@ -189,9 +217,13 @@ export async function PATCH(request: Request, context: RouteContext) {
         userId,
         adminId: guard.user.id,
         patch,
+        expectedUpdatedAt,
         reason: sanitizeText(body?.reason, 180) || '管理员编辑用户资料',
       }))
       invalidateCurrentUserCache(userId)
+      if (mobileProfile) {
+        return NextResponse.json({ message: result.changed ? '用户资料已更新' : '用户资料未发生变化' }, { headers: noStoreHeaders })
+      }
       if (result.changedFields.includes('username')) {
         await safeNotificationWrite(
           () => createNotification({
@@ -224,6 +256,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       })
     } catch (error) {
       const code = error instanceof Error ? error.message : ''
+      if (code === 'PROFILE_STALE') return NextResponse.json({ message: '资料已被更新，请重新读取后再编辑', code }, { status: 409 })
       if (code === 'USER_NOT_FOUND') return NextResponse.json({ message: '用户不存在' }, { status: 404 })
       if (code === 'USERNAME_ALREADY_EXISTS') return NextResponse.json({ message: '该用户名已被使用', code }, { status: 409 })
       if (code === 'EMAIL_ALREADY_EXISTS') return NextResponse.json({ message: '该邮箱已绑定其他账号', code }, { status: 409 })
