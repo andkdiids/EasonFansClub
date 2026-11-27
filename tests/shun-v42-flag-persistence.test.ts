@@ -63,3 +63,16 @@ test('部署重写 PM2 环境时保留 ecosystem 中的道具开关', () => {
     '部署重写后的 PM2 配置必须保留 SHUN_ITEMS_ENABLED=true',
   )
 })
+
+// systemd 以 `pm2 resurrect` 启动 PM2，只会恢复 `pm2 save` 写出的 dump。
+// 部署只 reload 不 save 时，dump 停留在上一次人工快照，重启后新开关丢失。
+test('部署成功后刷新 pm2 resurrect 快照', () => {
+  const script = readFileSync('scripts/deploy-production-git.sh', 'utf8')
+  const body = script.match(/reload_release_processes\(\) \{[\s\S]*?\n\}/)?.[0]
+  assert.ok(body, '必须存在 reload_release_processes 函数')
+  assert.match(
+    body,
+    /pm2 save/,
+    '全部应用 reload 成功后必须执行 pm2 save，否则服务器重启会恢复陈旧环境',
+  )
+})
