@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
+import { recordFaultEvidence } from './helpers/shun-fault-evidence'
 import { chromium } from 'playwright'
 import { authCookieName, createSessionToken } from '../lib/auth'
 import { prisma } from '../lib/prisma'
@@ -128,6 +129,16 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
           await box.getByText('幸运已经送达！').waitFor()
           assert.equal(giftRequests.length, 4)
           assert.equal(new Set(giftRequests).size, 1)
+          await recordFaultEvidence(join(output, 'fault-matrix.jsonl'), {
+            id: 'GIFT-HTTP-ROLLBACK-REFRESH',
+            business: 'FRIEND_GIFT',
+            scenario: 'request missing, real rollback, response loss and refresh replay',
+            method: 'Playwright route.fetch with real HTTP and MySQL notification trigger',
+            before: { gifts: 0 },
+            after: { gifts: 1, requestKeys: [...new Set(giftRequests)], intentId: persisted.id, code: persisted.code },
+            result: 'PASS',
+            logPath: join(output, '..', 'gift-intent-browser.log'),
+          })
           await box.getByText(new RegExp(receiver.nickname)).waitFor()
           assert.equal(await box.getByRole('region', { name: '通讯录好友' }).count(), 0)
           await page.screenshot({ path: join(output, 'v42-pc-gift.png') })
