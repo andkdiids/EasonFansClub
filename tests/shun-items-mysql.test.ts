@@ -6,7 +6,7 @@ import { prisma } from '../lib/prisma'
 import { consumeRegistrationFee } from '../lib/registration-fee'
 import { defaultShunItemDefinitions, defaultShunItemRules } from '../lib/shun-item-config'
 import { lockShunItemUsers, postShunItemMovement, reconcileShunItemInventory } from '../lib/shun-item-inventory'
-import { sendShunItemGift, setShunEnabled, shunStatus, shunTransaction, updateShunConfig, applyShunExtraAttempt, shunAttempt, shunCapture, shunItemBox, setShunItemPending, retryShunCapture, settleShunRevenge } from '../lib/shun-master'
+import { sendShunItemGift, setShunEnabled, shunStatus, shunTransaction, updateShunConfig, applyShunExtraAttempt, shunAttempt, shunCapture, shunSendNotification, shunItemBox, setShunItemPending, retryShunCapture, settleShunRevenge } from '../lib/shun-master'
 import { defaultShunConfig, shunDay } from '../lib/shun-master-rules'
 import { runShunItemRewardSweep } from '../lib/shun-item-rewards'
 import { getTodayTasks } from '../lib/growth-tasks/registry'
@@ -14,7 +14,7 @@ import { getShanghaiWeekKey } from '../lib/community-rewards'
 
 test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gift caps', {
   skip: process.env.SHUN_ITEMS_MYSQL_QA !== '1',
-  timeout: 120_000,
+  timeout: 180_000,
 }, async () => {
   const url = new URL(process.env.DATABASE_URL ?? '')
   assert.equal(url.protocol, 'mysql:')
@@ -26,6 +26,18 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     '--no-defaults', '--host=127.0.0.1', '--protocol=TCP', '--port=' + url.port,
     '--user=' + decodeURIComponent(url.username), 'ecfc_shun_items_fixture_qa',
   ], { input, env: { ...process.env, MYSQL_PWD: decodeURIComponent(url.password) } })
+  async function withNotificationFailure(recipientId: string, operation: () => Promise<unknown>) {
+    assert.match(recipientId, /^[a-z0-9]+$/)
+    const trigger = 'shun_qa_notify_' + randomUUID().replaceAll('-', '')
+    fixtureDdl(`CREATE TRIGGER ${trigger} BEFORE INSERT ON Notification FOR EACH ROW SET NEW.id = IF(NEW.recipientId = '${recipientId}', NULL, NEW.id)`)
+    try {
+      await operation()
+    } finally {
+      fixtureDdl(`DROP TRIGGER ${trigger}`)
+    }
+  }
+  const rejectNotificationFor = (recipientId: string, operation: () => Promise<unknown>) =>
+    withNotificationFailure(recipientId, () => assert.rejects(operation, /Column 'id' cannot be null/))
   const previousUsers = await prisma.user.findMany({ where: { points: { gt: 0 } }, select: { id: true } })
   const previous = process.env.SHUN_ITEMS_ENABLED
   process.env.SHUN_ITEMS_ENABLED = 'true'
@@ -204,6 +216,11 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
       dateKey: earnedDay, businessKey: 'shun-test-comment:' + unrelated.id + ':' + index, createdAt: completedAt,
     })) })
     await prisma.user.update({ where: { id: unrelated.id }, data: { points: 10 } })
+    await withNotificationFailure(unrelated.id, runShunItemRewardSweep)
+    assert.equal(await prisma.shunItemEntry.count({ where: { userId: unrelated.id, type: 'DAILY_MAIN' } }), 0)
+    const dailyErrors = await prisma.shunItemRewardEvent.count({ where: { userId: unrelated.id, attempts: { gt: 0 }, processedAt: null } })
+    assert.ok(dailyErrors > 0)
+    await prisma.shunItemRewardEvent.updateMany({ where: { userId: unrelated.id, processedAt: null }, data: { retryAt: new Date(0) } })
     for (let pass = 0; pass < 3; pass++) await runShunItemRewardSweep()
     assert.deepEqual(await prisma.shunItemDaily.findUnique({
       where: { userId_day: { userId: unrelated.id, day: earnedDay } },
@@ -245,9 +262,17 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     const failed = await shunCapture(target.id, doubled.id, { mode: options.mode, uid: wrong.uid })
     assert.ok('record' in failed)
     assert.equal(failed.record?.result, 'FAILED')
+    const beforeRecovery = await prisma.user.findUniqueOrThrow({ where: { id: target.id }, select: { points: true } })
+    await rejectNotificationFor(target.id, () => retryShunCapture(target.id, doubled.id))
+    assert.deepEqual(await prisma.user.findUniqueOrThrow({ where: { id: target.id }, select: { points: true } }), beforeRecovery)
+    assert.equal(await prisma.shunItemRoundEffect.count({ where: { roundId: doubled.id, code: 'RETRY_CAPTURE' } }), 0)
     const recovery = await Promise.all([retryShunCapture(target.id, doubled.id), retryShunCapture(target.id, doubled.id)])
     assert.deepEqual(recovery, [{ recovered: actual.amount }, { recovered: actual.amount }])
     assert.equal((await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: doubled.id } })).result, 'FAILED')
+    const beforeRevenge = await prisma.user.findUniqueOrThrow({ where: { id: sender.id }, select: { points: true } })
+    await rejectNotificationFor(sender.id, () => settleShunRevenge(target.id, doubled.id))
+    assert.deepEqual(await prisma.user.findUniqueOrThrow({ where: { id: sender.id }, select: { points: true } }), beforeRevenge)
+    assert.equal(await prisma.shunItemRoundEffect.count({ where: { roundId: doubled.id, code: 'REVENGE' } }), 0)
     const revenge = await Promise.all([settleShunRevenge(target.id, doubled.id), settleShunRevenge(target.id, doubled.id)])
     assert.deepEqual(revenge[0], revenge[1])
     assert.equal(await prisma.shunItemRoundEffect.count({ where: { roundId: doubled.id } }), 3)
@@ -266,6 +291,14 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     const trapVictim = await fixture(40)
     await setShunItemPending(sender.id, 'EXTRA_SUSPECT', randomUUID(), false)
     const trapped = await shunAttempt(sender.id, randomUUID())
+    await rejectNotificationFor(trapVictim.id, () => shunSendNotification(sender.id, trapped.id, '隔离测试匿名留言'))
+    assert.equal(await prisma.shunMasterAnonymousLetter.count({ where: { roundId: trapped.id } }), 0)
+    assert.equal((await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: trapped.id } })).notifyStatus, 'PENDING')
+    await Promise.all(Array.from({ length: 2 }, () => shunSendNotification(sender.id, trapped.id, '隔离测试匿名留言')))
+    assert.equal(await prisma.shunMasterAnonymousLetter.count({ where: { roundId: trapped.id } }), 1)
+    const delivered = await prisma.notification.findMany({ where: { recipientId: trapVictim.id, key: `shun:${trapped.id}:taken-letter` } })
+    assert.equal(delivered.length, 1)
+    assert.equal(delivered[0].actorId, null)
     const golden = await shunCapture(trapVictim.id, trapped.id)
     assert.equal(golden.mode, 3)
     assert.equal(golden.candidates?.length, 3)
@@ -372,6 +405,12 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
         dateKey, createdAt: completedAt, businessKey: `weekly-qa:${weeklyUser.id}:${index}:${event}`,
       })) })
     }
+    await withNotificationFailure(weeklyUser.id, async () => {
+      for (let sweep = 0; sweep < 3; sweep++) await runShunItemRewardSweep()
+    })
+    assert.equal(await prisma.shunItemWeeklyGrant.count({ where: { userId: weeklyUser.id } }), 0)
+    assert.ok(await prisma.shunItemRewardEvent.count({ where: { userId: weeklyUser.id, attempts: { gt: 0 }, processedAt: null } }) > 0)
+    await prisma.shunItemRewardEvent.updateMany({ where: { userId: weeklyUser.id, processedAt: null }, data: { retryAt: new Date(0) } })
     for (let sweep = 0; sweep < 12; sweep++) await runShunItemRewardSweep()
     assert.deepEqual(await prisma.shunItemWeeklyGrant.findMany({
       where: { userId: weeklyUser.id, weekStart: shunDay(monday) },
