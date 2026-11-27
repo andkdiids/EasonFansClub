@@ -59,14 +59,14 @@ function PersonLabel({ person, link = false }: { person: Person | null; link?: b
     : <span className={styles.person}>{content}</span>
 }
 
-export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId, autoCaptureLetterId }: {
-  focusedRecord?: string; initialSide: Side; initialGuest: boolean; autoLetterId?: string
+export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId, autoCaptureLetterId, initialItemsOpen = false }: {
+  focusedRecord?: string; initialItemsOpen?: boolean; initialSide: Side; initialGuest: boolean; autoLetterId?: string
   /** V5:一-shot flag from a capture notice that carries a counter note. */
   autoCaptureLetterId?: string
 }) {
   const [status, setStatus] = useState<Status>()
   const [box, setBox] = useState<ShunBoxData>()
-  const [boxOpen, setBoxOpen] = useState(false)
+  const [boxOpen, setBoxOpen] = useState(initialItemsOpen)
   const [newItems, setNewItems] = useState(false)
   const [boxError, setBoxError] = useState('')
   const [delivery, setDelivery] = useState<GiftDelivery>()
@@ -184,7 +184,6 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
     }
   }, [side, focusedRecord, initialSide, range, dateKey])
   useEffect(() => { if (!initialGuest) { void loadStatus(); void loadItems() } }, [initialGuest, loadStatus, loadItems])
-  useEffect(() => { if (new URLSearchParams(window.location.search).get('items') === '1') setBoxOpen(true) }, [])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
   // 「前往调查」从通知里带着 roundId 进来：记录加载完成后滚到对应那条，

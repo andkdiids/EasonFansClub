@@ -508,8 +508,8 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     const friendPool = config.friendChance > 0 && friendIds.size
       ? eligibleTargets.filter((target) => friendIds.has(target.id))
       : []
-    const friendPoolUsed = friendPool.length > 0 && friendPoolDraw(config.friendChance, randomInt)
-    const friendPoolFallback = friendPoolUsed ? null : friendPool.length > 0
+    const friendPoolUsed = !targeted && friendPool.length > 0 && friendPoolDraw(config.friendChance, randomInt)
+    const friendPoolFallback = targeted || friendPoolUsed ? null : friendPool.length > 0
       ? 'DICE_LOSS'
       : config.friendChance <= 0 ? 'FRIEND_CHANCE_OFF'
         : friendIds.size === 0 ? 'NO_FRIENDS' : 'POOL_EMPTY_AFTER_FILTERS'
@@ -553,7 +553,7 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       if (!effect || !inventory?.available) throw new ShunError('ITEM_STOCK', '任我顺暂不可使用。')
     }
     const additionalSuspect = effect === 'EXTRA_SUSPECT'
-    const amount = Math.min(effect === 'DOUBLE_AMOUNT' ? Math.min(rolled * 2, 14) : rolled, victimBalance)
+    const amount = effect === 'DOUBLE_AMOUNT' ? Math.min(rolled * 2, 14, victimBalance) : Math.min(rolled, victimBalance)
     // Decoys are chosen from the victim's friends first, then from recently
     // active accounts, always preferring the same public look as the real actor
     // so the true answer cannot be spotted by avatar or activity alone.
@@ -573,7 +573,7 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       goldenDecoyId: selectedDecoys[0],
       // Match-source audit for the admin-only statistics. Never exposed to a
       // player, never part of a notification or a letter.
-      friendHit: !!targeted || friendPoolUsed, victimTier: victim.tier,
+      friendHit: friendPoolUsed, victimTier: victim.tier,
       friendPoolSize: friendPool.length,
       friendPoolFallback,
       // The transfer is settled now; the victim is told once the actor decides
@@ -1179,7 +1179,7 @@ export async function retryShunCapture(userId: string, roundId: string) {
 
       const day = shunDay(new Date())
       const { entry } = await postShunItemMovement(tx, {
-        userId, code: 'RETRY_CAPTURE', type: 'USED', requestKey: `round:${roundId}`, day, configVersion: active.version,
+        userId, code: 'RETRY_CAPTURE', type: 'USED', requestKey: `retry:${roundId}`, day, configVersion: active.version,
       })
       const debit = Math.min(Math.max(0, actorBalance), round.amount)
       const compensation = round.amount - debit
@@ -1252,7 +1252,7 @@ export async function settleShunRevenge(userId: string, roundId: string, clock =
 
       const amount = Math.min(rolled, target)
       const { entry } = await postShunItemMovement(tx, {
-        userId, code: 'REVENGE', type: 'USED', requestKey: `round:${roundId}`, day, configVersion: active.version,
+        userId, code: 'REVENGE', type: 'USED', requestKey: `revenge:${roundId}`, day, configVersion: active.version,
       })
       await ledger(tx, `${roundId}:revenge`, userId, receiver, amount, 'take')
       await ledger(tx, `${roundId}:revenge`, round.actorId, target, -amount, 'take')

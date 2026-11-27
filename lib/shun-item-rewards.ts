@@ -110,7 +110,12 @@ async function processRewardEvent(sourceType: string, sourceId: string, userId: 
     if (event.sourceType === 'TASK') {
       const weekStart = getShanghaiWeekKey(event.occurredAt)
       const dates = await completedGrowthTaskDates(tx, userId, weekStart, event.occurredAt)
-      const completed = [...dates].filter((date) => date >= shunDay(enabledFrom) && date <= day)
+      const firstDay = shunDay(enabledFrom)
+      if (dates.has(firstDay)) {
+        const preLaunch = await completedGrowthTaskDates(tx, userId, weekStart, enabledFrom, enabledFrom)
+        if (preLaunch.has(firstDay)) dates.delete(firstDay)
+      }
+      const completed = [...dates].filter((date) => date >= firstDay && date <= day)
       if (rules.dailyMain && !daily.mainGranted && completed.includes(day)) {
         await grant('DAILY_MAIN', day, event.mainRoll)
         await tx.shunItemDaily.update({ where, data: { mainGranted: true } })

@@ -395,19 +395,20 @@ export async function claimGrowthTask(userId: string, taskCode: GrowthTaskCode, 
   })
 }
 
-export async function completedGrowthTaskDates(tx: GrowthTransaction, userId: string, weekKey: string, now = new Date()) {
+export async function completedGrowthTaskDates(tx: GrowthTransaction, userId: string, weekKey: string, now = new Date(), before?: Date) {
   const todayTasks = getTodayTasks()
   const todayTaskCodes = todayTasks.map((task) => task.code)
   const actionTaskCodes = todayTasks.filter((task) => task.surface === 'action').map((task) => task.code)
   const actionTaskCodeSet = new Set<string>(actionTaskCodes)
   const weekDateKeys = dayKeysForWeek(weekKey)
   const range = weekRange(weekKey)
+  const rangeEnd = before && before < range.end ? before : range.end
   const [rows, checkIns, prescriptions, commentRewards, actionRewards] = await Promise.all([
-    tx.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: todayTaskCodes }, periodKey: { in: weekDateKeys } }, select: { taskCode: true, periodKey: true } }),
-    tx.checkIn.findMany({ where: { userId, checkinDateKey: { in: weekDateKeys } }, select: { checkinDateKey: true } }),
-    tx.entertainmentDailyDraw.findMany({ where: { userId, dateKey: { in: weekDateKeys } }, select: { dateKey: true } }),
-    tx.pointLog.findMany({ where: { userId, action: 'COMMENT_POST', points: { gt: 0 }, createdAt: { gte: range.start, lt: range.end } }, select: { dateKey: true, createdAt: true } }),
-    tx.pointLog.findMany({ where: { userId, growthTaskCode: { in: actionTaskCodes }, points: { gt: 0 }, createdAt: { gte: range.start, lt: range.end } }, select: { growthTaskCode: true, dateKey: true, createdAt: true } }),
+    tx.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: todayTaskCodes }, periodKey: { in: weekDateKeys }, completedAt: before ? { lt: before } : undefined }, select: { taskCode: true, periodKey: true } }),
+    tx.checkIn.findMany({ where: { userId, checkinDateKey: { in: weekDateKeys }, createdAt: before ? { lt: before } : undefined }, select: { checkinDateKey: true } }),
+    tx.entertainmentDailyDraw.findMany({ where: { userId, dateKey: { in: weekDateKeys }, createdAt: before ? { lt: before } : undefined }, select: { dateKey: true } }),
+    tx.pointLog.findMany({ where: { userId, action: 'COMMENT_POST', points: { gt: 0 }, createdAt: { gte: range.start, lt: rangeEnd } }, select: { dateKey: true, createdAt: true } }),
+    tx.pointLog.findMany({ where: { userId, growthTaskCode: { in: actionTaskCodes }, points: { gt: 0 }, createdAt: { gte: range.start, lt: rangeEnd } }, select: { growthTaskCode: true, dateKey: true, createdAt: true } }),
   ])
   const commentRewardCountsByDate = new Map<string, number>(weekDateKeys.map((dateKey) => [dateKey, 0]))
   for (const row of commentRewards) {

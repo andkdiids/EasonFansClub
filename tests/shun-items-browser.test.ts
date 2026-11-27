@@ -77,6 +77,62 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
         await context.close()
       }
     }
+
+    await prisma.user.update({ where: { id: sender.id }, data: { points: 20 } })
+    await prisma.user.update({ where: { id: receiver.id }, data: { points: 50 } })
+    await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [sender.id, receiver.id])
+      for (const [userId, code] of [[sender.id, 'TARGET_FRIEND'], [receiver.id, 'RETRY_CAPTURE'], [receiver.id, 'REVENGE']] as const) {
+        await postShunItemMovement(tx, {
+          userId, code, type: 'DAILY_MAIN', day: shunDay(new Date()),
+          requestKey: 'browser-' + code, configVersion: active.version,
+        })
+      }
+    })
+    const actorContext = await browser.newContext({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' })
+    const victimContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
+    try {
+      await actorContext.addCookies([{ name: authCookieName, value: await createSessionToken(sender), url: base }])
+      const actorPage = await actorContext.newPage()
+      await actorPage.goto(base + '/shun-master?items=1')
+      const itemBox = actorPage.getByRole('dialog', { name: /百宝箱/ })
+      await itemBox.getByRole('button', { name: '选择好友', exact: true }).click()
+      await itemBox.getByRole('button', { name: receiver.nickname, exact: true }).click()
+      const result = actorPage.getByRole('dialog', { name: '顺走啦！' })
+      await result.getByRole('button', { name: '不留言并再顺一手' }).waitFor()
+      await result.getByRole('button', { name: '匿名留言', exact: true }).click()
+      await actorPage.getByRole('textbox', { name: '匿名留言内容' }).fill('隔离测试中的匿名留言')
+      await actorPage.getByRole('button', { name: '发送匿名留言' }).click()
+      const round = await prisma.shunMasterRound.findFirstOrThrow({
+        where: { actorId: sender.id, victimId: receiver.id }, orderBy: { createdAt: 'desc' },
+      })
+      assert.equal(await prisma.shunItemRoundEffect.count({ where: { roundId: round.id, code: 'TARGET_FRIEND' } }), 1)
+      await actorPage.getByText('留言已送达', { exact: false }).first().waitFor()
+
+      await victimContext.addCookies([{ name: authCookieName, value: await createSessionToken(receiver), url: base }])
+      const victimPage = await victimContext.newPage()
+      await victimPage.goto(base + '/shun-master?record=' + round.id)
+      const card = victimPage.locator('#shun-record-' + round.id)
+      await card.getByRole('button', { name: '立即调查' }).click()
+      const investigation = card.getByRole('region', { name: '抓捕追回' })
+      await investigation.waitFor()
+      assert.equal(await investigation.getByRole('radio').count(), 2)
+      await victimPage.screenshot({ path: join(output, 'v42-h5-inline-investigation.png') })
+      await investigation.locator('label').filter({ hasNotText: sender.nickname }).getByRole('radio').check()
+      await investigation.getByRole('button', { name: '确认抓捕' }).click()
+      await card.getByText('让 TA 溜了！').waitFor()
+      await card.getByRole('button', { name: '使用时光倒流' }).click()
+      await card.getByText(/时光倒流 · 已追回/).waitFor()
+      await card.getByRole('button', { name: '使用最佳损友' }).click()
+      await card.getByText(/最佳损友 · 反击/).waitFor()
+      await victimPage.screenshot({ path: join(output, 'v42-h5-record-effects.png') })
+      await victimPage.reload()
+      await card.getByText(/时光倒流 · 已追回/).waitFor()
+      await card.getByText(/最佳损友 · 反击/).waitFor()
+    } finally {
+      await actorContext.close()
+      await victimContext.close()
+    }
   } finally {
     await browser.close()
     await prisma.$disconnect()

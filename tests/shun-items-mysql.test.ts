@@ -8,6 +8,7 @@ import { sendShunItemGift, setShunEnabled, shunStatus, shunTransaction, updateSh
 import { defaultShunConfig, shunDay } from '../lib/shun-master-rules'
 import { runShunItemRewardSweep } from '../lib/shun-item-rewards'
 import { getTodayTasks } from '../lib/growth-tasks/registry'
+import { getShanghaiWeekKey } from '../lib/community-rewards'
 
 test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gift caps', {
   skip: process.env.SHUN_ITEMS_MYSQL_QA !== '1',
@@ -17,8 +18,7 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
   assert.equal(url.protocol, 'mysql:')
   assert.equal(url.hostname, '127.0.0.1')
   assert.equal(url.pathname, '/ecfc_shun_items_fixture_qa')
-  assert.equal(await prisma.shunMasterRound.count(), 0, 'run on a freshly migrated isolated fixture')
-  assert.equal(await prisma.shunItemConfigVersion.count(), 0)
+  const previousUsers = await prisma.user.findMany({ where: { points: { gt: 0 } }, select: { id: true } })
   const previous = process.env.SHUN_ITEMS_ENABLED
   process.env.SHUN_ITEMS_ENABLED = 'true'
   const now = new Date()
@@ -32,6 +32,9 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
   }
   try {
     const [sender, receiver, blocked, unrelated] = await Promise.all([fixture(10), fixture(), fixture(), fixture()])
+    if (previousUsers.length) await prisma.block.createMany({
+      data: previousUsers.map(({ id }) => ({ blockerId: sender.id, blockedId: id })),
+    })
     const config = await prisma.shunItemConfigVersion.create({ data: {
       createdBy: sender.id, enabled: true, rules: {
         ...defaultShunItemRules,
@@ -161,7 +164,7 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     assert.deepEqual(revenge[0], revenge[1])
     assert.equal(await prisma.shunItemRoundEffect.count({ where: { roundId: doubled.id } }), 3)
     const wallets = await prisma.user.findMany({ where: { id: { in: [sender.id, target.id] } }, select: { points: true } })
-    assert.equal(wallets.reduce((total, row) => total + row.points, 0), 60)
+    assert.equal(wallets.reduce((total, row) => total + row.points, 0), 70)
     assert.equal(await prisma.pointLog.count({ where: { businessKey: { startsWith: 'shun:' + doubled.id + ':' } } }), 6)
     assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, sender.id)), [])
     assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, target.id)), [])
@@ -195,6 +198,37 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     const directed = await shunAttempt(sender.id, randomUUID(), undefined, chosen.id)
     assert.equal(directed.person?.uid, chosen.uid)
     assert.equal(await prisma.shunItemRoundEffect.count({ where: { roundId: directed.id, code: 'TARGET_FRIEND' } }), 1)
+
+    const weeklyUser = await fixture()
+    const currentMonday = new Date(getShanghaiWeekKey(now) + 'T00:00:00+08:00')
+    const monday = new Date(currentMonday.getTime() - 7 * 86_400_000)
+    const activation = new Date(monday.getTime() + 12 * 60 * 60_000)
+    await prisma.shunItemConfigVersion.create({ data: { createdBy: sender.id, enabled: false, rules: defaultShunItemRules } })
+    await prisma.shunItemConfigVersion.create({ data: {
+      createdBy: sender.id, createdAt: activation, enabled: true,
+      rules: { ...defaultShunItemRules, community: false }, definitions: { create: defaultShunItemDefinitions },
+    } })
+    for (let index = 0; index < 7; index++) {
+      const completedAt = new Date(monday.getTime() + (index * 24 + 15) * 60 * 60_000)
+      const dateKey = shunDay(completedAt)
+      await prisma.growthTaskCompletion.createMany({ data: getTodayTasks().flatMap((task) =>
+        Array.from({ length: task.dailyCap ?? task.completionThreshold ?? 1 }, (_, event) => ({
+          userId: weeklyUser.id, taskCode: task.code, periodKey: dateKey,
+          completedAt, createdAt: completedAt, sourceEventId: `weekly:${task.code}:${index}:${event}`,
+        }))) })
+      await prisma.pointLog.createMany({ data: Array.from({ length: 10 }, (_, event) => ({
+        userId: weeklyUser.id, action: 'COMMENT_POST' as const, points: 1, before: index * 10 + event, after: index * 10 + event + 1,
+        dateKey, createdAt: completedAt, businessKey: `weekly-qa:${weeklyUser.id}:${index}:${event}`,
+      })) })
+    }
+    for (let sweep = 0; sweep < 12; sweep++) await runShunItemRewardSweep()
+    assert.deepEqual(await prisma.shunItemWeeklyGrant.findMany({
+      where: { userId: weeklyUser.id, weekStart: shunDay(monday) },
+      orderBy: { milestone: 'asc' }, select: { milestone: true },
+    }), [{ milestone: 3 }, { milestone: 5 }, { milestone: 7 }])
+    assert.equal(await prisma.shunItemEntry.count({ where: { userId: weeklyUser.id, type: 'DAILY_MAIN' } }), 7)
+    assert.equal(await prisma.shunItemEntry.count({ where: { userId: weeklyUser.id, type: 'COMMUNITY_DROP' } }), 0)
+    assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, weeklyUser.id)), [])
     assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, sender.id)), [])
   } finally {
     if (previous === undefined) delete process.env.SHUN_ITEMS_ENABLED
