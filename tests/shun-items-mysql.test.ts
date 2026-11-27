@@ -236,6 +236,33 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     }), 1)
     assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, compensatedVictim.id)), [])
 
+    const cappedVictim = await fixture(70)
+    const contenders = await Promise.all(Array.from({ length: 5 }, () => fixture()))
+    await prisma.friendship.createMany({ data: contenders.map(({ id }) => {
+      const [userAId, userBId] = [id, cappedVictim.id].sort()
+      return { userAId, userBId }
+    }) })
+    await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, contenders.map(({ id }) => id))
+      for (const { id } of contenders) await postShunItemMovement(tx, {
+        userId: id, code: 'TARGET_FRIEND', day, type: 'WEEKLY_REWARD',
+        configVersion: config.version, requestKey: 'cap-test',
+      })
+    })
+    const directedRequests = await Promise.allSettled(contenders.map(({ id }) =>
+      shunAttempt(id, randomUUID(), undefined, cappedVictim.id)))
+    assert.equal(directedRequests.filter(({ status }) => status === 'fulfilled').length, 4)
+    const taken = await prisma.shunMasterRound.findMany({ where: { victimId: cappedVictim.id, day } })
+    assert.equal(taken.length, 4)
+    assert.equal((await shunStatus(cappedVictim.id)).received, 4)
+    assert.equal(await prisma.pointLog.count({ where: {
+      action: 'SHUN_STEAL', userId: { in: [cappedVictim.id, ...contenders.map(({ id }) => id)] },
+    } }), 8)
+    const remainingStocks = await prisma.shunItemInventory.aggregate({
+      where: { code: 'TARGET_FRIEND', userId: { in: contenders.map(({ id }) => id) } }, _sum: { available: true },
+    })
+    assert.equal(remainingStocks._sum.available, 1)
+
     const weeklyUser = await fixture()
     const currentMonday = new Date(getShanghaiWeekKey(now) + 'T00:00:00+08:00')
     const monday = new Date(currentMonday.getTime() - 7 * 86_400_000)
