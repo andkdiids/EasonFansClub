@@ -61,7 +61,7 @@ test('clinic interaction routes require server transactions and database-backed 
   const service = read('lib/clinic-service.ts')
   assert.match(service, /prisma\.\$transaction\(async \(tx\)/)
   assert.match(service, /P2002/)
-  assert.match(read('app/api/admin/clinic/route.ts'), /requireAdmin\('clinic_manage'\)/)
+  assert.match(read('app/api/admin/clinic/route.ts'), /requireAdmin\('clinic_manage', request\)/)
   assert.match(read('app/api/clinic/[recordId]/route.ts'), /getPublicClinicRecordDetail/)
   assert.match(read('middleware.ts'), /'\/clinic'/)
   assert.match(read('middleware.ts'), /'\/api\/clinic\/'/)
