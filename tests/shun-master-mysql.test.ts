@@ -153,7 +153,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     const lowBudgetTarget = await createUser(20)
     const lowBudgetAttempt = await shunAttempt(owner.id, randomUUID())
     assert.ok(lowBudgetAttempt.amount >= 1 && lowBudgetAttempt.amount <= 7)
-    await seedRefusal(lowBudgetTarget.id)
+    assert.equal(lowBudgetAttempt.person?.uid, lowBudgetTarget.uid)
     assert.equal((await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })).reserved,
       expired.amount + lowBudgetAttempt.amount)
     await updateShunConfig(operator.id, config)
@@ -174,7 +174,8 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
 
     const [limitActor, ...targets] = await Promise.all([createUser(), ...Array.from({ length: 10 }, () => createUser(1))])
     await publish(config)
-    for (const user of [victim, ...actors]) await seedRefusal(user.id)
+    // Reset balances in this disposable fixture to isolate the one-point targets.
+    await prisma.user.updateMany({ where: { id: { notIn: targets.map(({ id }) => id) } }, data: { points: 0 } })
     const dayResults = await Promise.allSettled(Array.from({ length: 10 }, () => shunAttempt(limitActor.id, randomUUID())))
     const won = dayResults.flatMap((outcome) => outcome.status === 'fulfilled' ? [outcome.value] : [])
     assert.equal(won.length, 7)
@@ -193,7 +194,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     assert.equal((await shunStatus(invalidLegacyBalance.id)).remaining, 7)
 
     // Expose only one funded target and its linked account for a hot-account wave.
-    for (const user of [limitActor, ...targets, overflow, invalidLegacyBalance]) await seedRefusal(user.id)
+    await prisma.user.updateMany({ data: { points: 0 } })
     const contact = randomUUID() + '@example.invalid'
     const scaleUsers = Array.from({ length: 1500 }, (_, index) => {
       const id = 'shun-scale-' + index
