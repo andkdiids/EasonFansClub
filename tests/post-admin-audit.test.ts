@@ -26,7 +26,7 @@ test('帖子审核历史与管理员审计模型保存快照且支持账号删�
 })
 
 test('审核和帖子管理操作使用 authenticated operator、事务及 append-only 记录', () => {
-  assert.match(reviewRoute, /requireAdmin\('post_manage'\)/)
+  assert.match(reviewRoute, /requireAdmin\('post_manage', request\)/)
   assert.match(reviewRoute, /body\.rejectionReason.*trim\(\)/)
   assert.match(reviewRoute, /拒绝帖子时必须填写拒绝理由/)
   assert.match(reviewRoute, /canTransitionPostModerationStatus\(current\.moderationStatus, status\)/)

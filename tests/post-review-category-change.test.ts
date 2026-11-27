@@ -12,7 +12,7 @@ const transaction = reviewRoute.slice(reviewRoute.indexOf('prisma.$transaction')
 
 test('CASE 7/10 只有拥有 post_manage 的管理员能审核/调整发布分区（服务端权限复检）', () => {
   const get = reviewRoute.slice(reviewRoute.indexOf('export async function GET'), reviewRoute.indexOf('export async function PATCH'))
-  assert.match(get, /const guard = await requireAdmin\('post_manage'\)/)
+  assert.match(get, /const guard = await requireAdmin\('post_manage', request\)/)
   assert.match(patch, /const guard = await requireRequestAdmin\(request, 'post_manage'\)/)
 })
 
