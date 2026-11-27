@@ -79,7 +79,7 @@ test('管理员页面选择服务端漏签列表，业务日期为YYYY-MM-DD并�
 
 test('管理员查询接口服务端计算漏签，提交再次校验权限、注册日期、过去日期和重复签到', () => {
   const route = source('app/api/admin/checkin-makeup/route.ts')
-  assert.match(route, /requireAdmin\('checkin_manage'\)/)
+  assert.match(route, /requireAdmin\('checkin_manage', request\)/)
   assert.match(route, /eligibleMissingDates/)
   assert.match(route, /checkinDateKey: \{ gte: window\.startDateKey, lt: todayKey \}/)
   assert.match(route, /getShanghaiDateKey\(targetUser\.createdAt\)/)

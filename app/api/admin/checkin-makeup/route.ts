@@ -20,7 +20,7 @@ const MAKEUP_TRANSACTION_OPTIONS = {
 } as const
 
 export async function GET(request: Request) {
-  const guard = await requireAdmin('checkin_manage')
+  const guard = await requireAdmin('checkin_manage', request)
   if (!guard.user) return guard.response
   const searchParams = new URL(request.url).searchParams
   const previewUserId = sanitizeText(searchParams.get('userId'), 100)
@@ -111,7 +111,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (rejectInvalidRequestOrigin(request)) return NextResponse.json({ message: '请求来源校验失败' }, { status: 403 })
-  const guard = await requireAdmin('checkin_manage')
+  const guard = await requireAdmin('checkin_manage', request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null) as { userId?: unknown; dates?: unknown; date?: unknown; targetDate?: unknown; targetDateKey?: unknown; reason?: unknown } | null
   const userId = sanitizeText(body?.userId, 100)

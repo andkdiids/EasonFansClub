@@ -82,6 +82,34 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.ok(profileEdit.detail.changedFields.split('、').includes('bio'))
   assert.equal(profileEdit.detail.oldValue, undefined)
 
+  const makeup = origin + '/api/admin/checkin-makeup'
+  const previewUrl = makeup + '?' + new URLSearchParams({ userId: target.id, rangeDays: '30' })
+  assert.equal((await fetch(previewUrl, { headers: targetBearer })).status, 403)
+  await prisma.user.update({ where: { id: target.id }, data: { createdAt: new Date('2020-01-01T00:00:00Z') } })
+  const preview = await fetch(previewUrl, { headers: adminBearer })
+  assert.equal(preview.status, 200)
+  const [date] = (await preview.json()).eligibleMissingDates
+  assert.match(date, /^\d{4}-\d{2}-\d{2}$/)
+  const reason = '隔离数据库审核验证'
+  const submit = (headers: Record<string, string>) => fetch(makeup, {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: target.id, dates: [date], reason }),
+  })
+  assert.equal((await submit(targetBearer)).status, 403)
+  assert.equal((await submit({ ...adminBearer, Origin: 'https://untrusted.example.invalid' })).status, 403)
+  assert.equal((await submit(adminBearer)).status, 201)
+  assert.equal((await submit(adminBearer)).status, 409)
+  assert.equal(await prisma.adminActionLog.count({
+    where: { action: 'CHECK_IN_ADMIN_MAKEUP', adminId: admin.id, targetUserId: target.id },
+  }), 1)
+  const recordUrl = makeup + '/records?' + new URLSearchParams({ q: String(target.uid), type: 'ADMIN' })
+  assert.equal((await fetch(recordUrl, { headers: targetBearer })).status, 403)
+  const recordRead = await fetch(recordUrl, { headers: adminBearer })
+  assert.equal(recordRead.status, 200)
+  const { records } = await recordRead.json()
+  assert.equal(records.length, 1)
+  assert.equal(records[0].dateKey, date)
+  assert.equal(records[0].operator.reason, reason)
   const admins = origin + '/api/admin/admins'
   const grant = (headers: Record<string, string>, userId: string, permissions: string[]) =>
     fetch(admins, {

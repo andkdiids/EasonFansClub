@@ -94,6 +94,7 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
     assert.equal(opened.status, 200)
     const receivedLetter = await opened.json()
     assert.equal(receivedLetter.content, note)
+    assert.equal(receivedLetter.result, null)
     assert.equal(receivedLetter.sender, undefined)
     assert.equal(receivedLetter.senderId, undefined)
     assert.equal(round.id, rounds[1].id)

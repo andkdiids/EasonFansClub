@@ -25,7 +25,7 @@ function parsePositiveInt(value: string | null, fallback: number, max: number) {
 }
 
 export async function GET(request: Request) {
-  const guard = await requireAdmin('checkin_manage')
+  const guard = await requireAdmin('checkin_manage', request)
   if (!guard.user) return guard.response
 
   const { searchParams } = new URL(request.url)
