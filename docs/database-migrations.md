@@ -59,3 +59,15 @@ pnpm migration:check:mysql
 ```
 
 本地没有 MySQL runtime 时，不得声称 baseline 已通过真实空库回放。
+
+## 顺大师 V4.2 隔离空库初始化
+
+`schema.prisma` 和 `migration_lock.toml` 都使用 MySQL。历史 PostgreSQL 文件保留供迁移历史追溯，MySQL 原始回放遇到这些文件仍会失败。现有 MySQL 的增量升级应遵循上文的 preflight 和发布流程。
+
+在本机专用 MySQL 实例，可使用固定的 MySQL 数据模型 `ed804daa` 初始化空夹具，再顺序执行两条原样 V4.2 增量 SQL。此路径验证 DDL 和账务，仅适用于空 QA 库。命令从真实 Git 工作树根目录运行：
+
+```text
+pnpm exec tsx scripts/bootstrap-shun-items-qa.ts <mysql-client> ecfc_shun_bootstrap_qa 33327
+```
+
+脚本限定回环连接、隔离端口和 QA 库名，遇到已有库即停止。每次重跑应使用新的 QA 库名。它执行正式 SQL 文件，保留 MySQL CHECK 约束，并从原迁移读取顺大师默认设置。它不写 `_prisma_migrations`，因此这个夹具不能直接用来证明生产账本一致性，也不能作为生产接管流程使用。生产历史需要按审批流程单独审查。

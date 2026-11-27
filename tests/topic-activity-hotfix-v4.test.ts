@@ -286,6 +286,20 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   for (const name of ['MobilePushTokenStatus', 'MobilePushToken', 'MobilePushDeliveryStatus', 'MobilePushDelivery']) {
     assert.ok(comparableBlocks.delete(name), `mobile push schema block registered: ${name}`)
   }
+  // V4.2 changes are independently checked against their exact additive footprint.
+  for (const [model, index] of [
+    ['DirectMessage', '@@index([type, createdAt, id], map: "DirectMessage_shun_share_scan_idx")'],
+    ['GrowthTaskCompletion', '@@index([createdAt, id], map: "GrowthTaskCompletion_shun_scan_idx")'],
+  ] as const) {
+    const fields = comparableBlocks.get(model)!
+    assert.equal(fields.filter((field) => field === index).length, 1)
+    comparableBlocks.set(model, fields.filter((field) => field !== index))
+  }
+  for (const name of ['ShunItemCode', 'ShunItemEventType', 'ShunItemConfigVersion', 'ShunItemDefinition',
+    'ShunItemInventory', 'ShunItemPending', 'ShunItemEntry', 'ShunItemDaily', 'ShunItemDailyCounter',
+    'ShunItemWeeklyGrant', 'ShunItemGift', 'ShunItemRoundEffect', 'ShunItemRewardEvent']) {
+    assert.ok(comparableBlocks.delete(name), `required Shun V4.2 schema block retained: ${name}`)
+  }
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
   const pushMigration = read('prisma/migrations/20261126040000_add_mobile_push_tokens/migration.sql')
   assert.match(pushMigration, /CREATE TABLE `MobilePushToken`/)
