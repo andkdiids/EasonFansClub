@@ -12,6 +12,7 @@ import { publicImageUrl } from '@/lib/images'
 // state flips at exactly the boundary the server enforces.
 import { SHUN_CLOSED_TITLE, isShunOpen, shunOpenHoursHelp, shunOpenHoursHint, shunOpenHoursLine } from '@/lib/shun-open-hours'
 import { formatUid } from '@/lib/uid'
+import { ShunItemBox, type GiftDelivery, type ShunBoxData } from './ShunItemBox'
 import styles from './shun.module.css'
 
 const MESSAGE_MAX = 60
@@ -22,14 +23,14 @@ type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' 
   /** Platform bonus granted on a successful capture (0 when the roll lost). */
   bonusAwarded?: number
   /** Capturer side: this capture already carries a delivered counter note. */
-  hasCaptureLetter?: boolean }
+  hasCaptureLetter?: boolean; itemOutcomes?: { code: string; amount: number }[] }
 type OpenHours = { openHoursEnabled: boolean; openTime: string; closeTime: string; label: string; open: boolean; nextOpenAt: string | null }
 type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number
   /** V6: the daily window exactly as the server judged it for `serverNow`. */
   openHours?: OpenHours
   serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null; windowAt: string }
-type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
+type Capture = { mode: number; golden?: boolean; candidates: Person[]; serverNow: string; goldenUntil: string }
 type Side = 'in' | 'out'
 
 class RequestError extends Error {
@@ -58,12 +59,19 @@ function PersonLabel({ person, link = false }: { person: Person | null; link?: b
     : <span className={styles.person}>{content}</span>
 }
 
-export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId, autoCaptureLetterId }: {
-  focusedRecord?: string; initialSide: Side; initialGuest: boolean; autoLetterId?: string
+export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, autoLetterId, autoCaptureLetterId, initialItemsOpen = false, sessionUserId }: {
+  focusedRecord?: string; sessionUserId?: string; initialItemsOpen?: boolean; initialSide: Side; initialGuest: boolean; autoLetterId?: string
   /** V5:一-shot flag from a capture notice that carries a counter note. */
   autoCaptureLetterId?: string
 }) {
   const [status, setStatus] = useState<Status>()
+  const [box, setBox] = useState<ShunBoxData>()
+  const [boxOpen, setBoxOpen] = useState(initialItemsOpen)
+  const [newItems, setNewItems] = useState(false)
+  const [boxError, setBoxError] = useState('')
+  const [delivery, setDelivery] = useState<GiftDelivery>()
+  const boxRequests = useRef(new Map<string, string>())
+  const targetRequest = useRef<string | undefined>(undefined)
   const [side, setSide] = useState<Side>(initialSide)
   const [range, setRange] = useState('all')
   const [dateKey, setDateKey] = useState('')
@@ -115,6 +123,33 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const captureLetterRequested = useRef(false)
   // A notification deep link must land on its record once, not on every render.
   const focusOnce = useRef(false)
+  const loadItems = useCallback(async () => {
+    try {
+      const data = await api<ShunBoxData>('items')
+      setBox(data)
+      if (data.enabled) {
+        const acquisition = data.history.find((entry) => ['DAILY_MAIN', 'COMMUNITY_DROP', 'WEEKLY_REWARD', 'GIFT_RECEIVED'].includes(entry.type))
+        try { setNewItems(!!acquisition && sessionStorage.getItem('ecfc-shun-last-viewed-item') !== acquisition.id) }
+        catch { setNewItems(false) }
+      }
+    } catch {
+      // A box refresh is independent of fee settlement and the letter flow.
+    }
+  }, [])
+  useEffect(() => {
+    const refresh = () => void loadItems()
+    window.addEventListener('shun-item-acquired', refresh)
+    return () => window.removeEventListener('shun-item-acquired', refresh)
+  }, [loadItems])
+  useEffect(() => {
+    if (!boxOpen || !box?.enabled) return
+    const entry = box.history.find((row) => ['DAILY_MAIN', 'COMMUNITY_DROP', 'WEEKLY_REWARD', 'GIFT_RECEIVED'].includes(row.type))
+    if (entry) {
+      try { sessionStorage.setItem('ecfc-shun-last-viewed-item', entry.id) } catch { /* optional session storage */ }
+    }
+    setNewItems(false)
+  }, [box, boxOpen])
+
   const loadStatus = useCallback(async () => {
     try {
       const response = await api<Status>('status')
@@ -148,7 +183,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       if (version === sequence.current) setLoading(false)
     }
   }, [side, focusedRecord, initialSide, range, dateKey])
-  useEffect(() => { if (!initialGuest) void loadStatus() }, [initialGuest, loadStatus])
+  useEffect(() => { if (!initialGuest) { void loadStatus(); void loadItems() } }, [initialGuest, loadStatus, loadItems])
   const signedIn = !!status
   useEffect(() => { if (signedIn) void loadRecords() }, [signedIn, loadRecords])
   // 「前往调查」从通知里带着 roundId 进来：记录加载完成后滚到对应那条，
@@ -281,27 +316,94 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       if (!response.optedOut) setError('退出未生效，请稍后重试。')
     })
   }
-  function attempt() {
+  const usableItem = (code: string) => box?.enabled && box.items.some((item) => item.code === code && item.enabled && item.available > 0)
+
+  function readPending<T>(action: string): T | undefined {
+    if (!sessionUserId) return undefined
+    try {
+      const value = sessionStorage.getItem(`shun-request:${sessionUserId}:${action}`)
+      return value ? JSON.parse(value) as T : undefined
+    } catch { return undefined }
+  }
+
+  function savePending(action: string, value?: unknown) {
+    if (!sessionUserId) return
+    const key = `shun-request:${sessionUserId}:${action}`
+    try {
+      if (value === undefined) sessionStorage.removeItem(key)
+      else sessionStorage.setItem(key, JSON.stringify(value))
+    } catch { /* The in-memory request is still available in this tab. */ }
+  }
+
+  function isRejectedRequest(error: unknown) {
+    return error instanceof RequestError && error.status && error.status < 500 && error.status !== 429
+  }
+
+  async function submitBoxItem(action: string, fields: Record<string, unknown> = {}) {
+    await perform(action, async () => {
+      setBoxError('')
+      const key = JSON.stringify([action, fields])
+      const itemRequestId = boxRequests.current.get(key) ?? readPending<string>(key) ?? crypto.randomUUID()
+      boxRequests.current.set(key, itemRequestId)
+      savePending(key, itemRequestId)
+      try {
+        if (action === 'gift') {
+          setDelivery(undefined)
+          setDelivery(await api<GiftDelivery>('gift', { requestId: itemRequestId }))
+        } else {
+          await api(action, { ...fields, requestId: itemRequestId })
+        }
+        boxRequests.current.delete(key)
+        savePending(key)
+        await Promise.all([loadStatus(), loadItems(), ...(action.startsWith('capture/') ? [loadRecords()] : [])])
+      } catch (error) {
+        if (isRejectedRequest(error)) {
+          boxRequests.current.delete(key)
+          savePending(key)
+        }
+        if (boxOpen) setBoxError(error instanceof Error ? error.message : '暂时无法使用道具。')
+        else throw error
+      }
+    })
+  }
+
+  function attempt(friendId?: string) {
     return perform('attempt', async () => {
       setResult(undefined)
       setStep('result')
       setError('')
-      requestId.current ||= crypto.randomUUID()
+      const pending = readPending<{ id: string; friendId?: string }>('attempt')
+      if (!requestId.current && pending) {
+        requestId.current = pending.id
+        targetRequest.current = pending.friendId
+      }
+      if (requestId.current && friendId && friendId !== targetRequest.current) {
+        throw new RequestError('请先重试上一笔顺取。')
+      }
+      if (!requestId.current) {
+        targetRequest.current = friendId
+        requestId.current = crypto.randomUUID()
+        savePending('attempt', { id: requestId.current, friendId })
+      }
       try {
-        const round = await api<Round>('attempt', { requestId: requestId.current })
+        const round = await api<Round>('attempt', { requestId: requestId.current, friendId: targetRequest.current })
         setBusy('animation')
         const wait = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1600
         await Promise.all([
-          loadStatus(), loadRecords(),
+          loadStatus(), loadRecords(), loadItems(),
           new Promise((resolve) => window.setTimeout(resolve, wait)),
         ])
         requestId.current = null
+        savePending('attempt')
         setMessage('')
         setNotice('')
         setStep('result')
         setResult(round)
       } catch (error) {
-        if (error instanceof RequestError && error.status && error.status < 500 && error.status !== 429) requestId.current = null
+        if (isRejectedRequest(error)) {
+          requestId.current = null
+          savePending('attempt')
+        }
         // A take refused by the daily window means the page is out of date (e.g.
         // it was open when the page loaded and closed while it sat there): pull
         // the authoritative state so the button and the copy flip immediately.
@@ -317,18 +419,20 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
    * still delivers the plain notification, so a lost response can never leave
    * the victim unnotified.
    */
-  async function sendPlain() {
+  async function sendPlain(continueTaking = false) {
     const round = result
     if (!round || lock.current || step === 'sending') return
     lock.current = true
+    let notified = false
     setBusy('notify')
     setError('')
     try {
       await api<{ status: string }>(`round/${round.id}/notify`, {})
+      notified = true
       setResult(undefined)
       setStep('result')
       setMessage('')
-      setNotice('已发送被顺通知。')
+      setNotice(continueTaking ? '' : '今日收工，明天继续！')
       await Promise.all([loadStatus(), loadRecords()])
     } catch (error) {
       setError(error instanceof Error ? error.message : '通知发送失败，请重试。')
@@ -336,6 +440,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       lock.current = false
       setBusy('')
     }
+    if (notified && continueTaking) await attempt()
   }
   /** Sends the letter, then plays the delivery animation — only after the server confirms. */
   async function sendLetter() {
@@ -380,6 +485,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   }
   async function openCapture(id: string) {    const response = await api<Capture | { record: Round }>(`capture/${id}/start`, {})
     setSelected(undefined)
+    setCaught(undefined)
+    setCaptureStep('result')
+    setCaptureMessage('')
     if ('record' in response) { setCaught(response.record); setCapture(undefined); return }
     setClockOffset(Date.parse(response.serverNow) - Date.now())
     setCapture({ id, data: response })
@@ -544,71 +652,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   // Same 60-character contract for the capture counter note.
   const captureLength = [...captureMessage.trim()].length
   const canSendCapture = captureLength > 0 && captureLength <= MESSAGE_MAX && !busy
-  return <main className={styles.page}>
-    <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div></header>
-    {error && <p className={styles.alert} role="alert">{error}</p>}
-    {notice && <p className={styles.notice} role="status">{notice}</p>}
-    <div className={styles.columns}>
-      <section className={styles.panel} data-matching={busy === 'animation'}>
-        <ShunMasterArt />
-        {guest && <Link href="/login?callbackUrl=%2Fshun-master">登录参与顺大师</Link>}
-        {!guest && !status && <button onClick={() => void loadStatus()}>刷新状态</button>}
-        {status && <>
-          <dl className={styles.stats}>
-            <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
-            <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
-          </dl>
-          {status.optedOut ? <p className={styles.optedOut} role="status">
-            <strong>你已永久退出顺大师</strong>
-            <span>今后你不会再被顺取挂号费，也无法继续顺取其他 EF。</span>
-          </p> : !status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <>
-            {/* 休息提示：标题与两行说明全部来自服务端配置，后台改时间即时生效。 */}
-            {!openNow && openHours && <section className={styles.closed} role="status" aria-live="polite">
-              <strong>{SHUN_CLOSED_TITLE}</strong>
-              <p>{shunOpenHoursHint(openHours)}</p>
-              <p className={styles.hours}>{shunOpenHoursLine(openHours)}</p>
-            </section>}
-            <button className={styles.primary} disabled={!!busy || !status.remaining || !openNow} onClick={() => void attempt()}>
-              {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…'
-                : !openNow ? '休息中 💤' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
-            </button>
-          </>}
-        </>}
-        <details><summary>玩法说明</summary>
-          <h2>顺大师 · 玩法说明</h2>
-          <p>顺一手，缘分随天。</p>
-          <p>每天有 {status?.attempts ?? 7} 次「顺一手」的机会，每次随机顺走一位幸运 EF 的 1–7 挂号费，每人每天最多被顺 {status?.victimCap ?? 4} 次。</p>
-          <p>被顺走挂号费后，你会收到站内通知，并获得一次抓捕机会。</p>
-          <p>{status?.goldenMinutes ?? 10} 分钟内抓捕：二选一。</p>
-          <p>超过 {status?.goldenMinutes ?? 10} 分钟：三选一。</p>
-          <p>猜中即可追回被顺走的挂号费，猜错则无法追回。</p>
-          <p>每日机会于北京时间 00:00 重置。</p>
-          {openHours && <p>{shunOpenHoursHelp(openHours)}</p>}
-          <div className={styles.optOutArea}>
-            {status?.optedOut
-              ? <p className={styles.optOutDone}>你已永久退出顺大师，无法重新加入。</p>
-              : <>
-                <p>不想参与顺大师？</p>
-                <p>你可以选择永久退出，退出后无法重新加入。</p>
-                <button type="button" className={styles.optOutLink} onClick={() => { setOptOutAck(false); setOptOutOpen(true) }}>永久退出顺大师</button>
-              </>}
-          </div>
-        </details>
-      </section>
-      {status && <section className={styles.panel} aria-label="历史记录" id="shun-records" tabIndex={-1}>
-        <div className={styles.tabs} aria-label="记录类别">
-          <button aria-pressed={side === 'out'} onClick={() => { setSide('out'); setCapture(undefined); setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>我顺了谁</button>
-          <button aria-pressed={side === 'in'} onClick={() => { setSide('in'); setCapture(undefined); setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>谁顺了我</button>
-        </div>
-        <div className={styles.filters}>
-          <label>记录日期 <select value={range} onChange={(event) => setRange(event.target.value)}>
-            <option value="all">全部记录</option><option value="today">今天</option><option value="yesterday">昨天</option>
-            <option value="week">本周</option><option value="date">选择日期</option>
-          </select></label>
-          {range === 'date' && <input type="date" aria-label="选择北京时间日期" value={dateKey} onChange={(event) => setDateKey(event.target.value)} />}
-        </div>
-        {capture && <section className={styles.capture} aria-label="抓捕追回" id="shun-capture" tabIndex={-1}>
-          <h2>{capture.data.mode === 2 ? `黄金抓捕期 · ${countdown(remaining(capture.data.goldenUntil))}` : '三选一抓捕'}</h2>
+  const investigation = (recordId: string | undefined) => <>
+        {capture && capture.id === recordId && <section className={styles.capture} aria-label="抓捕追回" id="shun-capture" tabIndex={-1}>
+          <h2>{(capture.data.golden ?? capture.data.mode === 2) ? `黄金抓捕期 · ${countdown(remaining(capture.data.goldenUntil))}` : capture.data.mode === 4 ? '四选一抓捕' : '三选一抓捕'}</h2>
           <fieldset><legend>选择一位 EF</legend>{capture.data.candidates.map((person) => <label key={person.uid}>
             <input type="radio" name="suspect" checked={person.uid === selected} onChange={() => setSelected(person.uid)} />
             <PersonLabel person={person} />
@@ -616,7 +662,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <button disabled={!!busy || selected === undefined} onClick={() => void confirmCapture()}>确认抓捕</button>
           <button disabled={!!busy} onClick={() => setCapture(undefined)}>返回记录</button>
         </section>}
-        {caught && <div className={styles.result} role="status" id="shun-caught" tabIndex={-1}>
+        {caught && caught.id === recordId && <div className={styles.result} role="status" id="shun-caught" tabIndex={-1}>
           {caught.result !== 'SUCCESS' ? <>
             <strong>让 TA 溜了！</strong>
             <PersonLabel person={caught.person} link />
@@ -679,6 +725,74 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             </div>
           </>}
         </div>}
+  </>
+  return <main className={styles.page}>
+    <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div>
+      {box?.enabled && <button type="button" className={styles.itemToggle} onClick={() => { setBoxError(''); setBoxOpen(true); void loadItems() }}>百宝箱 · {box.total}{newItems && <span className={styles.itemDot} aria-label="有新道具" />}</button>}
+    </header>
+    {box?.enabled && <ShunItemBox box={box} open={boxOpen} busy={!!busy} errorMessage={boxError} gifting={busy === 'gift'} delivery={delivery}
+      onClose={() => setBoxOpen(false)} onUse={submitBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId) }} />}
+    {error && <p className={styles.alert} role="alert">{error}</p>}
+    {notice && <p className={styles.notice} role="status">{notice}</p>}
+    <div className={styles.columns}>
+      <section className={styles.panel} data-matching={busy === 'animation'}>
+        <ShunMasterArt />
+        {guest && <Link href="/login?callbackUrl=%2Fshun-master">登录参与顺大师</Link>}
+        {!guest && !status && <button onClick={() => void loadStatus()}>刷新状态</button>}
+        {status && <>
+          <dl className={styles.stats}>
+            <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
+            <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
+          </dl>
+          {status.optedOut ? <p className={styles.optedOut} role="status">
+            <strong>你已永久退出顺大师</strong>
+            <span>今后你不会再被顺取挂号费，也无法继续顺取其他 EF。</span>
+          </p> : !status.enabled ? <p>顺大师暂未开放，敬请期待。</p> : <>
+            {/* 休息提示：标题与两行说明全部来自服务端配置，后台改时间即时生效。 */}
+            {!openNow && openHours && <section className={styles.closed} role="status" aria-live="polite">
+              <strong>{SHUN_CLOSED_TITLE}</strong>
+              <p>{shunOpenHoursHint(openHours)}</p>
+              <p className={styles.hours}>{shunOpenHoursLine(openHours)}</p>
+            </section>}
+            <button className={styles.primary} disabled={!!busy || !status.remaining || !openNow} onClick={() => void attempt()}>
+              {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…'
+                : !openNow ? '休息中 💤' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
+            </button>
+          </>}
+        </>}
+        <details><summary>玩法说明</summary>
+          <h2>顺大师 · 玩法说明</h2>
+          <p>顺一手，缘分随天。</p>
+          <p>每天有 {status?.attempts ?? 7} 次「顺一手」的机会，每次随机顺走一位幸运 EF 的 1–7 挂号费，每人每天最多被顺 {status?.victimCap ?? 4} 次。</p>
+          <p>被顺走挂号费后，你会收到站内通知，并获得一次抓捕机会。</p>
+          <p>{status?.goldenMinutes ?? 10} 分钟内抓捕：二选一。</p>
+          <p>超过 {status?.goldenMinutes ?? 10} 分钟：三选一。</p>
+          <p>猜中即可追回被顺走的挂号费，猜错则无法追回。</p>
+          <p>每日机会于北京时间 00:00 重置。</p>
+          {openHours && <p>{shunOpenHoursHelp(openHours)}</p>}
+          <div className={styles.optOutArea}>
+            {status?.optedOut
+              ? <p className={styles.optOutDone}>你已永久退出顺大师，无法重新加入。</p>
+              : <>
+                <p>不想参与顺大师？</p>
+                <p>你可以选择永久退出，退出后无法重新加入。</p>
+                <button type="button" className={styles.optOutLink} onClick={() => { setOptOutAck(false); setOptOutOpen(true) }}>永久退出顺大师</button>
+              </>}
+          </div>
+        </details>
+      </section>
+      {status && <section className={styles.panel} aria-label="历史记录" id="shun-records" tabIndex={-1}>
+        <div className={styles.tabs} aria-label="记录类别">
+          <button aria-pressed={side === 'out'} onClick={() => { setSide('out'); setCapture(undefined); setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>我顺了谁</button>
+          <button aria-pressed={side === 'in'} onClick={() => { setSide('in'); setCapture(undefined); setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>谁顺了我</button>
+        </div>
+        <div className={styles.filters}>
+          <label>记录日期 <select value={range} onChange={(event) => setRange(event.target.value)}>
+            <option value="all">全部记录</option><option value="today">今天</option><option value="yesterday">昨天</option>
+            <option value="week">本周</option><option value="date">选择日期</option>
+          </select></label>
+          {range === 'date' && <input type="date" aria-label="选择北京时间日期" value={dateKey} onChange={(event) => setDateKey(event.target.value)} />}
+        </div>
         {rows.map((row) => <article className={styles.record} key={row.id} id={`shun-record-${row.id}`} tabIndex={-1}>
           <PersonLabel person={row.person} link />
           <p>{myTime.format(new Date(row.createdAt))} · {side === 'in' ? '−' : '+'}{row.amount} 挂号费</p>
@@ -691,9 +805,19 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           )}
           {side === 'in' && !row.result && (row.canCapture ? <>
             {remaining(row.goldenUntil) > 0 && <span>黄金抓捕期 · {countdown(remaining(row.goldenUntil))}</span>}
-            <button disabled={!!busy} onClick={() => void perform('start', () => openCapture(row.id))}>前往调查</button>
+            <button disabled={!!busy} onClick={() => capture?.id === row.id ? setCapture(undefined) : void perform('start', () => openCapture(row.id))}>{capture?.id === row.id ? '收起调查' : '立即调查'}</button>
           </> : <p>可用嫌疑人不足，本次不可抓捕。</p>)}
+          {row.itemOutcomes?.map((effect) => <p key={effect.code} role="status">
+            {effect.code === 'RETRY_CAPTURE' ? `时光倒流 · 已追回 ${effect.amount} 挂号费` : `最佳损友 · 反击 ${effect.amount} 挂号费`}
+          </p>)}
+          {side === 'in' && row.result === 'FAILED' && !row.itemOutcomes?.some(({ code }) => code === 'RETRY_CAPTURE') && usableItem('RETRY_CAPTURE') &&
+            <button type="button" disabled={!!busy} onClick={() => void submitBoxItem(`capture/${row.id}/retry-item`)}>使用时光倒流</button>}
+          {side === 'in' && (row.result === 'SUCCESS' || row.itemOutcomes?.some(({ code }) => code === 'RETRY_CAPTURE')) &&
+            !row.itemOutcomes?.some(({ code }) => code === 'REVENGE') && usableItem('REVENGE') &&
+            <button type="button" disabled={!!busy} onClick={() => void submitBoxItem(`capture/${row.id}/revenge-item`)}>使用最佳损友</button>}
+          {investigation(row.id)}
         </article>)}
+        {![capture?.id, caught?.id].some((id) => id && rows.some((row) => row.id === id)) && investigation(capture?.id ?? caught?.id)}
         {loading && <p role="status">记录加载中…</p>}
         {recordError && <p role="alert">{recordError} <button onClick={() => void loadRecords()}>重试</button></p>}
         {range === 'date' && !dateKey && <p>请选择日期。</p>}
@@ -705,15 +829,15 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       onCancel={(event) => { event.preventDefault(); closeResult() }}>
       {result && <div className={styles.modalBody}>
         {step === 'delivered' || step === 'expired' ? <>
-          <h2 id="shun-result-title">{step === 'delivered' ? '匿名信已送达 ✉️' : '本次通知已发送'}</h2>
+          <h2 id="shun-result-title">{step === 'delivered' ? '匿名留言已送达！' : '本次通知已发送'}</h2>
           <p className={styles.letterSent}>{step === 'delivered'
             ? 'TA 会在收到挂号费被顺走的同时，读到只有 TA 能看到的这句话。'
             : '普通通知已经送达，无法再补充匿名留言。'}</p>
           <div className={styles.tabs}>
-            <button type="button" disabled={!!busy || !status?.remaining || !status?.enabled || !openNow}
-              onClick={() => { setResult(undefined); void attempt() }}>{!openNow ? '休息中 💤'
-                : status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
-            <button type="button" autoFocus onClick={() => { setResult(undefined); setStep('result') }}>返回顺大师</button>
+            {status?.remaining && status.enabled && openNow
+              ? <button type="button" disabled={!!busy} onClick={() => void attempt()}>再顺一手</button>
+              : <><p>{status?.remaining ? '当前暂不可顺取。' : '今日收工，明天继续！'}</p>
+                <button type="button" onClick={() => { setResult(undefined); setStep('result') }}>完成</button></>}
           </div>
         </> : <>
           <h2 id="shun-result-title">{step === 'write' ? '给 TA 留一句匿名的话' : '顺走啦！'}</h2>
@@ -728,9 +852,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <div className={styles.composeMeta}><span>{messageLength}/{MESSAGE_MAX}</span><span>TA 不会知道是你</span></div>
             <div className={styles.composeActions}>
               <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSend || step === 'sending'}
-                onClick={() => void sendLetter()}>{step === 'sending' ? '发送中…' : '发送留言'}</button>
-              <button type="button" disabled={!!busy || step === 'sending'} onClick={() => { setError(''); setStep('result') }}>返回</button>
-              <button type="button" disabled={!!busy || step === 'sending'} onClick={closeResult}>关闭</button>
+                onClick={() => void sendLetter()}>{step === 'sending' ? '发送中…' : '发送匿名留言'}</button>
+              <button type="button" disabled={!!busy || step === 'sending'} onClick={() => { setError(''); setStep('result') }}>取消留言</button>
             </div>
           </> : <>
             <strong>+{result.amount} 挂号费</strong>
@@ -738,8 +861,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <div className={styles.composeActions}>
               <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
                 onClick={() => { setError(''); setStep('write') }}>匿名留言</button>
-              <button type="button" disabled={!!busy} onClick={() => void sendPlain()}>{busy === 'notify' ? '发送中…' : '不留言'}</button>
-              <button type="button" disabled={!!busy} onClick={closeResult}>关闭</button>
+              <button type="button" disabled={!!busy} onClick={() => void sendPlain(Boolean(status?.remaining))}>{busy === 'notify' ? '发送中…' : status?.remaining ? '不留言并再顺一手' : '不留言'}</button>
             </div>
           </>}
         </>}

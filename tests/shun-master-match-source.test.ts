@@ -73,7 +73,7 @@ test('rule changes bump the rules version, including weights and the friend chan
 
 test('the lottery uses the whole eligible population instead of a 128-row sample', () => {
   assert.match(service, /async function loadTargetPopulation\(rangeStart: Date, day: string, now: Date\): Promise<TargetCandidate\[\]>/)
-  assert.match(service, /SELECT u\.id, u\.uid, u\.lastActiveAt, u\.lastLoginAt FROM User u\s*\n\s*WHERE \$\{candidateAccount\} AND NOT \$\{hasRefusedDebit\} AND \$\{hasSpendableBalance\}/,
+  assert.match(service, /SELECT u\.id, u\.uid, u\.lastActiveAt, u\.lastLoginAt FROM User u\s*\n\s*WHERE \$\{candidateAccount\} AND \$\{hasSpendableBalance\}/,
     '必须读取完整合格候选池，否则人数仍会主导命中率')
   assert.doesNotMatch(service, /LIMIT 128/, '不得再用 128 行采样')
   assert.doesNotMatch(service, /slots/, '不得再用 UID 抽样引入额外偏差')
@@ -97,7 +97,7 @@ test('the draw is: pick a non-empty tier by weight, then one user inside it', ()
 test('the friend pool is a subset of the already eligible targets, never a bypass', () => {
   assert.match(attemptBody, /const friendPool = config\.friendChance > 0 && friendIds\.size\s*\n?\s*\? eligibleTargets\.filter\(\(target\) => friendIds\.has\(target\.id\)\)/,
     '好友池必须来自已通过全部资格规则的候选')
-  assert.match(attemptBody, /const friendPoolUsed = friendPool\.length > 0 && friendPoolDraw\(config\.friendChance, randomInt\)/)
+  assert.match(attemptBody, /const friendPoolUsed = !targeted && friendPool\.length > 0 && friendPoolDraw\(config\.friendChance, randomInt\)/)
   assert.match(attemptBody, /if \(!victim\)/, '抽不到任何目标时必须走原有失败/回退路径')
   // No eligibility predicate is relaxed for friends: the pool query is shared.
   const friendBlock = attemptBody.slice(attemptBody.indexOf('const friendPool ='), attemptBody.indexOf('const victim ='))
@@ -142,9 +142,9 @@ test('the admin surface exposes the friend chance and the read-only statistics',
 
 test('the existing game rules are untouched by the new lottery', () => {
   assert.match(service, /const rolled = weightedIndex\(config\.probabilities\) \+ 1/, '金额仍按七档概率抽取')
-  assert.match(service, /const amount = Math\.min\(rolled, victimBalance\)/, '金额上限仍受账户余额约束')
-  assert.match(service, /if \(played\.length >= config\.attempts\) throw new ShunError\('LIMIT'/, '每日次数不变')
-  assert.match(service, /capped\.filter\(\(row\) => row\._count\._all >= config\.victimCap\)/, '每日被顺上限不变')
+  assert.match(service, /const amount = effect === 'DOUBLE_AMOUNT' \? Math\.min\(rolled \* 2, 14, victimBalance\) : Math\.min\(rolled, victimBalance\)/, '金额上限仍受账户余额约束')
+  assert.match(service, /if \(played\.length >= config\.attempts \+ \(itemDaily\?\.extraAttemptsGranted \?\? 0\)\) \{\s*throw new ShunError\('LIMIT'/, '每日次数不变')
+  assert.match(service, /hitsByUser\]\.filter\(\(\[, count\]\) => count >= config\.victimCap\)/, '每日被顺上限不变')
   assert.match(service, /goldenUntil: new Date\(now\.getTime\(\) \+ config\.goldenMinutes \* 60000\)/, '黄金抓捕期不变')
   assert.match(service, /const compensation = correct \? round\.amount - debit : 0/, '补偿规则不变')
 })

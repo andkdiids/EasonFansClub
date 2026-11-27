@@ -178,10 +178,10 @@ test('顺一手 executes the take directly and shows the target first', () => {
   assert.match(client, /<PersonLabel person=\{result\.person\} link \/>/, '结果弹窗必须展示被顺用户头像与昵称')
 })
 
-test('the result dialog exposes exactly the three documented actions', () => {
+test('the result dialog exposes the two documented actions for either remaining count', () => {
   assert.match(client, /setError\(''\); setStep\('write'\) \}\}>匿名留言</, '必须提供「匿名留言」')
-  assert.match(client, /busy === 'notify' \? '发送中…' : '不留言'/, '必须提供「不留言」')
-  assert.match(client, /onClick=\{closeResult\}>关闭</, '必须提供「关闭」')
+  assert.match(client, /status\?\.remaining \? '不留言并再顺一手' : '不留言'/, '必须提供「不留言」')
+  assert.doesNotMatch(client, /onClick=\{closeResult\}>关闭</, '不再提供重复关闭按钮')
   assert.match(client, /给 TA 留一句匿名的话/, '编辑器标题按需求命名')
 })
 
@@ -192,9 +192,9 @@ test('关闭 and ESC always fall back to the plain notice', () => {
 })
 
 test('返回 goes back to the result step without another take', () => {
-  assert.match(client, /setError\(''\); setStep\('result'\) \}\}>返回</)
+  assert.match(client, /setError\(''\); setStep\('result'\) \}\}>取消留言</)
   assert.doesNotMatch(client, /setStep\('result'\); void attempt\(\)\}>\u8fd4\u56de/, '返回不得重新顺取')
-  assert.match(client, /setStep\('result'\) \}\}>返回顺大师</, '送达后必须能回到顺大师')
+  assert.match(client, /setStep\('result'\) \}\}>完成</, '用尽次数后可以收起结果')
 })
 
 test('the composer enforces the documented input rules', () => {
@@ -223,7 +223,7 @@ test('the sending animation follows the six documented beats', () => {
   assert.doesNotMatch(sender, /fetch\(/, '动画不得自行调用任何接口')
   assert.match(client, /\{step === 'animate' && <SendAnonymousLetter/)
   assert.match(client, /onComplete=\{\(\) => \{[\s\S]{0,160}setStep\('delivered'\)/, '动画结束只切状态，不再调用接口')
-  assert.match(client, /匿名信已送达 ✉️/)
+  assert.match(client, /匿名留言已送达！/)
 })
 
 test('a letter refused after the notice went out never claims it was delivered', () => {
@@ -300,8 +300,9 @@ test('a record that can no longer be investigated explains itself', () => {
 test('the original capture button survives a closed letter', () => {
   assert.match(overlay, /onClick=\{onClose\}>收下这封信/)
   assert.match(client, /function closeLetter\(\) \{[\s\S]*setLetter\(undefined\)/, '关闭后记录列表仍可用')
-  assert.match(client, /onClick=\{\(\) => void perform\('start', \(\) => openCapture\(row\.id\)\)\}>前往调查</,
-    '记录入口必须保留，并统一为「前往调查」')
+  assert.match(client, /openCapture\(row\.id\)\)\}>\{capture\?\.id === row\.id \? '收起调查' : '立即调查'\}/,
+    '记录入口可原地展开或收起')
+  assert.match(client, /<article[\s\S]*?\{investigation\(row\.id\)\}\s*<\/article>/)
 })
 
 // ---------------------------------------------------------------- letter visuals

@@ -55,17 +55,7 @@ test('Shun Master resolves Web and Android users through the same HTTP routes', 
     assert.ok(closed.status >= 400)
 
     const decoys = await Promise.all([create(0), create(0)])
-    const outsiders = await prisma.user.findMany({
-      where: { id: { notIn: [actor.id, other.id, ...decoys.map(user => user.id)] } },
-      select: { id: true },
-    })
-    await prisma.shunMasterProtection.createMany({
-      data: outsiders.map(user => ({ userId: user.id, protected: true })),
-      skipDuplicates: true,
-    })
-    await prisma.shunMasterProtection.updateMany({
-      where: { userId: { in: outsiders.map(user => user.id) } }, data: { protected: true },
-    })
+    await prisma.user.updateMany({ where: { id: { notIn: [actor.id, other.id, ...decoys.map(user => user.id)] } }, data: { points: 0 } })
     await updateShunConfig(actor.id, { ...defaultShunConfig, enabled: false, openHoursEnabled: false, bonusChance: 0 })
     await setShunEnabled(actor.id, true)
     const victimDto = await getMobileUserById(other.id)

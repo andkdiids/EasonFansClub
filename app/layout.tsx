@@ -1,3 +1,5 @@
+import { ShunDropToast } from '@/components/shun-master/ShunDropToast'
+import { shunItemsFeatureEnabled } from '@/lib/shun-item-config'
 import type { Metadata, Viewport } from 'next'
 import { AppShell } from '@/components/layout/AppShell'
 import { AuthSessionRestore } from '@/components/AuthSessionRestore'
@@ -113,6 +115,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           </MusicPlayerProvider>
         </NotificationProvider>
         <NotificationToast enabled={Boolean(sessionUser)} />
+        {sessionUser && shunItemsFeatureEnabled() && <ShunDropToast key={sessionUser.id} userId={sessionUser.id} />}
       </body>
     </html>
   )
