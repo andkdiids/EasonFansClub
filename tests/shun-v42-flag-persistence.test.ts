@@ -7,9 +7,9 @@ import { parse } from 'dotenv'
 
 function loadEcosystemApps(): Array<{ name: string; env: Record<string, string> }> {
   const source = readFileSync(path.resolve('ecosystem.config.js'), 'utf8')
-  const module = { exports: {} as { apps?: Array<{ name: string; env: Record<string, string> }> } }
-  runInNewContext(source, { module, exports: module.exports })
-  return Array.isArray(module.exports.apps) ? module.exports.apps : []
+  const mod = { exports: {} as { apps?: Array<{ name: string; env: Record<string, string> }> } }
+  runInNewContext(source, { module: mod, exports: mod.exports })
+  return Array.isArray(mod.exports.apps) ? mod.exports.apps : []
 }
 
 // 2026-11-28 生产故障回归：SHUN_ITEMS_ENABLED 曾只靠临时 PM2 注入，
