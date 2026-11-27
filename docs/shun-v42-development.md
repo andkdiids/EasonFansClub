@@ -20,3 +20,11 @@
 | 全矩阵验收 | IN_PROGRESS | 已覆盖主要结算及三种浏览器视口；仍需逐项补齐四类行为浏览器动作、防刷及候选不足边界 |
 
 隔离证据位于 `E:\Eason\build-cache\shun-items-mysql-5ccb45b9e9c64f89a994917e2540ad47`。构建源是 `fb8d55b3`，此后的提交只变更测试及本文。生产迁移、开关及部署未执行。
+
+## 最终复核中的全仓失败定位
+
+- RC14 canonical ledger 与 Topic V2 production diagnostic 两项依赖 Git ref 和对象。导出目录无 Git 元数据，在原工作树复跑的两个文件合计 10 项通过。
+- skip-db Bash 安全模式用例通过 Git 获取工作树根目录，随后为每次运行创建独立 `mktemp` 夹具。导出目录在第一步就无法定位 Git 根目录。回到真实工作树并使用 E 盘临时空间后，六个并发进程均通过。该轮确认的是导出环境问题和隔离夹具行为，未重现更早的 C 盘空间不足错误。
+- Android 品牌二维码测试的失败来自动态导入缺少本地 `sharp`。Instagram worker 启动及 maintenance release wait 两项从子进程加载本地 `tsx`。补足工作树内的只读依赖链接后，三项均通过。
+- Topic Activity V2 的 schema 守卫碰到已经批准的顺大师 V4.2 增量。登记两个精确索引及新增模型和枚举后，原有模型字段、历史迁移保护与其他未知变更的严格断言仍有效。
+- 首次真实 Git 全仓复跑 4976 通过、0 失败、95 跳过。额外一项跳过来自新的活动浏览器套件，需显式开启本地 Web、Chrome 与 MySQL 后另跑。

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import test from 'node:test'
 import { prisma } from '../lib/prisma'
 import { consumeRegistrationFee } from '../lib/registration-fee'
@@ -19,6 +20,12 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
   assert.equal(url.protocol, 'mysql:')
   assert.equal(url.hostname, '127.0.0.1')
   assert.equal(url.pathname, '/ecfc_shun_items_fixture_qa')
+  const mysql = process.env.SHUN_ITEMS_MYSQL_CLIENT
+  assert.ok(mysql, 'The isolated MySQL client is required for trigger-based failure injection')
+  const fixtureDdl = (input: string) => execFileSync(mysql, [
+    '--no-defaults', '--host=127.0.0.1', '--protocol=TCP', '--port=' + url.port,
+    '--user=' + decodeURIComponent(url.username), 'ecfc_shun_items_fixture_qa',
+  ], { input, env: { ...process.env, MYSQL_PWD: decodeURIComponent(url.password) } })
   const previousUsers = await prisma.user.findMany({ where: { points: { gt: 0 } }, select: { id: true } })
   const previous = process.env.SHUN_ITEMS_ENABLED
   process.env.SHUN_ITEMS_ENABLED = 'true'
@@ -105,7 +112,7 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     const receipt = { sourceType_sourceId: { sourceType: 'TASK', sourceId: checkInFact.id } }
     const trigger = 'shun_qa_' + randomUUID().replaceAll('-', '')
     assert.match(unrelated.id, /^[a-z0-9]+$/)
-    await prisma.$executeRawUnsafe(
+    fixtureDdl(
       `CREATE TRIGGER ${trigger} BEFORE INSERT ON ShunItemEntry FOR EACH ROW SET NEW.availableDelta = IF(NEW.userId = '${unrelated.id}' AND NEW.type = 'COMMUNITY_DROP', 0, NEW.availableDelta)`,
     )
     let originalRolls: { dropRoll: number; itemRoll: number } | undefined
@@ -117,7 +124,7 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
       assert.equal(await prisma.shunItemInventory.count({ where: { userId: unrelated.id } }), 0)
       originalRolls = { dropRoll: failed.dropRoll, itemRoll: failed.itemRoll }
     } finally {
-      await prisma.$executeRawUnsafe(`DROP TRIGGER ${trigger}`)
+      fixtureDdl(`DROP TRIGGER ${trigger}`)
     }
     await prisma.shunItemRewardEvent.update({ where: receipt, data: { retryAt: new Date(0) } })
     await Promise.all([runShunItemRewardSweep(), runShunItemRewardSweep()])
