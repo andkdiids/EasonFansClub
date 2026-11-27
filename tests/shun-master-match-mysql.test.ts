@@ -81,9 +81,6 @@ function befriend(left: string, right: string) {
   return prisma.friendship.create({ data: { userAId, userBId } })
 }
 
-const protect = (...userIds: string[]) => prisma.shunMasterProtection.createMany({
-  data: userIds.map((userId) => ({ userId, protected: true })), skipDuplicates: true,
-})
 
 /**
  * Pins the target population to exactly `keep`.
@@ -93,8 +90,7 @@ const protect = (...userIds: string[]) => prisma.shunMasterProtection.createMany
  * the population first, otherwise the fixture would drift under the test.
  */
 async function pinFundedTo(...keep: string[]) {
-  const funded = await prisma.user.findMany({ where: { points: { gt: 0 }, id: { notIn: keep } }, select: { id: true } })
-  if (funded.length) await protect(...funded.map(({ id }) => id))
+  await prisma.user.updateMany({ where: { points: { gt: 0 }, id: { notIn: keep } }, data: { points: 0 } })
 }
 
 /** One check-in day, `offsetDays` in the past, inside the 7-day activity window. */
@@ -120,8 +116,6 @@ async function assertEligibleVictim(victimId: string, actorId: string) {
   assert.equal(victim.status, 'ACTIVE')
   assert.equal(victim.isDeleted, false)
   assert.ok(victim.Profile, '不得顺取没有资料的账号')
-  assert.equal(await prisma.shunMasterProtection.count({ where: { userId: victimId, protected: true } }), 0,
-    '不得顺取已拒绝扣费的用户')
 }
 
 after(async () => { await prisma.$disconnect() })
@@ -156,6 +150,12 @@ test('friend-first pool honours the chance, the real friendship relation and eve
   const loyalActor = await createUser()
   const loyalFriends = await Promise.all([createUser(80), createUser(80)])
   for (const friend of loyalFriends) await befriend(loyalActor.id, friend.id)
+  for (const [index, { id: userId }] of loyalFriends.entries()) {
+    const protectedFlag = index === 0
+    await prisma.shunMasterProtection.upsert({
+      where: { userId }, create: { userId, protected: protectedFlag }, update: { protected: protectedFlag },
+    })
+  }
   await pinFundedTo(...loyalFriends.map((friend) => friend.id))
   const loyalRounds = await Promise.all([shunAttempt(loyalActor.id, randomUUID()), shunAttempt(loyalActor.id, randomUUID())])
   const storedLoyal = await prisma.shunMasterRound.findMany({ where: { id: { in: loyalRounds.map((round) => round.id) } } })
@@ -286,7 +286,7 @@ test('two-stage stratified draw ignores population size differences', {
   for (const actorId of actors) {
     assert.ok((await shunAttempt(actorId, randomUUID())).id)
     // A winner is credited and would join the funded population itself.
-    await protect(actorId)
+    await prisma.user.update({ where: { id: actorId }, data: { points: 0 } })
   }
   const rounds = await prisma.shunMasterRound.findMany({ where: { actorId: { in: actors } } })
   assert.equal(rounds.length, samples, '每一次抽签都必须落一条记录')
@@ -339,7 +339,7 @@ test('player-facing surfaces never expose the match source', {
   assert.equal(JSON.stringify(status).includes('permanentlyOptedOutAt'), false, '状态接口不得泄露内部时间戳')
   const summary = await getShunCandidateSummary(prisma, shunDay(new Date()), baseConfig.victimCap)
   assert.deepEqual(Object.keys(summary).sort(), ['day', 'eligible', 'excluded'])
-  assert.deepEqual(Object.keys(summary.excluded).sort(), ['account', 'balance', 'dailyCap', 'refused'])
+  assert.deepEqual(Object.keys(summary.excluded).sort(), ['account', 'balance', 'dailyCap'])
   const outgoing = await shunRecords(actor.id, 'out')
   const incoming = await shunRecords(friend.id, 'in')
   for (const row of [...outgoing.records, ...incoming.records]) {

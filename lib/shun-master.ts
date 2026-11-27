@@ -27,20 +27,13 @@ const candidateAccount = Prisma.sql`
   AND u.permanentlyOptedOutAt IS NULL
   AND EXISTS (SELECT 1 FROM Profile p WHERE p.userId = u.id)
 `
-// Existing refusals are durable. Any future time-limited protection belongs
-// in the eligibility predicate, without weakening the historical refusal.
-const hasRefusedDebit = Prisma.sql`EXISTS (
-  SELECT 1 FROM ShunMasterProtection p WHERE p.userId = u.id AND p.protected = true
-)`
 const hasSpendableBalance = Prisma.sql`u.points > 0`
-const candidateFilter = Prisma.sql`${candidateAccount} AND NOT ${hasRefusedDebit}`
 
 export async function getShunCandidateSummary(tx: Tx, day: string, victimCap: number) {
   const rows = await tx.$queryRaw<{ reason: string; count: bigint }[]>`
     SELECT pool.reason, COUNT(*) AS count FROM (
       SELECT CASE
         WHEN NOT (${candidateAccount}) THEN 'account'
-        WHEN ${hasRefusedDebit} THEN 'refused'
         WHEN NOT (${hasSpendableBalance}) THEN 'balance'
         WHEN reached.victimId IS NOT NULL THEN 'dailyCap'
         ELSE 'eligible'
@@ -55,7 +48,7 @@ export async function getShunCandidateSummary(tx: Tx, day: string, victimCap: nu
   const counts = new Map(rows.map(row => [row.reason, Number(row.count)]))
   return {
     day, eligible: counts.get('eligible') ?? 0,
-    excluded: { account: counts.get('account') ?? 0, refused: counts.get('refused') ?? 0,
+    excluded: { account: counts.get('account') ?? 0,
       balance: counts.get('balance') ?? 0, dailyCap: counts.get('dailyCap') ?? 0 },
   }
 }
@@ -74,7 +67,7 @@ type TargetCandidate = { id: string; uid: number; tier: number }
 async function loadTargetPopulation(rangeStart: Date, day: string, now: Date): Promise<TargetCandidate[]> {
   const pool = await prisma.$queryRaw<{ id: string; uid: number; lastActiveAt: Date | null; lastLoginAt: Date | null }[]>`
     SELECT u.id, u.uid, u.lastActiveAt, u.lastLoginAt FROM User u
-    WHERE ${candidateAccount} AND NOT ${hasRefusedDebit} AND ${hasSpendableBalance}`
+    WHERE ${candidateAccount} AND ${hasSpendableBalance}`
   if (!pool.length) return []
   const checkins = await prisma.checkIn.findMany({ where: { userId: { in: pool.map(({ id }) => id) },
     checkinDateKey: { gte: shunDay(rangeStart), lte: day }, isMakeUp: false }, select: { userId: true, checkinDateKey: true } })
@@ -123,8 +116,7 @@ export async function diagnoseShunTarget(uid: number, actorUid?: number) {
   const config = settingsRow?.config ?? null
   const parsedConfig = validateShunConfig(config)
 
-  const [protection, receivedToday, receivedEver, checkins] = await Promise.all([
-    prisma.shunMasterProtection.findUnique({ where: { userId: user.id }, select: { protected: true, updatedAt: true } }),
+  const [receivedToday, receivedEver, checkins] = await Promise.all([
     prisma.shunMasterRound.count({ where: { victimId: user.id, day } }),
     prisma.shunMasterRound.count({ where: { victimId: user.id } }),
     prisma.checkIn.findMany({ where: { userId: user.id, checkinDateKey: { gte: shunDay(rangeStart), lte: day }, isMakeUp: false },
@@ -142,7 +134,6 @@ export async function diagnoseShunTarget(uid: number, actorUid?: number) {
   if (user.isDeleted) reasons.push('ACCOUNT_DELETED')
   if (user.permanentlyOptedOutAt) reasons.push('PERMANENT_OPT_OUT')
   if (!user.Profile) reasons.push('NO_PROFILE')
-  if (protection?.protected) reasons.push('SHUN_PROTECTION_ON')
   if (user.points <= 0) reasons.push('ZERO_BALANCE')
   if (receivedToday >= victimCap) reasons.push('DAILY_VICTIM_CAP_REACHED')
   const staticEligible = reasons.length === 0
@@ -193,7 +184,7 @@ export async function diagnoseShunTarget(uid: number, actorUid?: number) {
         if (friendIds.size) {
           const rows = await prisma.$queryRaw<{ id: string }[]>`
             SELECT u.id FROM User u
-            WHERE ${candidateAccount} AND NOT ${hasRefusedDebit} AND ${hasSpendableBalance}
+            WHERE ${candidateAccount} AND ${hasSpendableBalance}
               AND u.id IN (${Prisma.join([...friendIds])})`
           friendPoolSize = rows.length
         }
@@ -225,7 +216,6 @@ export async function diagnoseShunTarget(uid: number, actorUid?: number) {
     victimCap,
     receivedToday,
     receivedEver,
-    protection: protection ? { protected: protection.protected, updatedAt: protection.updatedAt.toISOString() } : null,
     permanentlyOptedOut: Boolean(user.permanentlyOptedOutAt),
     hasSpendableBalance: user.points > 0,
     activityTier: tier,
@@ -393,13 +383,13 @@ async function selectDecoys(tx: Tx, input: {
   `
   const friends = friendIds.length
     ? await tx.$queryRaw<Array<{ id: string; avatarUrl: string | null; lastActiveAt: Date | null }>>`
-        ${rows} WHERE u.id IN (${Prisma.join(friendIds)}) AND ${candidateFilter} LIMIT 200`
+        ${rows} WHERE u.id IN (${Prisma.join(friendIds)}) AND ${candidateAccount} LIMIT 200`
     : []
   const active = await tx.$queryRaw<Array<{ id: string; avatarUrl: string | null; lastActiveAt: Date | null }>>`
-    ${rows} WHERE ${candidateFilter} AND u.id NOT IN (${Prisma.join(excluded)})
+    ${rows} WHERE ${candidateAccount} AND u.id NOT IN (${Prisma.join(excluded)})
     ORDER BY u.lastActiveAt DESC LIMIT 60`
   const fallback = await tx.$queryRaw<Array<{ id: string; avatarUrl: string | null; lastActiveAt: Date | null }>>`
-    ${rows} WHERE ${candidateFilter} AND u.id NOT IN (${Prisma.join(excluded)})
+    ${rows} WHERE ${candidateAccount} AND u.id NOT IN (${Prisma.join(excluded)})
     ORDER BY SHA2(CONCAT(${randomBytes(16).toString('hex')}, u.id), 256) LIMIT 12`
   return pickDecoys({
     friends: friends.map(decoyCandidate),
@@ -474,16 +464,10 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     // only the per-actor exclusions and the victim verification stay serialised.
     const eligibleTargets = population.filter((target) => !targetExclusions.has(target.id))
     if (!eligibleTargets.length) {
-      const [funded, protectedFunded] = await Promise.all([
-        tx.user.count({ where: { ...transactionAccount, points: { gt: 0 } } }),
-        tx.$queryRaw<{ count: bigint }[]>`
-          SELECT COUNT(*) AS count FROM ShunMasterProtection p JOIN User u ON u.id = p.userId
-          WHERE p.protected = true AND ${candidateAccount} AND ${hasSpendableBalance}
-        `,
-      ])
+      const funded = await tx.user.count({ where: { ...transactionAccount, points: { gt: 0 } } })
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '没有符合条件的顺取目标', source: 'WEB', operatorType: 'USER',
-        metadata: { funded, protectedFunded: Number(protectedFunded[0].count), capped: capped.filter(row => row._count._all >= config.victimCap).length,
+        metadata: { funded, capped: capped.filter(row => row._count._all >= config.victimCap).length,
           blocked: blocks.length, linked: relatedAccounts.length, previouslyMatched: played.length } } })
       return null
     }

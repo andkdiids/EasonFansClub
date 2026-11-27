@@ -11,7 +11,6 @@ type Diagnosis = {
   victimCap?: number
   receivedToday?: number
   receivedEver?: number
-  protection?: { protected: boolean; updatedAt: string } | null
   permanentlyOptedOut?: boolean
   hasSpendableBalance?: boolean
   activityTier?: number
@@ -35,13 +34,12 @@ const REASON_LABELS: Record<string, string> = {
   ACCOUNT_DELETED: '账号已删除',
   PERMANENT_OPT_OUT: '已永久退出顺大师',
   NO_PROFILE: '没有资料页（Profile）',
-  SHUN_PROTECTION_ON: '顺大师保护已开启（拒绝被扣费）',
   ZERO_BALANCE: '挂号费余额 ≤ 0',
   DAILY_VICTIM_CAP_REACHED: '当日被顺次数已达上限',
   ACTOR_NOT_FOUND: '发起人 UID 不存在',
   FRIEND_CHANCE_OFF: '好友命中概率为 0（好友池未启用）',
   NO_FRIENDS: '发起人没有任何「已接受」好友',
-  POOL_EMPTY_AFTER_FILTERS: '好友存在，但全部被资格规则排除（余额/保护/上限/拉黑/关联账号/当日已顺）',
+  POOL_EMPTY_AFTER_FILTERS: '好友存在，但全部被资格规则排除（账户状态/余额/上限/拉黑/关联账号/当日已顺）',
   DICE_LOSS: '好友池非空，但概率掷骰未命中（当前概率 < 100%）',
 }
 
@@ -117,8 +115,6 @@ export function ShunDiagnosePanel() {
                   : '无'}</td></tr>
               <tr className="border-t"><th className="p-2">今日被顺 / 上限</th><td className="p-2">{result.receivedToday} / {result.victimCap}</td></tr>
               <tr className="border-t"><th className="p-2">历史累计被顺</th><td className="p-2">{result.receivedEver}</td></tr>
-              <tr className="border-t"><th className="p-2">顺大师保护</th>
-                <td className="p-2">{result.protection ? `${result.protection.protected ? '已开启' : '已关闭'}（更新于 ${result.protection.updatedAt}）` : '从未设置（视同关闭）'}</td></tr>
               <tr className="border-t"><th className="p-2">永久退出</th><td className="p-2"><Bool value={result.permanentlyOptedOut} /></td></tr>
               <tr className="border-t"><th className="p-2">挂号费余额 &gt; 0</th><td className="p-2"><Bool value={result.hasSpendableBalance} /></td></tr>
               <tr className="border-t"><th className="p-2">活跃度档位 / 近 7 天活跃天数</th><td className="p-2">{result.activityTier} / {result.activeDays}</td></tr>

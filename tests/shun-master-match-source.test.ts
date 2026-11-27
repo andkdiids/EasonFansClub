@@ -73,7 +73,7 @@ test('rule changes bump the rules version, including weights and the friend chan
 
 test('the lottery uses the whole eligible population instead of a 128-row sample', () => {
   assert.match(service, /async function loadTargetPopulation\(rangeStart: Date, day: string, now: Date\): Promise<TargetCandidate\[\]>/)
-  assert.match(service, /SELECT u\.id, u\.uid, u\.lastActiveAt, u\.lastLoginAt FROM User u\s*\n\s*WHERE \$\{candidateAccount\} AND NOT \$\{hasRefusedDebit\} AND \$\{hasSpendableBalance\}/,
+  assert.match(service, /SELECT u\.id, u\.uid, u\.lastActiveAt, u\.lastLoginAt FROM User u\s*\n\s*WHERE \$\{candidateAccount\} AND \$\{hasSpendableBalance\}/,
     '必须读取完整合格候选池，否则人数仍会主导命中率')
   assert.doesNotMatch(service, /LIMIT 128/, '不得再用 128 行采样')
   assert.doesNotMatch(service, /slots/, '不得再用 UID 抽样引入额外偏差')
