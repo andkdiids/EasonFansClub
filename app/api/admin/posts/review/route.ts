@@ -9,7 +9,7 @@ import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds,
 import { postContentPlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
 import { createNotification } from '@/lib/notification-write'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 import { reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
@@ -354,6 +354,8 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
   const guard = await requireRequestAdmin(request, 'post_manage')
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
@@ -410,6 +412,7 @@ export async function PATCH(request: Request) {
         },
       })
       if (!current) throw new Error('POST_NOT_FOUND')
+      if (body?.expectedStatus === 'APPROVED' && current.moderationStatus !== 'APPROVED') throw new Error('POST_REVIEW_ALREADY_REVIEWED')
       if (current.moderationStatus === status) {
         throw new Error('POST_REVIEW_ALREADY_REVIEWED')
       }

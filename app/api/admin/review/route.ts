@@ -265,6 +265,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
         return [{ id: `${row.id}:${index}`, src, previewSrc: publicImageUrl(media.thumbnailUrl) || undefined, alt: `沙龙图片 ${index + 1}` }]
       }),
       reviewer: row.approvedBy ? author({ id: row.approvedBy.id, uid: row.approvedBy.uid, nickname: row.approvedBy.nickname }) : null, reviewedAt: asIso(row.approvedAt), rejectReason: row.rejectReason,
+      editVersion: row.updatedAt.toISOString(),
     }))
   }
 

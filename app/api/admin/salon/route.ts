@@ -9,7 +9,7 @@ import { publicImageUrl } from '@/lib/images'
 import { normalizeSalonConcertSelection, parseSalonCategory, SALON_CATEGORY_CONFIG, SALON_POST_STATUSES, salonCategoryLabel, supportsOriginal } from '@/lib/salon'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime, emitRealtimeMany } from '@/lib/realtime'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import { completeTask, grantGrowthReward, reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
 import { toSalonReviewError, type SalonReviewErrorCode, type SalonReviewFailureStage } from '@/lib/salon-review-errors'
 import { canTransitionSalonReviewStatus } from '@/lib/salon-review-transitions'
@@ -142,7 +142,9 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const guard = await requireAdmin('post_manage')
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireAdmin('post_manage', request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return reviewErrorResponse('INVALID_REQUEST', '请求内容无效')
@@ -248,6 +250,10 @@ export async function PATCH(request: Request) {
         select: { id: true, category: true, status: true, userId: true, title: true, concertId: true, createdAt: true, approvedAt: true, updatedAt: true },
       })
       if (!lockedCurrent) throw new Error('SALON_POST_NOT_FOUND')
+      if (action === 'update' && body.expectedApprovedVersion !== undefined
+        && (lockedCurrent.status !== 'APPROVED' || body.expectedApprovedVersion !== lockedCurrent.updatedAt.toISOString())) {
+        throw new Error('SALON_POST_ALREADY_REVIEWED')
+      }
       current = lockedCurrent
       if (reviewStatus) {
         if (lockedCurrent.status === reviewStatus) throw new Error('SALON_REVIEW_ALREADY_REVIEWED')

@@ -115,6 +115,7 @@ export type ReviewItem = {
   sourceType: ReviewSourceType
   sourceId: string
   reviewKind?: 'CREATE' | 'EDIT'
+  editVersion?: string
   title: string
   author: { id: string | null; uid: number | null; name: string; avatarUrl: string | null }
   authorId: string | null
