@@ -107,6 +107,15 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   const board = await prisma.board.create({ data: { name: '评论测试', slug: 'reply-qa-' + randomUUID() } })
   const post = await prisma.post.create({ data: { title: '隔离测试帖', content: '正文', authorId: admin.id, boardId: board.id } })
   const reply = await prisma.reply.create({ data: { content: '隔离测试评论', authorId: target.id, postId: post.id } })
+  const postReview = origin + '/api/admin/posts/review?' + new URLSearchParams({ status: 'ALL', keyword: post.id, contentType: 'NORMAL', postId: post.id })
+  assert.equal((await fetch(postReview, { headers: targetBearer })).status, 403)
+  const posts = await fetch(postReview, { headers: adminBearer })
+  assert.equal(posts.status, 200)
+  const managedPosts = (await posts.json()).posts
+  assert.equal(managedPosts.length, 1)
+  assert.equal(managedPosts[0].id, post.id)
+  assert.equal(managedPosts[0].contentType, 'NORMAL')
+  assert.deepEqual(managedPosts[0].reports, [])
   const replies = origin + '/api/admin/replies'
   const search = replies + '?' + new URLSearchParams({ keyword: reply.id })
   assert.equal((await fetch(search, { headers: targetBearer })).status, 403)

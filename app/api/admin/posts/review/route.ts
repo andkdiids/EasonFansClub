@@ -1,6 +1,6 @@
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
-import type { Prisma } from '@prisma/client'
+import { PostContentType, type Prisma } from '@prisma/client'
 import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory, userSnapshotName } from '@/lib/admin-audit'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
@@ -23,6 +23,7 @@ const reviewSelect = {
   id: true,
   boardId: true,
   title: true,
+  contentType: true,
   content: true,
   richContent: true,
   summary: true,
@@ -288,8 +289,10 @@ function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[])
 }
 
 export async function GET(request: Request) {
-  const guard = await requireAdmin('post_manage')
+  const guard = await requireAdmin('post_manage', request)
   if (!guard.user) return guard.response
+  const params = new URL(request.url).searchParams
+  const postId = sanitizeText(params.get('postId'), 80).trim()
   const rawStatus = new URL(request.url).searchParams.get('status')
   const status: PostModerationStatus | 'ALL' = rawStatus === 'ALL'
     ? 'ALL'
@@ -299,20 +302,24 @@ export async function GET(request: Request) {
   // #2 关键词搜索：标题 / 正文 / 作者昵称 / UID / 帖子 ID。
   // 统一 trim；空字符串视为「不过滤」（保持原有全部列表行为）。
   // 注意：MySQL 不支持 mode: 'insensitive'，这里使用原生 contains（LIKE）即可满足中文搜索。
-  const keyword = (new URL(request.url).searchParams.get('keyword') || '').trim()
+  const keyword = sanitizeText(params.get('keyword'), 80).trim()
+  const contentType = params.get('contentType')
   const keywordFilter = keyword
     ? {
         OR: [
           { title: { contains: keyword } },
           { content: { contains: keyword } },
           { User: { nickname: { contains: keyword } } },
-          ...(/^\d+$/.test(keyword) ? [{ id: { equals: keyword } }, { User: { uid: Number(keyword) } }] : []),
+          { id: keyword },
+          ...(/^\d+$/.test(keyword) && Number(keyword) <= 2147483647 ? [{ User: { uid: Number(keyword) } }] : []),
         ],
       }
     : {}
-  const where = status === 'ALL'
+  const where: Prisma.PostWhereInput = status === 'ALL'
     ? { isDeleted: false, ...keywordFilter }
     : { moderationStatus: status, isDeleted: false, ...keywordFilter }
+  if (postId) where.id = postId
+  if (contentType && Object.values(PostContentType).includes(contentType as PostContentType)) where.contentType = contentType as PostContentType
   try {
     const total = await prisma.post.count({ where })
     // 页码夹紧：超出范围的页码（如批量删除后当前页被清空）回退到最后一页，
@@ -322,17 +329,17 @@ export async function GET(request: Request) {
     const pageRows = await prisma.post.findMany({
       where,
       orderBy: status === 'PENDING' || status === 'ALL'
-        ? [{ createdAt: 'desc' as const }]
-        : [{ reviewedAt: 'desc' as const }, { createdAt: 'desc' as const }],
+        ? [{ createdAt: 'desc' as const }, { id: 'desc' as const }]
+        : [{ reviewedAt: 'desc' as const }, { createdAt: 'desc' as const }, { id: 'desc' as const }],
       skip: (safePage - 1) * POST_REVIEW_PAGE_SIZE,
       take: POST_REVIEW_PAGE_SIZE + 1,
-      select: reviewSelect,
+      select: { ...reviewSelect, Report: { take: postId ? 10 : 0, orderBy: { createdAt: 'desc' }, select: { id: true, status: true, reason: true } } },
     })
     const hasMore = pageRows.length > POST_REVIEW_PAGE_SIZE
     const posts = pageRows.slice(0, POST_REVIEW_PAGE_SIZE)
     const historyByPostId = await loadPostModerationHistoryByPostIds(posts.map((post) => post.id), 'admin.posts.review.list')
     return NextResponse.json({
-      posts: posts.map((post) => serializePost(post, historyByPostId.get(post.id) || [])),
+      posts: posts.map(({ Report, ...post }) => ({ ...serializePost(post, historyByPostId.get(post.id) || []), ...(postId ? { reports: Report } : {}) })),
       status,
       page: safePage,
       hasMore,

@@ -25,6 +25,7 @@ on:
       - 'app/api/admin/user-operations/**'
       - 'app/api/admin/admins/**'
       - 'app/api/admin/replies/**'
+      - 'app/api/admin/posts/review/**'
       - 'app/api/replies/**'
       - 'lib/admin-user-profile.ts'
       - 'lib/clinic-service.ts'
