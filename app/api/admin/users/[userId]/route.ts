@@ -366,6 +366,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   } = {}
 
   if (body?.role) {
+    if (guard.user.role !== 'SUPER_ADMIN') {
+      return NextResponse.json({ message: '角色变更需要超级管理员权限' }, { status: 403 })
+    }
     data.role = body.role
     if (body.role !== 'ADMIN' && body.role !== 'SUPER_ADMIN') data.canPlayFullMusic = false
   }

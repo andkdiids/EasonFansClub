@@ -81,4 +81,26 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.equal(profileEdit.operator.uid, admin.uid)
   assert.ok(profileEdit.detail.changedFields.split('、').includes('bio'))
   assert.equal(profileEdit.detail.oldValue, undefined)
+
+  const admins = origin + '/api/admin/admins'
+  const grant = (headers: Record<string, string>, userId: string, permissions: string[]) =>
+    fetch(admins, {
+      method: 'POST', redirect: 'manual', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, permissions }),
+    })
+  const optionsUrl = admins + '?view=permission-options'
+  assert.equal((await fetch(optionsUrl, { headers: targetBearer })).status, 403)
+  assert.equal((await grant(adminBearer, target.id, ['admin_manage'])).status, 200)
+  const delegated = await fetch(optionsUrl, { headers: targetBearer })
+  assert.equal(delegated.status, 200)
+  assert.deepEqual((await delegated.json()).options.map((item: { key: string }) => item.key), ['admin_manage'])
+  assert.equal((await grant(targetBearer, target.id, ['admin_manage'])).status, 403)
+  const another = await create('USER')
+  assert.equal((await grant(targetBearer, another.id, ['user_manage'])).status, 403)
+  const revoke = await fetch(admins + '/' + encodeURIComponent(target.id), { method: 'DELETE', headers: adminBearer })
+  assert.equal(revoke.status, 200)
+  assert.equal((await fetch(optionsUrl, { headers: targetBearer })).status, 403)
+  assert.equal(await prisma.adminAction.count({
+    where: { targetUserId: target.id, adminId: admin.id, action: 'UPDATE_USER_ROLE' },
+  }), 2)
 })

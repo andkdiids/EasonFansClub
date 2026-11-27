@@ -17,7 +17,7 @@ test('Admin Mobile capability discovery is guarded by the shared server role and
 
 test('Admin search never lists all administrators and caps each query page', () => {
   const route = read('app/api/admin/admins/route.ts')
-  assert.match(route, /requireAdmin\('admin_manage'\)/)
+  assert.match(route, /requireAdmin\('admin_manage', request\)/)
   assert.match(route, /AdminPermission: \{ where: \{ enabled: true \}, select: \{ permissionKey: true \} \}/)
   assert.match(route, /permissions: AdminPermission\.map\(\(\{ permissionKey \}\) => permissionKey\)/)
   assert.match(route, /if \(!query\) return NextResponse\.json\(\{ admins: \[\]/)
