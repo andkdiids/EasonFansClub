@@ -2,7 +2,7 @@ import { SHUN_COMMUNITY_DROP_RULES, SHUN_GIFT_WEIGHTS, SHUN_ITEM_CATALOG, type S
 
 const descriptions: Record<ShunItemCode, string> = {
   EXTRA_ATTEMPT: '增加一次今天的主动顺取机会。',
-  FRIEND_GIFT: '随机送一件普通或稀有道具给通讯录好友。',
+  FRIEND_GIFT: '将随机为一位通讯录好友送上一份礼物。',
   EXTRA_SUSPECT: '下一次成功顺取的抓捕名单多一位候选人。',
   REVENGE: '抓捕成功后，对真实顺取者反击一次。',
   TARGET_FRIEND: '指定一位通讯录好友进行顺取。',
@@ -26,7 +26,17 @@ export const defaultShunItemDefinitions = (Object.keys(SHUN_ITEM_CATALOG) as Shu
   code, ...SHUN_ITEM_CATALOG[code], description: descriptions[code], enabled: true, icon: code,
 }))
 
-type ItemRules = typeof defaultShunItemRules
+type ItemRules = {
+  dailyMain: boolean
+  weekly: Record<3 | 5 | 7, boolean>
+  community: boolean
+  drops: Record<keyof typeof SHUN_COMMUNITY_DROP_RULES, { chance: number; dailyChecks: number }>
+  dailyMax: number
+  giftsReceived: number
+  extraAttempts: number
+  commentMinChars: number
+  gifts: Record<keyof typeof SHUN_GIFT_WEIGHTS, number>
+}
 type Definition = Omit<(typeof defaultShunItemDefinitions)[number], 'name' | 'rarity' | 'weight' | 'icon'> & {
   name: string; rarity: string; weight: number; icon: string
 }
@@ -54,7 +64,7 @@ export function validateShunItemDraft(input: unknown): ShunItemDraft | null {
       || typeof item.enabled !== 'boolean' || !integer(item.weight, 0, 100)) return null
     if (defaults.code === 'TARGET_FRIEND' && item.name.trim() !== '任我顺') return null
     definitions.push({
-      code: defaults.code, name: item.name.trim(), description: item.description.trim(),
+      code: defaults.code, name: item.name.trim(), description: defaults.code === 'FRIEND_GIFT' ? defaults.description : item.description.trim(),
       icon: item.icon, rarity: item.rarity, enabled: item.enabled, weight: item.weight,
     })
   }

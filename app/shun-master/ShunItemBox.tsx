@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { publicImageUrl } from '@/lib/images'
 import styles from './shun.module.css'
 
 const icons: Record<string, string> = {
@@ -18,6 +19,8 @@ const events: Record<string, string> = {
   GIFT_RECEIVED: '收到礼物', GIFT_SENT: '送出礼物', USED: '使用', RESERVED: '待生效', RELEASED: '恢复可用',
 }
 
+export type GiftDelivery = { id: string; name: string; receiver: { nickname: string; avatarUrl: string | null } | null }
+
 export type ShunBoxData = { enabled: false } | {
   enabled: true
   total: number
@@ -27,17 +30,19 @@ export type ShunBoxData = { enabled: false } | {
 
 type Friend = { id: string; displayName: string }
 
-export function ShunItemBox({ box, open, onClose, busy, errorMessage, onUse, onTarget }: {
+export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, delivery, onUse, onTarget }: {
   box: Extract<ShunBoxData, { enabled: true }>
   open: boolean
   onClose: () => void
   busy: boolean
   errorMessage: string
+  gifting: boolean
+  delivery?: GiftDelivery
   onUse: (action: string, fields?: Record<string, unknown>) => Promise<void>
   onTarget: (friendId: string) => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
-  const [selecting, setSelecting] = useState<'gift' | 'target'>()
+  const [selecting, setSelecting] = useState(false)
   const [friends, setFriends] = useState<Friend[]>()
   const [error, setError] = useState('')
   useEffect(() => {
@@ -45,8 +50,8 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, onUse, onT
     if (!open && dialog.current?.open) dialog.current.close()
   }, [open])
 
-  async function selectFriend(mode: 'gift' | 'target') {
-    setSelecting(mode)
+  async function selectFriend() {
+    setSelecting(true)
     setError('')
     try {
       const response = await fetch('/api/friends/list?directory=1', { cache: 'no-store' })
@@ -78,21 +83,29 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, onUse, onT
         {item.code === 'EXTRA_ATTEMPT' && <button type="button" disabled={busy || !item.available || !item.enabled} onClick={() => void onUse('extra-attempt')}>使用</button>}
         {['DOUBLE_AMOUNT', 'EXTRA_SUSPECT'].includes(item.code) && <button type="button" disabled={busy || (!item.pending && (!item.available || !item.enabled))}
           onClick={() => void onUse('pending-item', { code: item.code, cancel: item.pending > 0 })}>{item.pending ? '取消待生效' : '设为待生效'}</button>}
-        {item.code === 'FRIEND_GIFT' && <button type="button" disabled={busy || !item.available || !item.enabled} onClick={() => void selectFriend('gift')}>赠送好友</button>}
-        {item.code === 'TARGET_FRIEND' && <button type="button" disabled={busy || !item.available || !item.enabled} onClick={() => void selectFriend('target')}>选择好友</button>}
+        {item.code === 'FRIEND_GIFT' && <button type="button" disabled={busy || !item.available || !item.enabled} onClick={() => void onUse('gift')}>随机赠送</button>}
+        {item.code === 'TARGET_FRIEND' && <button type="button" disabled={busy || !item.available || !item.enabled} onClick={() => void selectFriend()}>选择好友</button>}
         {['RETRY_CAPTURE', 'REVENGE'].includes(item.code) && <small>在符合条件的历史记录中使用</small>}
       </li>)}
     </ul>
+    {gifting && <p role="status">寻找一位幸运的 EF...</p>}
+    {!gifting && delivery && <section className={styles.giftDelivery} role="status">
+      <h3>幸运已经送达！</h3>
+      {publicImageUrl(delivery.receiver?.avatarUrl) && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={publicImageUrl(delivery.receiver?.avatarUrl)} alt="" width={32} height={32} />
+      )}
+      <p>{delivery.receiver?.nickname ?? 'EF'} 获得了道具『{delivery.name}』</p>
+    </section>}
     {selecting && <section aria-label="通讯录好友">
       <h3>通讯录好友</h3>
-      <button type="button" onClick={() => setSelecting(undefined)}>返回道具</button>
+      <button type="button" onClick={() => setSelecting(false)}>返回道具</button>
       {error && <p role="alert">{error}</p>}
       {friends?.length === 0 && <p>通讯录暂无好友。</p>}
       <ul className={styles.itemFriends}>{friends?.map((friend) => <li key={friend.id}>
         <button type="button" disabled={busy} onClick={() => {
-          setSelecting(undefined)
-          if (selecting === 'target') onTarget(friend.id)
-          else void onUse('gift', { friendId: friend.id })
+          setSelecting(false)
+          onTarget(friend.id)
         }}>{friend.displayName}</button>
       </li>)}</ul>
     </section>}

@@ -33,3 +33,28 @@ test('community probabilities and judgment limits match each event', () => {
     [15, 1], [15, 1], [8, 5], [10, 3], [5, 10],
   ])
 })
+
+test('item config rejects empty enabled pools and incompatible gift entries', async () => {
+  const { defaultShunItemDefinitions, defaultShunItemRules, validateShunItemDraft } = await import('../lib/shun-item-config')
+  const defaults = { enabled: true, definitions: defaultShunItemDefinitions, rules: defaultShunItemRules }
+  assert.ok(validateShunItemDraft(defaults))
+  assert.equal(validateShunItemDraft({ ...defaults, definitions: defaults.definitions.map((item) => ({ ...item, enabled: false })) }), null)
+  assert.equal(validateShunItemDraft({
+    ...defaults, rules: { ...defaultShunItemRules, gifts: { ...defaultShunItemRules.gifts, RETRY_CAPTURE: 0 } },
+  }), null)
+  assert.equal(validateShunItemDraft({
+    ...defaults, definitions: defaults.definitions.map((item) => item.code === 'TARGET_FRIEND' ? { ...item, name: '旧名称' } : item),
+  }), null)
+})
+
+test('random gifting cannot accept a selected friend while directed takes still can', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const route = await readFile('app/api/shun-master/[action]/route.ts', 'utf8')
+  assert.match(route, /Object\.keys\(body\)\.some\(\(key\) => key !== 'requestId'\)/)
+  assert.match(route, /sendShunItemGift\(guard\.user\.id, body\.requestId\)/)
+  assert.match(route, /shunAttempt\(guard\.user\.id, body\.requestId, undefined, body\.friendId\)/)
+  const box = await readFile('app/shun-master/ShunItemBox.tsx', 'utf8')
+  assert.match(box, /onUse\('gift'\)/)
+  assert.match(box, /寻找一位幸运的 EF\.\.\./)
+  assert.match(box, /幸运已经送达！/)
+})

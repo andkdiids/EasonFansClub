@@ -12,7 +12,7 @@ import { publicImageUrl } from '@/lib/images'
 // state flips at exactly the boundary the server enforces.
 import { SHUN_CLOSED_TITLE, isShunOpen, shunOpenHoursHelp, shunOpenHoursHint, shunOpenHoursLine } from '@/lib/shun-open-hours'
 import { formatUid } from '@/lib/uid'
-import { ShunItemBox, type ShunBoxData } from './ShunItemBox'
+import { ShunItemBox, type GiftDelivery, type ShunBoxData } from './ShunItemBox'
 import styles from './shun.module.css'
 
 const MESSAGE_MAX = 60
@@ -67,7 +67,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const [status, setStatus] = useState<Status>()
   const [box, setBox] = useState<ShunBoxData>()
   const [boxOpen, setBoxOpen] = useState(false)
+  const [newItems, setNewItems] = useState(false)
   const [boxError, setBoxError] = useState('')
+  const [delivery, setDelivery] = useState<GiftDelivery>()
   const boxRequests = useRef(new Map<string, string>())
   const targetRequest = useRef<string | undefined>(undefined)
   const [side, setSide] = useState<Side>(initialSide)
@@ -123,11 +125,31 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const focusOnce = useRef(false)
   const loadItems = useCallback(async () => {
     try {
-      setBox(await api<ShunBoxData>('items'))
+      const data = await api<ShunBoxData>('items')
+      setBox(data)
+      if (data.enabled) {
+        const acquisition = data.history.find((entry) => ['DAILY_MAIN', 'COMMUNITY_DROP', 'WEEKLY_REWARD', 'GIFT_RECEIVED'].includes(entry.type))
+        try { setNewItems(!!acquisition && sessionStorage.getItem('ecfc-shun-last-viewed-item') !== acquisition.id) }
+        catch { setNewItems(false) }
+      }
     } catch {
       // A box refresh is independent of fee settlement and the letter flow.
     }
   }, [])
+  useEffect(() => {
+    const refresh = () => void loadItems()
+    window.addEventListener('shun-item-acquired', refresh)
+    return () => window.removeEventListener('shun-item-acquired', refresh)
+  }, [loadItems])
+  useEffect(() => {
+    if (!boxOpen || !box?.enabled) return
+    const entry = box.history.find((row) => ['DAILY_MAIN', 'COMMUNITY_DROP', 'WEEKLY_REWARD', 'GIFT_RECEIVED'].includes(row.type))
+    if (entry) {
+      try { sessionStorage.setItem('ecfc-shun-last-viewed-item', entry.id) } catch { /* optional session storage */ }
+    }
+    setNewItems(false)
+  }, [box, boxOpen])
+
   const loadStatus = useCallback(async () => {
     try {
       const response = await api<Status>('status')
@@ -304,7 +326,12 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       const itemRequestId = boxRequests.current.get(key) ?? crypto.randomUUID()
       boxRequests.current.set(key, itemRequestId)
       try {
-        await api(action, { ...fields, requestId: itemRequestId })
+        if (action === 'gift') {
+          setDelivery(undefined)
+          setDelivery(await api<GiftDelivery>('gift', { requestId: itemRequestId }))
+        } else {
+          await api(action, { ...fields, requestId: itemRequestId })
+        }
         boxRequests.current.delete(key)
         await Promise.all([loadStatus(), loadItems(), ...(action.startsWith('capture/') ? [loadRecords()] : [])])
       } catch (error) {
@@ -666,9 +693,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   </>
   return <main className={styles.page}>
     <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div>
-      {box?.enabled && <button type="button" className={styles.itemToggle} onClick={() => { setBoxError(''); setBoxOpen(true); void loadItems() }}>百宝箱 · {box.total}</button>}
+      {box?.enabled && <button type="button" className={styles.itemToggle} onClick={() => { setBoxError(''); setBoxOpen(true); void loadItems() }}>百宝箱 · {box.total}{newItems && <span className={styles.itemDot} aria-label="有新道具" />}</button>}
     </header>
-    {box?.enabled && <ShunItemBox box={box} open={boxOpen} busy={!!busy} errorMessage={boxError}
+    {box?.enabled && <ShunItemBox box={box} open={boxOpen} busy={!!busy} errorMessage={boxError} gifting={busy === 'gift'} delivery={delivery}
       onClose={() => setBoxOpen(false)} onUse={useBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId) }} />}
     {error && <p className={styles.alert} role="alert">{error}</p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}

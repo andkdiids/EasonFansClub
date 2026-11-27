@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client'
-import { randomBytes, randomInt } from 'node:crypto'
+import { createHmac, randomBytes, randomInt } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { createNotificationWithDb } from '@/lib/notification-write'
 import { awardRegistrationFee, consumeRegistrationFee, getRegistrationFeeHistoryWindow, type RegistrationFeeHistoryRange } from '@/lib/registration-fee'
@@ -650,15 +650,16 @@ export async function shunNotifyRound(roundId: string, letter: AnonymousMessageF
     // The golden capture window starts when the victim is actually told, for all
     // three paths. It is written once and never re-extended by re-notification.
     const goldenUntil = new Date(now.getTime() + config.goldenMinutes * 60000)
+    const ambush = (round.candidates as string[]).length === 4 ? ' 十面埋伏已生效，调查时多一位候选人。' : ''
     if (letter.provided && letter.content) {
       await tx.shunMasterAnonymousLetter.create({ data: {
         roundId: round.id, senderId: round.actorId, recipientId: round.victimId, content: letter.content,
       } })
       await notify(tx, round.id, round.victimId, ANONYMOUS_LETTER_NOTIFICATION.title,
-        ANONYMOUS_LETTER_NOTIFICATION.content, 'taken-letter', anonymousLetterNotificationLink(round.id))
+        ANONYMOUS_LETTER_NOTIFICATION.content + ambush, 'taken-letter', anonymousLetterNotificationLink(round.id))
     } else {
       await notify(tx, round.id, round.victimId, SHUN_PLAIN_NOTIFICATION_TITLE,
-        shunPlainNotificationContent(round.amount), 'taken', shunInvestigationLink(round.id))
+        shunPlainNotificationContent(round.amount) + ambush, 'taken', shunInvestigationLink(round.id))
     }
     const status = letter.provided ? SHUN_NOTIFY_STATUS.letter : SHUN_NOTIFY_STATUS.plain
     await tx.shunMasterRound.update({ where: { id: round.id }, data: {
@@ -998,49 +999,66 @@ export async function shunItemBox(userId: string) {
   })
 }
 
-export async function sendShunItemGift(senderId: string, receiverId: string, requestId: string, clock = () => new Date()) {
+export async function sendShunItemGift(senderId: string, requestId: string, clock = () => new Date()) {
   if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
-  const unavailable = () => new ShunError('FRIEND_UNAVAILABLE', '暂不可赠送给该好友。')
-  if (senderId === receiverId) throw unavailable()
-
+  const matchSeed = randomBytes(32)
+  const itemRoll = randomInt(100)
   try {
     return await shunTransaction(async (tx) => {
-      await lockShunItemUsers(tx, [senderId, receiverId])
+      await settings(tx)
       const requestKey = `gift:${requestId}`
       const prior = await tx.shunItemEntry.findUnique({
         where: { userId_type_requestKey: { userId: senderId, type: 'GIFT_SENT', requestKey } },
-        include: { sentGift: { include: { receivedEntry: { select: { code: true } } } } },
+        include: { sentGift: { include: { receivedEntry: { include: { config: { include: { definitions: true } } } } } } },
       })
-      if (prior) {
-        if (prior.sentGift?.receiverId !== receiverId) throw new ShunError('REQUEST_CONFLICT', '该请求已用于另一笔赠送。')
-        return { id: prior.sentGift.id, code: prior.sentGift.receivedEntry.code }
+      if (prior?.sentGift) {
+        const { id, receiverId, receivedEntry } = prior.sentGift
+        const name = receivedEntry.config.definitions.find(({ code }) => code === receivedEntry.code)?.name
+        return { id, code: receivedEntry.code, name, receiver: await shunPerson(tx, receiverId) }
       }
 
       const active = await tx.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })
-      if (!active?.enabled || !active.definitions.some((item) => item.code === 'FRIEND_GIFT' && item.enabled)) {
+      const draft = validateShunItemDraft(active)
+      if (!active || !draft?.enabled || !draft.definitions.some((item) => item.code === 'FRIEND_GIFT' && item.enabled)) {
         throw new ShunError('DISABLED', '天使的礼物暂不可使用。')
       }
-      const [userAId, userBId] = [senderId, receiverId].sort()
-      const friendship = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM Friendship WHERE userAId = ${userAId} AND userBId = ${userBId} FOR UPDATE`
-      const block = await tx.block.findFirst({
-        where: { OR: [{ blockerId: senderId, blockedId: receiverId }, { blockerId: receiverId, blockedId: senderId }] },
-        select: { blockerId: true },
-      })
-      const eligibleCount = await tx.user.count({ where: { ...transactionAccount, id: { in: [senderId, receiverId] } } })
-      if (!friendship.length || block || eligibleCount !== 2) throw unavailable()
+      const links = await tx.$queryRaw<Array<{ userAId: string; userBId: string }>>`
+        SELECT userAId, userBId FROM Friendship WHERE userAId = ${senderId} OR userBId = ${senderId} FOR UPDATE`
+      const friends = [...new Set(links.map(({ userAId, userBId }) => userAId === senderId ? userBId : userAId))]
+        .filter((id) => id !== senderId)
+      await lockShunItemUsers(tx, [senderId, ...friends])
+      const sender = await tx.user.findFirst({ where: { ...transactionAccount, id: senderId }, select: { id: true } })
+      if (!sender) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
+      const inventory = await tx.shunItemInventory.findUnique({ where: { userId_code: { userId: senderId, code: 'FRIEND_GIFT' } } })
+      if (!inventory?.available) throw new ShunError('ITEM_STOCK', '天使的礼物库存不足。', 409)
 
       const day = shunDay(clock())
-      const where = { userId_day: { userId: receiverId, day } }
-      const daily = await tx.shunItemDaily.findUnique({ where })
-      const rules = validateShunItemDraft(active)?.rules ?? defaultShunItemRules
-      if ((daily?.giftsReceived ?? 0) >= rules.giftsReceived) throw new ShunError('GIFT_LIMIT', '好友今天已达到接收礼物上限。')
+      const rules = draft.rules
+      const [eligibleFriends, blocks, full] = await Promise.all([
+        tx.user.findMany({ where: { ...transactionAccount, id: { in: friends } }, select: { id: true } }),
+        tx.block.findMany({
+          where: { OR: [{ blockerId: senderId, blockedId: { in: friends } }, { blockedId: senderId, blockerId: { in: friends } }] },
+          select: { blockerId: true, blockedId: true },
+        }),
+        tx.shunItemDaily.findMany({
+          where: { day, userId: { in: friends }, giftsReceived: { gte: rules.giftsReceived } },
+          select: { userId: true },
+        }),
+      ])
+      const excluded = new Set([...full.map(({ userId }) => userId),
+        ...blocks.map(({ blockerId, blockedId }) => blockerId === senderId ? blockedId : blockerId)])
+      // A fresh seed per request gives each eligible friend the same chance.
+      // Reusing it inside a transaction retry preserves the same random order.
+      const candidates = eligibleFriends.filter(({ id }) => !excluded.has(id)).map(({ id }) => ({
+        id, rank: createHmac('sha256', matchSeed).update(id).digest('hex'),
+      })).sort((a, b) => a.rank.localeCompare(b.rank))
+      const receiverId = rules.giftsReceived > 0 ? candidates[0]?.id : undefined
+      if (!receiverId) throw new ShunError('NO_GIFT_FRIEND', '暂无符合条件的通讯录好友。')
+
       const pool = (Object.keys(SHUN_GIFT_WEIGHTS) as Array<keyof typeof SHUN_GIFT_WEIGHTS>)
         .map((code) => [code, rules.gifts[code]] as const)
-      if (pool.some(([code, weight]) => weight > 0 && !active.definitions.some((item) => item.code === code && item.enabled))) {
-        throw new ShunError('DISABLED', '天使的礼物奖池暂不可用。')
-      }
-      const code = drawShunItem(pool)
+      const code = drawShunItem(pool, () => itemRoll)
+      const name = draft.definitions.find((item) => item.code === code)?.name ?? SHUN_ITEM_CATALOG[code].name
       const configVersion = active.version
       const { entry: sent } = await postShunItemMovement(tx, {
         userId: senderId, code: 'FRIEND_GIFT', type: 'GIFT_SENT', requestKey, day, configVersion,
@@ -1052,23 +1070,23 @@ export async function sendShunItemGift(senderId: string, receiverId: string, req
         data: { senderId, receiverId, sentEntryId: sent.id, receivedEntryId: received.id },
       })
       await tx.shunItemDaily.upsert({
-        where,
+        where: { userId_day: { userId: receiverId, day } },
         create: { userId: receiverId, day, giftsReceived: 1 },
         update: { giftsReceived: { increment: 1 } },
       })
-      await notify(tx, gift.id, receiverId, '天使的礼物', `好友送给你一件顺大师道具 · ${SHUN_ITEM_CATALOG[code].name}`,
+      const [senderPerson, receiver] = await Promise.all([shunPerson(tx, senderId), shunPerson(tx, receiverId)])
+      await notify(tx, gift.id, receiverId, '天使的礼物',
+        `你的好友 ${senderPerson?.nickname ?? 'EF'} 为你送来了一份天使的礼物，你获得了道具『${name}』！`,
         'item-gift', '/shun-master?items=1')
-      return { id: gift.id, code }
+      return { id: gift.id, code, name, receiver }
     })
   } catch (error) {
-    if (error instanceof ShunItemInventoryError && error.code === 'MISSING_USER') throw unavailable()
     if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
       throw new ShunError('ITEM_STOCK', '天使的礼物库存不足。', 409)
     }
     throw error
   }
 }
-
 type PendingShunCode = 'DOUBLE_AMOUNT' | 'EXTRA_SUSPECT'
 
 async function releaseShunPending(
@@ -1250,4 +1268,18 @@ export async function useShunRevenge(userId: string, roundId: string, clock = ()
     }
     throw error
   }
+}
+
+export async function recentShunItemDrop(userId: string) {
+  if (!shunItemsFeatureEnabled()) return { drop: null }
+  const active = await prisma.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, select: { enabled: true } })
+  if (!active?.enabled) return { drop: null }
+  const entry = await prisma.shunItemEntry.findFirst({
+    where: { userId, type: 'COMMUNITY_DROP', createdAt: { gte: new Date(Date.now() - 120_000) } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { id: true, code: true, config: { select: { definitions: { select: { code: true, name: true } } } } },
+  })
+  return { drop: entry ? {
+    id: entry.id, name: entry.config.definitions.find((item) => item.code === entry.code)?.name ?? SHUN_ITEM_CATALOG[entry.code].name,
+  } : null }
 }
