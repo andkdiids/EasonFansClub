@@ -301,7 +301,7 @@ async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = fal
   const visible = side === 'out' || round.result !== null
   return {
     id: round.id, amount: round.amount, recovered: round.recovered, result: round.result,
-    createdAt: round.createdAt, goldenUntil: round.goldenUntil, canCapture: (round.candidates as string[]).length === 3,
+    createdAt: round.createdAt, goldenUntil: round.goldenUntil, canCapture: [3, 4].includes((round.candidates as string[]).length),
     // The platform bonus is part of the capturer's own settlement view. It is
     // never shown to anybody else and never leaks into the caught player's copy.
     bonusAwarded: round.bonusAwarded,
@@ -373,7 +373,7 @@ function decoyCandidate(row: { id: string; avatarUrl: string | null; lastActiveA
  * touches the ledger, so the settlement transaction stays short.
  */
 async function selectDecoys(tx: Tx, input: {
-  actorId: string; victimId: string; actorHasAvatar: boolean; actorTier: number
+  actorId: string; victimId: string; actorHasAvatar: boolean; actorTier: number; count?: number
 }) {
   const links = await tx.friendship.findMany({
     where: { OR: [{ userAId: input.victimId }, { userBId: input.victimId }] },
@@ -398,7 +398,7 @@ async function selectDecoys(tx: Tx, input: {
     friends: friends.map(decoyCandidate),
     active: active.map(decoyCandidate),
     fallback: fallback.map(decoyCandidate),
-  }, { id: input.actorId, hasAvatar: input.actorHasAvatar, tier: input.actorTier }, 2, randomInt, [input.victimId])
+  }, { id: input.actorId, hasAvatar: input.actorHasAvatar, tier: input.actorTier }, input.count ?? 2, randomInt, [input.victimId])
 }
 
 /**
@@ -410,7 +410,7 @@ async function selectDecoys(tx: Tx, input: {
  * the instant the qualification checks actually run. Tests inject a frozen
  * clock here instead of relying on the machine's real time.
  */
-export async function shunAttempt(actorId: string, requestId: string, clock: () => Date = () => new Date()) {
+export async function shunAttempt(actorId: string, requestId: string, clock: () => Date = () => new Date(), targetFriendId?: string) {
   const now = clock()
   const day = shunDay(now)
   // Captured for the post-commit badge refresh of both sides of the transfer.
@@ -428,7 +428,11 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     const previous = await tx.shunMasterRound.findUnique({ where: { actorId_requestId: { actorId, requestId } } })
     // A replay of a completed request must never take a second fee, and must
     // never reopen the letter decision either.
+    if (previous && targetFriendId && (previous.victimId !== targetFriendId || !await tx.shunItemRoundEffect.findUnique({
+      where: { roundId_code: { roundId: previous.id, code: 'TARGET_FRIEND' } },
+    }))) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
     if (previous) return present(tx, previous, 'out')
+    if (targetFriendId && !shunItemsFeatureEnabled()) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
     // Authoritative opening-hours gate. Re-read inside the transaction (not the
     // pre-transaction snapshot) so a boundary crossing cannot be bypassed, and
@@ -471,6 +475,8 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     // The population and its activity tiers were read before the transaction;
     // only the per-actor exclusions and the victim verification stay serialised.
     const eligibleTargets = population.filter((target) => !targetExclusions.has(target.id))
+    const targeted = targetFriendId ? eligibleTargets.find((target) => target.id === targetFriendId && friendIds.has(target.id)) : undefined
+    if (targetFriendId && !targeted) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
     if (!eligibleTargets.length) {
       const funded = await tx.user.count({ where: { ...transactionAccount, points: { gt: 0 } } })
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
@@ -493,7 +499,7 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       ? 'DICE_LOSS'
       : config.friendChance <= 0 ? 'FRIEND_CHANCE_OFF'
         : friendIds.size === 0 ? 'NO_FRIENDS' : 'POOL_EMPTY_AFTER_FILTERS'
-    const victim = pickStratified(friendPoolUsed ? friendPool : eligibleTargets, config.weights, randomInt)
+    const victim = targeted ?? pickStratified(friendPoolUsed ? friendPool : eligibleTargets, config.weights, randomInt)
     if (!victim) {
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '没有符合条件的顺取目标', source: 'WEB', operatorType: 'USER',
@@ -507,18 +513,41 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     const victimBalance = accounts.get(victim.id)
     if (actorBalance === undefined || actorBalance < 0 || victimBalance === undefined || victimBalance <= 0 || shunDay(settledAt) !== day
       || await tx.user.count({ where: { ...transactionAccount, id: { in: [actorId, victim.id] } } }) !== 2) {
+      if (targeted) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
       throw new ShunError('BALANCE', '账户状态或结算日期已变化，顺取次数未扣除。')
     }
+    if (targeted) {
+      const [userAId, userBId] = [actorId, victim.id].sort()
+      const friendship = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM Friendship WHERE userAId = ${userAId} AND userBId = ${userBId} FOR UPDATE`
+      const blocked = await tx.block.findFirst({
+        where: { OR: [{ blockerId: actorId, blockedId: victim.id }, { blockerId: victim.id, blockedId: actorId }] },
+        select: { blockerId: true },
+      })
+      if (!friendship.length || blocked) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
+    }
     const rolled = weightedIndex(config.probabilities) + 1
-    const amount = Math.min(rolled, victimBalance)
+    const pending = shunItemsFeatureEnabled() ? await currentShunPending(tx, actorId, day) : null
+    if (targeted && pending) throw new ShunError('ITEM_PENDING', '请先取消待生效道具。')
+    const itemCode = targeted ? 'TARGET_FRIEND' : pending?.code
+    const activeItems = itemCode && await tx.shunItemConfigVersion.findFirst({
+      orderBy: { version: 'desc' }, include: { definitions: { where: { code: itemCode, enabled: true } } },
+    })
+    const effect = activeItems && activeItems.enabled && activeItems.definitions.length ? itemCode : null
+    if (targeted) {
+      const inventory = await tx.shunItemInventory.findUnique({ where: { userId_code: { userId: actorId, code: 'TARGET_FRIEND' } } })
+      if (!effect || !inventory?.available) throw new ShunError('ITEM_STOCK', '任我顺暂不可使用。')
+    }
+    const additionalSuspect = effect === 'EXTRA_SUSPECT'
+    const amount = Math.min(effect === 'DOUBLE_AMOUNT' ? Math.min(rolled * 2, 14) : rolled, victimBalance)
     // Decoys are chosen from the victim's friends first, then from recently
     // active accounts, always preferring the same public look as the real actor
     // so the true answer cannot be spotted by avatar or activity alone.
     const selectedDecoys = await selectDecoys(tx, {
       actorId, victimId: victim.id, actorHasAvatar: !!actor.avatarUrl,
-      actorTier: recencyTier(actor.lastActiveAt),
+      actorTier: recencyTier(actor.lastActiveAt), count: additionalSuspect ? 3 : 2,
     })
-    if (selectedDecoys.length !== 2) {
+    if (selectedDecoys.length !== (additionalSuspect ? 3 : 2)) {
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '候选不足，未扣除挂号费', source: 'WEB', operatorType: 'USER', metadata: { reason: 'INSUFFICIENT_DECOYS' } } })
       return null
@@ -530,7 +559,7 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       goldenDecoyId: selectedDecoys[0],
       // Match-source audit for the admin-only statistics. Never exposed to a
       // player, never part of a notification or a letter.
-      friendHit: friendPoolUsed, victimTier: victim.tier,
+      friendHit: !!targeted || friendPoolUsed, victimTier: victim.tier,
       friendPoolSize: friendPool.length,
       friendPoolFallback,
       // The transfer is settled now; the victim is told once the actor decides
@@ -541,6 +570,13 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { reserved: { increment: amount } } })
     await ledger(tx, round.id, actorId, actorBalance, amount, 'take')
     await ledger(tx, round.id, victim.id, victimBalance, -amount, 'take')
+    if (effect && activeItems) {
+      const { entry } = await postShunItemMovement(tx, {
+        userId: actorId, code: effect, type: 'USED', requestKey: `round:${round.id}`, day, configVersion: activeItems.version,
+      }, { consumePending: !!pending })
+      if (pending) await tx.shunItemPending.delete({ where: { userId: actorId } })
+      await tx.shunItemRoundEffect.create({ data: { roundId: round.id, code: effect, entryId: entry.id, amount } })
+    }
     if (itemDaily && played.length >= config.attempts && itemDaily.extraAttemptsUsed < itemDaily.extraAttemptsGranted) {
       await tx.shunItemDaily.update({
         where: { userId_day: { userId: actorId, day } },
@@ -680,16 +716,18 @@ export function shunCapture(userId: string, id: string, guess?: { mode: number; 
     actorId = round.actorId
     if (round.result) return { record: await present(tx, round, 'in') }
     const candidates = round.candidates as string[]
-    if (candidates.length !== 3) throw new ShunError('UNAVAILABLE', '可用嫌疑人不足，本次不可抓捕。')
+    if (candidates.length !== 3 && candidates.length !== 4) throw new ShunError('UNAVAILABLE', '可用嫌疑人不足，本次不可抓捕。')
     const accounts = guess ? await lockAccounts(tx, [round.actorId, userId]) : null
     const now = new Date()
-    const mode = captureMode(now, round.goldenUntil)
+    const golden = captureMode(now, round.goldenUntil) === 2
+    const mode = golden ? candidates.length - 1 : candidates.length
     if (guess && guess.mode !== mode) throw new ShunError('MODE_CHANGED', '抓捕模式已变化，请重新查看候选人。')
-    const visible = mode === 2 ? candidates.filter((candidate) => candidate === round.actorId || candidate === round.goldenDecoyId) : candidates
+    const hidden = golden ? [...candidates].reverse().find((candidate) => candidate !== round.actorId && candidate !== round.goldenDecoyId) : undefined
+    const visible = candidates.filter((candidate) => candidate !== hidden)
     const people = await Promise.all(visible.map((candidate) => shunPerson(tx, candidate)))
     if (people.some((person) => person === null)) throw new ShunError('UNAVAILABLE', '候选账号不可展示，本次不可抓捕。')
     const options = people.filter((person) => person !== null)
-    if (!guess || !accounts) return { mode, candidates: options, goldenUntil: round.goldenUntil, serverNow: now }
+    if (!guess || !accounts) return { mode, golden, candidates: options, goldenUntil: round.goldenUntil, serverNow: now }
     const chosen = options.findIndex((person) => person.uid === guess.uid)
     if (chosen < 0) throw new ShunError('INVALID_CHOICE', '请选择当前候选名单中的 EF。', 400)
     const selectedId = visible[chosen]
@@ -933,6 +971,7 @@ export async function shunItemBox(userId: string) {
       include: { definitions: { select: { code: true, name: true, description: true, icon: true, rarity: true, enabled: true } } },
     })
     if (!active?.enabled) return { enabled: false }
+    await currentShunPending(tx, userId, shunDay(new Date()))
     const inventory = await tx.shunItemInventory.findMany({ where: { userId }, select: { code: true, available: true, pending: true } })
     const history = await tx.shunItemEntry.findMany({
       where: { userId },
@@ -1013,6 +1052,129 @@ export async function sendShunItemGift(senderId: string, receiverId: string, req
     if (error instanceof ShunItemInventoryError && error.code === 'MISSING_USER') throw unavailable()
     if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
       throw new ShunError('ITEM_STOCK', '天使的礼物库存不足。', 409)
+    }
+    throw error
+  }
+}
+
+type PendingShunCode = 'DOUBLE_AMOUNT' | 'EXTRA_SUSPECT'
+
+async function releaseShunPending(
+  tx: Tx,
+  pending: { userId: string; code: import('@prisma/client').ShunItemCode; reservationId: string },
+  day: string,
+  requestKey: string,
+) {
+  const reservation = await tx.shunItemEntry.findUniqueOrThrow({ where: { id: pending.reservationId } })
+  await postShunItemMovement(tx, {
+    userId: pending.userId, code: pending.code, type: 'RELEASED', requestKey, day, configVersion: reservation.configVersion,
+  })
+  await tx.shunItemPending.delete({ where: { userId: pending.userId } })
+}
+
+async function currentShunPending(tx: Tx, userId: string, day: string) {
+  const pending = await tx.shunItemPending.findUnique({ where: { userId } })
+  if (!pending || pending.day === day) return pending
+  await releaseShunPending(tx, pending, day, `expire:${pending.reservationId}`)
+  return null
+}
+
+export async function setShunItemPending(userId: string, code: PendingShunCode, requestId: string, cancel: boolean) {
+  if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+  try {
+    return await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [userId])
+      const type = cancel ? 'RELEASED' : 'RESERVED'
+      const requestKey = `pending:${requestId}`
+      const prior = await tx.shunItemEntry.findUnique({
+        where: { userId_type_requestKey: { userId, type, requestKey } },
+      })
+      if (prior) {
+        if (prior.code !== code) throw new ShunError('REQUEST_CONFLICT', '该请求已用于另一件道具。')
+        return { applied: true }
+      }
+
+      const day = shunDay(new Date())
+      const pending = await currentShunPending(tx, userId, day)
+      if (cancel) {
+        if (!pending || pending.code !== code) throw new ShunError('ITEM_PENDING', '该道具当前没有待生效效果。')
+        await releaseShunPending(tx, pending, day, requestKey)
+        return { applied: true }
+      }
+
+      if (pending) throw new ShunError('ITEM_PENDING', '已有一件道具待生效，请先取消。')
+      const active = await tx.shunItemConfigVersion.findFirst({
+        orderBy: { version: 'desc' }, include: { definitions: { where: { code, enabled: true } } },
+      })
+      if (!active?.enabled || !active.definitions.length) throw new ShunError('DISABLED', '该道具暂不可使用。')
+      const account = await tx.user.findFirst({ where: { id: userId, ...transactionAccount }, select: { id: true } })
+      if (!account) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
+      const { entry } = await postShunItemMovement(tx, { userId, code, type, requestKey, day, configVersion: active.version })
+      await tx.shunItemPending.create({ data: { userId, code, day, reservationId: entry.id } })
+      return { applied: true }
+    })
+  } catch (error) {
+    if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
+      throw new ShunError('ITEM_STOCK', '道具库存不足。', 409)
+    }
+    throw error
+  }
+}
+
+export async function retryShunCapture(userId: string, roundId: string) {
+  if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+  try {
+    return await shunTransaction(async (tx) => {
+      await settings(tx)
+      const round = await tx.shunMasterRound.findFirst({ where: { id: roundId, victimId: userId } })
+      if (!round) throw new ShunError('NOT_FOUND', '未找到这条记录。', 404)
+      const prior = await tx.shunItemRoundEffect.findUnique({
+        where: { roundId_code: { roundId, code: 'RETRY_CAPTURE' } },
+      })
+      if (prior) return { recovered: prior.amount }
+      if (round.result !== 'FAILED' || round.recovered !== 0) {
+        throw new ShunError('INVALID_RESULT', '只有抓捕失败且尚未追回的记录可使用时光倒流。')
+      }
+      const active = await tx.shunItemConfigVersion.findFirst({
+        orderBy: { version: 'desc' },
+        include: { definitions: { where: { code: 'RETRY_CAPTURE', enabled: true } } },
+      })
+      if (!active?.enabled || !active.definitions.length) throw new ShunError('DISABLED', '时光倒流暂不可使用。')
+      const accounts = await lockAccounts(tx, [round.actorId, userId])
+      const actorBalance = accounts.get(round.actorId)
+      const receiver = accounts.get(userId)
+      if (actorBalance === undefined || receiver === undefined) throw new ShunError('BALANCE', '目前无法完成挂号费结算。')
+      const account = await tx.user.findFirst({ where: { id: userId, ...eligible }, select: { id: true } })
+      if (!account) throw new ShunError('ACCOUNT', '当前账号无法参与顺大师。', 403)
+
+      const day = shunDay(new Date())
+      const { entry } = await postShunItemMovement(tx, {
+        userId, code: 'RETRY_CAPTURE', type: 'USED', requestKey: `round:${roundId}`, day, configVersion: active.version,
+      })
+      const debit = Math.min(Math.max(0, actorBalance), round.amount)
+      const compensation = round.amount - debit
+      const recoveryId = `${roundId}:retry`
+      await ledger(tx, recoveryId, round.actorId, actorBalance, -debit, 'recover', `shun:${roundId}:take:${round.actorId}`)
+      await ledger(tx, recoveryId, userId, receiver, debit, 'recover', `shun:${roundId}:take:${userId}`)
+      await ledger(tx, recoveryId, userId, receiver + debit, compensation, 'compensate', `shun:${roundId}:take:${userId}`)
+      // The failed capture already released the original reserve.
+      await tx.shunMasterSettings.update({ where: { id: 1 }, data: { compensated: { increment: compensation } } })
+      await tx.shunItemRoundEffect.create({
+        data: { roundId, code: 'RETRY_CAPTURE', entryId: entry.id, amount: round.amount, compensation },
+      })
+      if (compensation) await tx.userOperationLog.create({ data: {
+        userId, category: 'SHUN_MASTER', action: 'COMPENSATION', summary: '时光倒流触发挂号费补偿',
+        source: 'WEB', operatorType: 'SYSTEM', targetType: 'ShunMasterRound', targetId: roundId, riskLevel: 'MEDIUM',
+        metadata: { compensation, roundId, item: 'RETRY_CAPTURE' },
+      } })
+      await notify(tx, roundId, userId, '时光倒流', `你成功追回了 ${round.amount} 挂号费！`, 'retry-capture')
+      await notify(tx, roundId, round.actorId, '时光倒流', `此前顺取的 ${round.amount} 挂号费已被追回。`,
+        'retry-capture-actor', `/shun-master?record=${roundId}&side=out`)
+      return { recovered: round.amount }
+    })
+  } catch (error) {
+    if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
+      throw new ShunError('ITEM_STOCK', '时光倒流库存不足。', 409)
     }
     throw error
   }

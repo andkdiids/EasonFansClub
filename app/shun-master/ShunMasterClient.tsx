@@ -29,7 +29,7 @@ type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining:
   openHours?: OpenHours
   serverNow: string }
 type Records = { records: Round[]; focused: Round | null; nextCursor: string | null; windowAt: string }
-type Capture = { mode: number; candidates: Person[]; serverNow: string; goldenUntil: string }
+type Capture = { mode: number; golden?: boolean; candidates: Person[]; serverNow: string; goldenUntil: string }
 type Side = 'in' | 'out'
 
 class RequestError extends Error {
@@ -552,7 +552,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const canSendCapture = captureLength > 0 && captureLength <= MESSAGE_MAX && !busy
   const investigation = (recordId: string | undefined) => <>
         {capture && capture.id === recordId && <section className={styles.capture} aria-label="抓捕追回" id="shun-capture" tabIndex={-1}>
-          <h2>{capture.data.mode === 2 ? `黄金抓捕期 · ${countdown(remaining(capture.data.goldenUntil))}` : '三选一抓捕'}</h2>
+          <h2>{(capture.data.golden ?? capture.data.mode === 2) ? `黄金抓捕期 · ${countdown(remaining(capture.data.goldenUntil))}` : capture.data.mode === 4 ? '四选一抓捕' : '三选一抓捕'}</h2>
           <fieldset><legend>选择一位 EF</legend>{capture.data.candidates.map((person) => <label key={person.uid}>
             <input type="radio" name="suspect" checked={person.uid === selected} onChange={() => setSelected(person.uid)} />
             <PersonLabel person={person} />
