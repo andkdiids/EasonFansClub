@@ -34,7 +34,7 @@ test('normal users and partial admins need post_manage, including delegated POST
 test('native review payload keeps pagination, pending count, full post body and author image', () => {
   assert.match(center, /const PAGE_SIZE = 40/)
   assert.match(center, /hasMore: start \+ PAGE_SIZE < total/)
-  assert.match(center, /targetItem: targetItem && \{ \.\.\.targetItem, history: targetHistory \}/)
+  assert.match(center, /targetItem: targetWithHistory/)
   assert.match(center, /avatarUrl: row\.User\.Profile\?\.avatarUrl/)
   assert.match(center, /body: postContentPlainText\(row\.content, row\.richContent\)/)
   assert.match(center, /status = parseReviewStatus\(statusParam\)/)

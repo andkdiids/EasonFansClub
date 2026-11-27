@@ -24,6 +24,8 @@ on:
       - 'app/api/admin/users/**'
       - 'app/api/admin/user-operations/**'
       - 'app/api/admin/admins/**'
+      - 'app/api/admin/replies/**'
+      - 'app/api/replies/**'
       - 'lib/admin-user-profile.ts'
       - 'lib/clinic-service.ts'
       - 'tests/clinic-moderation-delete-mysql.test.ts'

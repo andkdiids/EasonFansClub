@@ -14,6 +14,7 @@ import { getForumBoardDisplayName, mergeForumBoardOptions } from '@/lib/boards'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { postContentPlainText } from '@/lib/share-metadata'
 import { loadPostModerationHistoryByPostIds } from '@/lib/post-moderation-history'
+import { withReviewTargetHistory } from '@/lib/review-target-history'
 import { prisma } from '@/lib/prisma'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getSalonEditReviewPostIds } from '@/lib/salon-review-notifications'
@@ -366,9 +367,7 @@ export async function GET(request: Request) {
   // adapter's bounded prefetch window.
   const scopedCounts = countRows.filter((row) => selected.some((definition) => definition.type === row.type))
   const targetItem = targetBatches.flat().find((item) => item.sourceId === targetId) || null
-  const targetHistory = targetItem?.sourceType === 'POST'
-    ? (await loadPostModerationHistoryByPostIds([targetItem.sourceId], 'admin.review.detail')).get(targetItem.sourceId) ?? []
-    : []
+  const targetWithHistory = await withReviewTargetHistory(targetItem, loadPostModerationHistoryByPostIds)
   const total = scopedCounts.reduce((sum, row) => sum + row[status.toLowerCase() as 'pending' | 'approved' | 'rejected'], 0)
   const start = (page - 1) * PAGE_SIZE
   const items = allItems.slice(start, start + PAGE_SIZE)
@@ -381,7 +380,7 @@ export async function GET(request: Request) {
     targetId,
     targetFound: targetId ? Boolean(targetItem) : undefined,
     targetStatus: targetItem?.status,
-    targetItem: targetItem && { ...targetItem, history: targetHistory },
+    targetItem: targetWithHistory,
     type: sourceType,
     status,
     keyword,

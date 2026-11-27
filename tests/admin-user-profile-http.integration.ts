@@ -103,4 +103,23 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.equal(await prisma.adminAction.count({
     where: { targetUserId: target.id, adminId: admin.id, action: 'UPDATE_USER_ROLE' },
   }), 2)
+
+  const board = await prisma.board.create({ data: { name: '评论测试', slug: 'reply-qa-' + randomUUID() } })
+  const post = await prisma.post.create({ data: { title: '隔离测试帖', content: '正文', authorId: admin.id, boardId: board.id } })
+  const reply = await prisma.reply.create({ data: { content: '隔离测试评论', authorId: target.id, postId: post.id } })
+  const replies = origin + '/api/admin/replies'
+  const search = replies + '?' + new URLSearchParams({ keyword: reply.id })
+  assert.equal((await fetch(search, { headers: targetBearer })).status, 403)
+  const listed = await fetch(search, { headers: adminBearer })
+  assert.equal(listed.status, 200)
+  assert.deepEqual((await listed.json()).items.map((item: { id: string }) => item.id), [reply.id])
+  const remove = (headers: Record<string, string>) => fetch(replies + '?id=' + reply.id, {
+    method: 'DELETE', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: '隔离审核测试' }),
+  })
+  assert.equal((await remove(targetBearer)).status, 403)
+  assert.equal((await remove({ ...browser, Origin: 'https://untrusted.example.invalid' })).status, 403)
+  const outcomes = await Promise.all([remove(adminBearer), remove(adminBearer)])
+  assert.deepEqual(outcomes.map(response => response.status).sort(), [200, 409])
+  assert.equal(await prisma.adminAction.count({ where: { replyId: reply.id, action: 'DELETE_REPLY', reason: '隔离审核测试' } }), 1)
 })
