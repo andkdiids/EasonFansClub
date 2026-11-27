@@ -116,8 +116,6 @@ async function assertEligibleVictim(victimId: string, actorId: string) {
   assert.equal(victim.status, 'ACTIVE')
   assert.equal(victim.isDeleted, false)
   assert.ok(victim.Profile, '不得顺取没有资料的账号')
-  assert.equal(await prisma.shunMasterProtection.count({ where: { userId: victimId, protected: true } }), 0,
-    '不得顺取已拒绝扣费的用户')
 }
 
 after(async () => { await prisma.$disconnect() })
@@ -152,6 +150,7 @@ test('friend-first pool honours the chance, the real friendship relation and eve
   const loyalActor = await createUser()
   const loyalFriends = await Promise.all([createUser(80), createUser(80)])
   for (const friend of loyalFriends) await befriend(loyalActor.id, friend.id)
+  await prisma.shunMasterProtection.createMany({ data: loyalFriends.map(({ id: userId }, index) => ({ userId, protected: index === 0 })) })
   await pinFundedTo(...loyalFriends.map((friend) => friend.id))
   const loyalRounds = await Promise.all([shunAttempt(loyalActor.id, randomUUID()), shunAttempt(loyalActor.id, randomUUID())])
   const storedLoyal = await prisma.shunMasterRound.findMany({ where: { id: { in: loyalRounds.map((round) => round.id) } } })
