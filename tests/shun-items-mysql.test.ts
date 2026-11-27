@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { prisma } from '../lib/prisma'
+import { consumeRegistrationFee } from '../lib/registration-fee'
 import { defaultShunItemDefinitions, defaultShunItemRules } from '../lib/shun-item-config'
 import { lockShunItemUsers, postShunItemMovement, reconcileShunItemInventory } from '../lib/shun-item-inventory'
 import { sendShunItemGift, setShunEnabled, shunStatus, shunTransaction, updateShunConfig, applyShunExtraAttempt, shunAttempt, shunCapture, shunItemBox, setShunItemPending, retryShunCapture, settleShunRevenge } from '../lib/shun-master'
@@ -198,6 +199,42 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     const directed = await shunAttempt(sender.id, randomUUID(), undefined, chosen.id)
     assert.equal(directed.person?.uid, chosen.uid)
     assert.equal(await prisma.shunItemRoundEffect.count({ where: { roundId: directed.id, code: 'TARGET_FRIEND' } }), 1)
+
+    const [drainedActor, compensatedVictim] = await Promise.all([fixture(), fixture(40)])
+    const [pairA, pairB] = [drainedActor.id, compensatedVictim.id].sort()
+    await prisma.friendship.create({ data: { userAId: pairA, userBId: pairB } })
+    await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [drainedActor.id, compensatedVictim.id])
+      for (const [userId, code] of [[drainedActor.id, 'TARGET_FRIEND'], [compensatedVictim.id, 'RETRY_CAPTURE']] as const) {
+        await postShunItemMovement(tx, {
+          userId, code, day, type: 'WEEKLY_REWARD', configVersion: config.version, requestKey: 'compensation:' + code,
+        })
+      }
+    })
+    const claim = await shunAttempt(drainedActor.id, randomUUID(), undefined, compensatedVictim.id)
+    const guess = await shunCapture(compensatedVictim.id, claim.id)
+    assert.ok(guess.candidates && guess.mode)
+    const decoy = guess.candidates.find((candidate) => candidate.uid !== drainedActor.uid)
+    assert.ok(decoy)
+    await shunCapture(compensatedVictim.id, claim.id, { mode: guess.mode, uid: decoy.uid })
+    await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [drainedActor.id])
+      await consumeRegistrationFee(tx, {
+        userId: drainedActor.id, amount: claim.amount, action: 'ACTIVITY_REGISTRATION_FEE',
+        reason: 'Synthetic compensation fixture', businessKey: 'fixture-spend:' + claim.id,
+      })
+    })
+    const beforeCompensated = await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })
+    assert.deepEqual(await retryShunCapture(compensatedVictim.id, claim.id), { recovered: claim.amount })
+    assert.deepEqual(await retryShunCapture(compensatedVictim.id, claim.id), { recovered: claim.amount })
+    const afterCompensated = await prisma.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })
+    assert.equal(afterCompensated.compensated - beforeCompensated.compensated, claim.amount)
+    assert.equal(await prisma.user.findUniqueOrThrow({ where: { id: drainedActor.id } }).then((row) => row.points), 0)
+    assert.equal(await prisma.user.findUniqueOrThrow({ where: { id: compensatedVictim.id } }).then((row) => row.points), 40)
+    assert.equal(await prisma.pointLog.count({
+      where: { userId: compensatedVictim.id, action: 'SHUN_COMPENSATION', points: claim.amount },
+    }), 1)
+    assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, compensatedVictim.id)), [])
 
     const weeklyUser = await fixture()
     const currentMonday = new Date(getShanghaiWeekKey(now) + 'T00:00:00+08:00')

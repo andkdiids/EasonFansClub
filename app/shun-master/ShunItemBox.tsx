@@ -28,7 +28,7 @@ export type ShunBoxData = { enabled: false } | {
   history: { id: string; code: string; type: string; createdAt: string }[]
 }
 
-type Friend = { id: string; displayName: string }
+type Friend = { id: string; displayName: string; available: boolean }
 
 export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, delivery, onUse, onTarget }: {
   box: Extract<ShunBoxData, { enabled: true }>
@@ -53,12 +53,18 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
 
   async function selectFriend() {
     setSelecting(true)
+    setFriends(undefined)
     setError('')
     try {
-      const response = await fetch('/api/friends/list?directory=1', { cache: 'no-store' })
-      if (!response.ok) throw new Error()
-      const data: { friends: Friend[] } = await response.json()
-      setFriends(data.friends)
+      const [directory, eligibility] = await Promise.all([
+        fetch('/api/friends/list?directory=1', { cache: 'no-store' }),
+        fetch('/api/shun-master/target-friends', { cache: 'no-store' }),
+      ])
+      if (!directory.ok || !eligibility.ok) throw new Error()
+      const data: { friends: Omit<Friend, 'available'>[] } = await directory.json()
+      const { eligibleIds }: { eligibleIds: string[] } = await eligibility.json()
+      const eligible = new Set(eligibleIds)
+      setFriends(data.friends.map((friend) => ({ ...friend, available: eligible.has(friend.id) })))
     } catch {
       setError('无法加载通讯录，请重试。')
     }
@@ -104,10 +110,10 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
       {error && <p role="alert">{error}</p>}
       {friends?.length === 0 && <p>通讯录暂无好友。</p>}
       <ul className={styles.itemFriends}>{friends?.map((friend) => <li key={friend.id}>
-        <button type="button" disabled={busy} onClick={() => {
+        <button type="button" disabled={busy || !friend.available} onClick={() => {
           setSelecting(false)
           onTarget(friend.id)
-        }}>{friend.displayName}</button>
+        }}>{friend.displayName}{friend.available ? '' : ' · 暂不可顺取'}</button>
       </li>)}</ul>
     </section>}
     <h3>获取、使用及赠送记录</h3>

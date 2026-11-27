@@ -1283,3 +1283,43 @@ export async function recentShunItemDrop(userId: string) {
     id: entry.id, name: entry.config.definitions.find((item) => item.code === entry.code)?.name ?? SHUN_ITEM_CATALOG[entry.code].name,
   } : null }
 }
+
+export async function shunTargetFriends(actorId: string) {
+  if (!shunItemsFeatureEnabled()) return { eligibleIds: [] }
+  const day = shunDay(new Date())
+  const [friends, actor, draft, previous, blocks] = await Promise.all([
+    loadFriendIds(actorId),
+    prisma.user.findFirst({
+      where: { ...transactionAccount, id: actorId },
+      select: { email: true, emailVerifiedAt: true, phone: true, phoneVerifiedAt: true },
+    }),
+    prisma.shunMasterSettings.findUnique({ where: { id: 1 }, select: { config: true } }),
+    prisma.shunMasterRound.findMany({ where: { actorId, day }, select: { victimId: true } }),
+    prisma.block.findMany({
+      where: { OR: [{ blockerId: actorId }, { blockedId: actorId }] },
+      select: { blockerId: true, blockedId: true },
+    }),
+  ])
+  if (!actor || !friends.size) return { eligibleIds: [] }
+  const config = validateShunConfig(draft?.config) ?? defaultShunConfig
+  const excluded = new Set([actorId, ...previous.map(({ victimId }) => victimId),
+    ...blocks.map(({ blockerId, blockedId }) => blockerId === actorId ? blockedId : blockerId)])
+  const ids = [...friends].filter((id) => !excluded.has(id))
+  if (!ids.length) return { eligibleIds: [] }
+  const linked: Prisma.UserWhereInput[] = [
+    ...(actor.email && actor.emailVerifiedAt ? [{ email: actor.email, emailVerifiedAt: { not: null } }] : []),
+    ...(actor.phone && actor.phoneVerifiedAt ? [{ phone: actor.phone, phoneVerifiedAt: { not: null } }] : []),
+  ]
+  const [eligibleFriends, taken, revenges] = await Promise.all([
+    prisma.user.findMany({ where: { ...transactionAccount, id: { in: ids }, points: { gt: 0 }, NOT: linked }, select: { id: true } }),
+    prisma.shunMasterRound.groupBy({ by: ['victimId'], where: { day, victimId: { in: ids } }, _count: { _all: true } }),
+    prisma.shunItemRoundEffect.findMany({
+      where: { ...revengeReceivedWhere(day), round: { actorId: { in: ids } } },
+      select: { round: { select: { actorId: true } } },
+    }),
+  ])
+  const received = new Map(taken.map(({ victimId, _count }) => [victimId, _count._all]))
+  for (const { round } of revenges) received.set(round.actorId, (received.get(round.actorId) ?? 0) + 1)
+  // A UI hint only. shunAttempt repeats all eligibility checks under locks.
+  return { eligibleIds: eligibleFriends.filter(({ id }) => (received.get(id) ?? 0) < config.victimCap).map(({ id }) => id) }
+}

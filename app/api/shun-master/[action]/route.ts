@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
-import { recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, applyShunExtraAttempt } from '@/lib/shun-master'
+import { shunTargetFriends, recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, applyShunExtraAttempt } from '@/lib/shun-master'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -28,6 +28,12 @@ export async function GET(request: Request, { params }: Context) {
         endpoint: 'shun-master:item-drop', user: { limit: 12, windowSeconds: 60 }, ip: { limit: 240, windowSeconds: 60 },
       })
       return limited ?? json(await recentShunItemDrop(guard.user.id))
+    }
+    if (action === 'target-friends') {
+      const limited = await enforceApiRateLimit(request, guard.user.id, {
+        endpoint: 'shun-master:target-friends', user: { limit: 20, windowSeconds: 60 }, ip: { limit: 120, windowSeconds: 60 },
+      })
+      return limited ?? json(await shunTargetFriends(guard.user.id))
     }
     if (action === 'items') return json(await shunItemBox(guard.user.id))
     if (action === 'records') {
