@@ -395,7 +395,7 @@ export async function claimGrowthTask(userId: string, taskCode: GrowthTaskCode, 
   })
 }
 
-async function completedActiveDays(tx: GrowthTransaction, userId: string, weekKey: string, now = new Date()) {
+export async function completedGrowthTaskDates(tx: GrowthTransaction, userId: string, weekKey: string, now = new Date()) {
   const todayTasks = getTodayTasks()
   const todayTaskCodes = todayTasks.map((task) => task.code)
   const actionTaskCodes = todayTasks.filter((task) => task.surface === 'action').map((task) => task.code)
@@ -434,7 +434,7 @@ async function completedActiveDays(tx: GrowthTransaction, userId: string, weekKe
     prescriptionDateKeys: prescriptions.map((row) => row.dateKey),
     commentRewardCountsByDate,
     actionProgressCountsByDate,
-  }).size
+  })
 }
 
 export type WeeklyMilestoneReward = Readonly<{
@@ -468,7 +468,7 @@ export async function resolveAndGrantWeeklyMilestonesInTransaction(
   // key or the PointLog business-key idempotency guard.
   await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
   const weekKey = getShanghaiWeekKey(now)
-  const days = await completedActiveDays(tx, userId, weekKey, now)
+  const days = (await completedGrowthTaskDates(tx, userId, weekKey, now)).size
   const existingClaims = await tx.growthWeeklyMilestoneClaim.findMany({
     where: { userId, weekKey },
     select: { milestone: true, claimedAt: true },

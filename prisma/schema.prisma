@@ -1601,6 +1601,7 @@ model DirectMessage {
 
   @@index([senderId, createdAt])
   @@index([stickerId])
+  @@index([type, createdAt, id], map: "DirectMessage_shun_share_scan_idx")
 }
 
 model EmailVerification {
@@ -3850,6 +3851,7 @@ model GrowthTaskCompletion {
   @@unique([userId, taskCode, periodKey, sourceEventId])
   @@index([userId, taskCode, completedAt])
   @@index([userId, periodKey, completedAt])
+  @@index([createdAt, id], map: "GrowthTaskCompletion_shun_scan_idx")
 }
 
 model GrowthWeeklyMilestoneClaim {
@@ -7464,4 +7466,26 @@ model ShunItemRoundEffect {
   entry ShunItemEntry @relation(fields: [entryId], references: [id])
 
   @@id([roundId, code])
+}
+
+model ShunItemRewardEvent {
+  sourceType String @db.VarChar(16)
+  sourceId String
+  userId String
+  day String @db.Char(10)
+  kind String @db.VarChar(16)
+  occurrenceKey String? @db.VarChar(191)
+  configVersion Int
+  occurredAt DateTime
+  dropRoll Int
+  itemRoll Int
+  mainRoll Int
+  weeklyRolls Json
+  processedAt DateTime?
+  retryAt DateTime @default(now())
+  attempts Int @default(0)
+
+  @@id([sourceType, sourceId])
+  @@index([processedAt, retryAt])
+  @@index([userId, kind, occurrenceKey, processedAt], map: "ShunItemRewardEvent_dedupe_idx")
 }
