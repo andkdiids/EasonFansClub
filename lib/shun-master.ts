@@ -102,6 +102,139 @@ async function loadFriendIds(actorId: string) {
   return new Set(links.map((link) => link.userAId === actorId ? link.userBId : link.userAId))
 }
 
+/**
+ * Admin-only, read-only eligibility diagnosis for one target (and optionally one
+ * initiating actor's friend-pool view). Mirrors `loadTargetPopulation` and the
+ * per-actor exclusions inside `shunAttempt` field by field, so the diagnosis can
+ * never disagree with the actual draw. Returns booleans + exclusion reasons
+ * only — no email, phone or any other PII ever leaves this function.
+ */
+export async function diagnoseShunTarget(uid: number, actorUid?: number) {
+  const user = await prisma.user.findFirst({
+    where: { uid },
+    select: { id: true, uid: true, status: true, isDeleted: true, permanentlyOptedOutAt: true,
+      points: true, lastActiveAt: true, lastLoginAt: true, Profile: { select: { userId: true } } },
+  })
+  if (!user) return { found: false as const }
+  const now = new Date()
+  const day = shunDay(now)
+  const rangeStart = new Date(now.getTime() - 6 * 86400000)
+  const settingsRow = await prisma.shunMasterSettings.findUnique({ where: { id: 1 }, select: { config: true } })
+  const config = settingsRow?.config ?? null
+  const parsedConfig = validateShunConfig(config)
+
+  const [protection, receivedToday, receivedEver, checkins] = await Promise.all([
+    prisma.shunMasterProtection.findUnique({ where: { userId: user.id }, select: { protected: true, updatedAt: true } }),
+    prisma.shunMasterRound.count({ where: { victimId: user.id, day } }),
+    prisma.shunMasterRound.count({ where: { victimId: user.id } }),
+    prisma.checkIn.findMany({ where: { userId: user.id, checkinDateKey: { gte: shunDay(rangeStart), lte: day }, isMakeUp: false },
+      select: { checkinDateKey: true } }),
+  ])
+  const activeDays = new Set(checkins.map((row) => row.checkinDateKey))
+  for (const date of [user.lastActiveAt, user.lastLoginAt]) if (date && date >= rangeStart && date <= now) activeDays.add(shunDay(date))
+  const tier = activityTier(activeDays.size)
+  const effectiveConfig = parsedConfig || defaultShunConfig
+  const configFellBack = !parsedConfig
+
+  const victimCap = effectiveConfig.victimCap
+  const reasons: string[] = []
+  if (user.status !== 'ACTIVE') reasons.push('ACCOUNT_NOT_ACTIVE')
+  if (user.isDeleted) reasons.push('ACCOUNT_DELETED')
+  if (user.permanentlyOptedOutAt) reasons.push('PERMANENT_OPT_OUT')
+  if (!user.Profile) reasons.push('NO_PROFILE')
+  if (protection?.protected) reasons.push('SHUN_PROTECTION_ON')
+  if (user.points <= 0) reasons.push('ZERO_BALANCE')
+  if (receivedToday >= victimCap) reasons.push('DAILY_VICTIM_CAP_REACHED')
+  const staticEligible = reasons.length === 0
+  const inGlobalPool = staticEligible
+
+  // Optional actor view: friendship recognition + this actor's friend-pool size.
+  let actor: {
+    found: boolean
+    friendRecognized: boolean
+    friendshipCreatedAt?: string
+    actorBlockedByTarget?: boolean
+    relatedAccountsExcluded?: boolean
+    matchedToday?: number
+    friendPoolSize: number
+    friendChance: number
+    fallbackReason: string | null
+  } | null = null
+
+  if (actorUid !== undefined) {
+    const actorUser = await prisma.user.findFirst({ where: { uid: actorUid }, select: { id: true, uid: true } })
+    if (!actorUser) {
+      actor = { found: false, friendRecognized: false, friendPoolSize: 0,
+        friendChance: effectiveConfig.friendChance, fallbackReason: 'ACTOR_NOT_FOUND' }
+    } else {
+      const link = await prisma.friendship.findFirst({
+        where: { OR: [{ userAId: actorUser.id, userBId: user.id }, { userAId: user.id, userBId: actorUser.id }] },
+        select: { createdAt: true },
+      })
+      const [blockRow, actorEmail, targetContact] = await Promise.all([
+        prisma.block.findFirst({ where: { OR: [{ blockerId: actorUser.id, blockedId: user.id }, { blockerId: user.id, blockedId: actorUser.id }] }, select: { id: true } }),
+        prisma.user.findUnique({ where: { id: actorUser.id }, select: { email: true, emailVerifiedAt: true, phone: true, phoneVerifiedAt: true } }),
+        prisma.user.findUnique({ where: { id: user.id }, select: { email: true, emailVerifiedAt: true, phone: true, phoneVerifiedAt: true } }),
+      ])
+      let related = false
+      if (actorEmail && targetContact) {
+        related = Boolean(
+          (actorEmail.emailVerifiedAt && targetContact.emailVerifiedAt && actorEmail.email && actorEmail.email === targetContact.email)
+          || (actorEmail.phoneVerifiedAt && targetContact.phoneVerifiedAt && actorEmail.phone && actorEmail.phone === targetContact.phone),
+        )
+      }
+      const matchedToday = await prisma.shunMasterRound.count({
+        where: { actorId: actorUser.id, victimId: user.id, day } })
+      // Friend-pool size as `shunAttempt` would compute it: every OTHER accepted
+      // friend of the actor that currently passes the static eligibility gate.
+      let friendPoolSize = 0
+      if (effectiveConfig.friendChance > 0) {
+        const friendIds = await loadFriendIds(actorUser.id)
+        if (friendIds.size) {
+          const rows = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT u.id FROM User u
+            WHERE ${candidateAccount} AND NOT ${hasRefusedDebit} AND ${hasSpendableBalance}
+              AND u.id IN (${Prisma.join([...friendIds])})`
+          friendPoolSize = rows.length
+        }
+      }
+      actor = {
+        found: true,
+        friendRecognized: Boolean(link),
+        ...(link ? { friendshipCreatedAt: link.createdAt.toISOString() } : {}),
+        actorBlockedByTarget: Boolean(blockRow),
+        relatedAccountsExcluded: related,
+        matchedToday,
+        friendPoolSize,
+        friendChance: effectiveConfig.friendChance,
+        // Why a 100% friendChance could still draw a stranger: the friend pool
+        // the draw would have used, and the reason it would fall back.
+        fallbackReason: friendPoolSize > 0 ? null
+          : effectiveConfig.friendChance <= 0 ? 'FRIEND_CHANCE_OFF'
+            : link ? 'POOL_EMPTY_AFTER_FILTERS' : 'NO_FRIENDS',
+      }
+    }
+  }
+
+  return {
+    found: true as const,
+    uid: user.uid,
+    eligible: staticEligible,
+    inGlobalPool,
+    exclusionReasons: reasons,
+    victimCap,
+    receivedToday,
+    receivedEver,
+    protection: protection ? { protected: protection.protected, updatedAt: protection.updatedAt.toISOString() } : null,
+    permanentlyOptedOut: Boolean(user.permanentlyOptedOutAt),
+    hasSpendableBalance: user.points > 0,
+    activityTier: tier,
+    activeDays: activeDays.size,
+    configFellBack,
+    actor,
+  }
+}
+
 export class ShunError extends Error {
   /**
    * `details` carries machine-readable context for a few business rejections —
@@ -115,7 +248,17 @@ export class ShunError extends Error {
 async function settings(tx: Tx) {
   await tx.$queryRaw`SELECT id FROM ShunMasterSettings WHERE id = 1 FOR UPDATE`
   const state = await tx.shunMasterSettings.findUniqueOrThrow({ where: { id: 1 } })
-  return { state, config: validateShunConfig(state.config) || defaultShunConfig }
+  const config = validateShunConfig(state.config)
+  if (!config) {
+    // A stored config that fails validation silently falling back to the
+    // defaults once caused "friendChance=100 did not work": the UI showed 100
+    // from a stale request while every draw actually used the default 20.
+    // Surface it loudly; the operator can then fix the stored JSON instead of
+    // chasing random-number bugs that do not exist.
+    console.error('[shun-master] stored settings failed validation; falling back to defaults',
+      { rulesVersion: state.rulesVersion, config: state.config })
+  }
+  return { state, config: config || defaultShunConfig }
 }
 
 export async function shunTransaction<T>(callback: (tx: Tx) => Promise<T>) {
@@ -346,17 +489,24 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     }
     // Friend-first pool: a subset of the very same eligible set, so balance,
     // daily cap, blocks, related accounts, already-hit targets and every other
-    // existing rule keep applying. Only the draw order changes, and the pool is
-    // silently abandoned when it holds nobody.
+    // existing rule keep applying. Only the draw order changes; when it holds
+    // nobody the attempt falls back to the global pool and the exact reason is
+    // recorded on the round so "100% friendChance drew a stranger" is always
+    // diagnosable from data instead of guesswork.
     const friendPool = config.friendChance > 0 && friendIds.size
       ? eligibleTargets.filter((target) => friendIds.has(target.id))
       : []
     const friendPoolUsed = friendPool.length > 0 && friendPoolDraw(config.friendChance, randomInt)
+    const friendPoolFallback = friendPoolUsed ? null : friendPool.length > 0
+      ? 'DICE_LOSS'
+      : config.friendChance <= 0 ? 'FRIEND_CHANCE_OFF'
+        : friendIds.size === 0 ? 'NO_FRIENDS' : 'POOL_EMPTY_AFTER_FILTERS'
     const victim = pickStratified(friendPoolUsed ? friendPool : eligibleTargets, config.weights, randomInt)
     if (!victim) {
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '没有符合条件的顺取目标', source: 'WEB', operatorType: 'USER',
-        metadata: { reason: 'NO_ELIGIBLE_TIER', eligible: eligibleTargets.length } } })
+        metadata: { reason: 'NO_ELIGIBLE_TIER', eligible: eligibleTargets.length,
+          friendPoolSize: friendPool.length, friendPoolFallback } } })
       return null
     }
     const accounts = await lockAccounts(tx, [actorId, victim.id])
@@ -389,6 +539,8 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       // Match-source audit for the admin-only statistics. Never exposed to a
       // player, never part of a notification or a letter.
       friendHit: friendPoolUsed, victimTier: victim.tier,
+      friendPoolSize: friendPool.length,
+      friendPoolFallback,
       // The transfer is settled now; the victim is told once the actor decides
       // whether to write, or when this window expires (server-side sweep).
       notifyStatus: SHUN_NOTIFY_STATUS.pending,

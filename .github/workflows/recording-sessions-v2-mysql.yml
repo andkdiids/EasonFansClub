@@ -23,6 +23,7 @@ on:
       - 'tests/activity-redemption.mysql.integration.ts'
       - 'app/api/shun-master/**'
       - 'tests/shun-master-mysql.test.ts'
+      - 'tests/shun-master-match-mysql.test.ts'
       - 'lib/shun-master.ts'
       - 'lib/shun-master-rules.ts'
       - 'lib/music-listening.ts'
@@ -157,6 +158,19 @@ jobs:
             fi
           done
           pnpm exec tsx --test tests/shun-master-mysql.test.ts
+
+      - name: Verify friend-pool observability and fallback reasons on a separate isolated database
+        env:
+          DATABASE_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/ecfc_shun_match_qa?connection_limit=8
+          SHUN_MATCH_MYSQL_QA: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only \
+            -e 'CREATE DATABASE ecfc_shun_match_qa CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+          trap 'mysql --protocol=TCP -h 127.0.0.1 -uroot -precording-sessions-qa-only -e "DROP DATABASE IF EXISTS ecfc_shun_match_qa"' EXIT
+          pnpm exec prisma db push --skip-generate
+          pnpm exec tsx --test tests/shun-master-match-mysql.test.ts
 
       - name: Verify Shun Master Session and Bearer against the real HTTP server
         env:

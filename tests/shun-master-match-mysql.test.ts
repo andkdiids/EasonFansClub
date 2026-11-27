@@ -163,6 +163,11 @@ test('friend-first pool honours the chance, the real friendship relation and eve
   assert.ok(storedLoyal.every((round) => round.friendHit === true), '100% 好友概率必须命中好友池')
   assert.ok(storedLoyal.every((round) => loyalFriends.some((friend) => friend.id === round.victimId)),
     '好友池命中时目标必须是好友')
+  // Observability: the friend pool was used, so no fallback reason is recorded
+  // and the pool size reflects the eligible friends at snapshot time (>= 1; the
+  // two attempts run concurrently, each with its own exclusion snapshot).
+  assert.ok(storedLoyal.every((round) => round.friendPoolFallback === null), '命中好友池时不得记录回退原因')
+  assert.ok(storedLoyal.every((round) => round.friendPoolSize >= 1), '命中好友池时好友池大小必须 ≥ 1')
   for (const round of storedLoyal) await assertEligibleVictim(round.victimId, loyalActor.id)
 
   // --- An account without friends silently falls back to the whole pool.
@@ -173,6 +178,8 @@ test('friend-first pool honours the chance, the real friendship relation and eve
   const storedLonely = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: lonelyRound.id } })
   assert.equal(storedLonely.friendHit, false, '没有合格好友时必须回退到全站池')
   assert.equal(storedLonely.victimId, lonelyTarget.id, '回退到全站池时仍能命中普通用户')
+  assert.equal(storedLonely.friendPoolSize, 0, '无好友时好友池大小必须为 0')
+  assert.equal(storedLonely.friendPoolFallback, 'NO_FRIENDS', '无好友必须明确记录 NO_FRIENDS 而不是静默')
 
   // --- Only a real Friendship row counts: pending requests and follows never do.
   const relationActor = await createUser()
@@ -205,6 +212,7 @@ test('friend-first pool honours the chance, the real friendship relation and eve
   const storedAfterDelete = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: afterDelete.id } })
   assert.equal(storedAfterDelete.friendHit, false, '已删除的好友关系不得再进入好友池')
   assert.equal(storedAfterDelete.victimId, exFriend2.id, '删除好友后会回退到剩下的全站用户')
+  assert.equal(storedAfterDelete.friendPoolFallback, 'NO_FRIENDS', '删除好友后好友池为空的原因是 NO_FRIENDS')
 
   // --- A friend still has to clear balance, cap, block and repeat rules.
   await publish({ friendChance: 100 })
@@ -231,6 +239,8 @@ test('friend-first pool honours the chance, the real friendship relation and eve
   const storedStrict = await prisma.shunMasterRound.findUniqueOrThrow({ where: { id: strictRound.id } })
   assert.equal(storedStrict.friendHit, true)
   assert.equal(storedStrict.victimId, healthy.id, '好友池只剩一位合格好友时不得抽到不合格好友')
+  assert.equal(storedStrict.friendPoolSize, 1, '好友池大小只计通过全部资格规则的好友')
+  assert.equal(storedStrict.friendPoolFallback, null, '仍有合格好友且 100% 概率时必须使用好友池')
   const everyStrictRound = await roundsOf(strictActor.id)
   for (const ineligible of [noBalance, capped, blocked]) {
     assert.ok(everyStrictRound.every((round) => round.victimId !== ineligible.id),
