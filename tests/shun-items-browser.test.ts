@@ -413,7 +413,18 @@ test('V4.2 prescription, comment, friend post share and like use real reward fac
           const submit = () => context.request.post(base + routes[kind], { headers: { Origin: base }, data: fields[kind] })
           const response = await submit()
           assert.ok(response.ok(), kind + ': ' + response.status() + ' ' + await response.text())
-          return { kind, user, page, submit }
+          const repeat = async () => {
+            const headers = { Origin: base }
+            if (kind === 'COMMENT') {
+              const reply = await prisma.reply.findFirstOrThrow({ where: { postId: post.id, authorId: user.id, isDeleted: false } })
+              assert.ok((await context.request.delete(base + '/api/replies/' + reply.id, { headers })).ok())
+            }
+            if (kind === 'LIKE') assert.ok((await context.request.delete(base + routes.LIKE, { headers })).ok())
+            if (kind === 'SHARE') fields.SHARE.clientMessageId = randomUUID()
+            const replay = await submit()
+            assert.ok(replay.ok(), kind + ' repeat: ' + replay.status())
+          }
+          return { kind, user, page, repeat }
         }))
         for (let i = 0; i < 8; i++) await runShunItemRewardSweep()
         for (const { kind, user, page } of actions) {
@@ -426,7 +437,7 @@ test('V4.2 prescription, comment, friend post share and like use real reward fac
           const stock = await prisma.shunItemInventory.findMany({ where: { userId: user.id } })
           assert.equal(stock.reduce((sum, row) => sum + row.available, 0), 1)
         }
-        await Promise.all(actions.map(async ({ kind, page, submit }) => {
+        await Promise.all(actions.map(async ({ kind, page, repeat }) => {
           if (chance) {
             const toast = page.getByRole('link', { name: /意外收获/ })
             await toast.waitFor()
@@ -437,7 +448,7 @@ test('V4.2 prescription, comment, friend post share and like use real reward fac
             await page.reload()
             await box.getByText(/意外收获 ·/).waitFor()
           }
-          await submit()
+          await repeat()
         }))
         for (let i = 0; i < 4; i++) await runShunItemRewardSweep()
         for (const { kind, user } of actions) assert.equal(
