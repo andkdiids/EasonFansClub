@@ -13,10 +13,11 @@ import { getTodayEventDateKey } from '@/lib/today'
 import { getForumBoardDisplayName, mergeForumBoardOptions } from '@/lib/boards'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { postContentPlainText } from '@/lib/share-metadata'
+import { loadPostModerationHistoryByPostIds } from '@/lib/post-moderation-history'
 import { prisma } from '@/lib/prisma'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getSalonEditReviewPostIds } from '@/lib/salon-review-notifications'
-import { requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
 import {
   canApplyReviewDecision,
   parseReviewStatus,
@@ -365,6 +366,9 @@ export async function GET(request: Request) {
   // adapter's bounded prefetch window.
   const scopedCounts = countRows.filter((row) => selected.some((definition) => definition.type === row.type))
   const targetItem = targetBatches.flat().find((item) => item.sourceId === targetId) || null
+  const targetHistory = targetItem?.sourceType === 'POST'
+    ? (await loadPostModerationHistoryByPostIds([targetItem.sourceId], 'admin.review.detail')).get(targetItem.sourceId) ?? []
+    : []
   const total = scopedCounts.reduce((sum, row) => sum + row[status.toLowerCase() as 'pending' | 'approved' | 'rejected'], 0)
   const start = (page - 1) * PAGE_SIZE
   const items = allItems.slice(start, start + PAGE_SIZE)
@@ -377,7 +381,7 @@ export async function GET(request: Request) {
     targetId,
     targetFound: targetId ? Boolean(targetItem) : undefined,
     targetStatus: targetItem?.status,
-    targetItem,
+    targetItem: targetItem && { ...targetItem, history: targetHistory },
     type: sourceType,
     status,
     keyword,
@@ -428,6 +432,8 @@ async function performConcertDecision(sourceId: string, decision: ReviewDecision
 }
 
 export async function PATCH(request: Request) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
   const guard = await requireRequestAdmin(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
@@ -459,6 +465,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
   const guard = await requireAdmin()
   if (!guard.user) return guard.response
   const params = new URL(request.url).searchParams
