@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
-import { ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus } from '@/lib/shun-master'
+import { shunTargetFriends, recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, applyShunExtraAttempt } from '@/lib/shun-master'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +23,19 @@ export async function GET(request: Request, { params }: Context) {
       const { enabled, attempts, victimCap, goldenMinutes } = status
       return json({ enabled, attempts, victimCap, goldenMinutes, maxAmount: 7 })
     }
+    if (action === 'item-drop') {
+      const limited = await enforceApiRateLimit(request, guard.user.id, {
+        endpoint: 'shun-master:item-drop', user: { limit: 12, windowSeconds: 60 }, ip: { limit: 240, windowSeconds: 60 },
+      })
+      return limited ?? json(await recentShunItemDrop(guard.user.id))
+    }
+    if (action === 'target-friends') {
+      const limited = await enforceApiRateLimit(request, guard.user.id, {
+        endpoint: 'shun-master:target-friends', user: { limit: 20, windowSeconds: 60 }, ip: { limit: 120, windowSeconds: 60 },
+      })
+      return limited ?? json(await shunTargetFriends(guard.user.id))
+    }
+    if (action === 'items') return json(await shunItemBox(guard.user.id))
     if (action === 'records') {
       const query = new URL(request.url).searchParams
       const side = query.get('side')
@@ -53,7 +66,7 @@ export async function POST(request: Request, { params }: Context) {
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { action } = await params
-  if (action !== 'attempt' && action !== 'opt-out') return json({ message: '未找到操作。' }, 404)
+  if (action !== 'attempt' && action !== 'opt-out' && action !== 'extra-attempt' && action !== 'gift' && action !== 'pending-item') return json({ message: '未找到操作。' }, 404)
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'shun-master:' + action, user: { limit: 18, windowSeconds: 60 }, ip: { limit: 120, windowSeconds: 60 },
   })
@@ -63,10 +76,25 @@ export async function POST(request: Request, { params }: Context) {
   if (action === 'opt-out') return json(await shunPermanentOptOut(guard.user.id))
   const body = await request.json().catch(() => null)
   try {
-    if (action === 'attempt' && typeof body?.requestId === 'string'
+    if ((action === 'attempt' || action === 'extra-attempt' || action === 'gift' || action === 'pending-item') && typeof body?.requestId === 'string'
       && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(body.requestId)) {
+      if (action === 'pending-item') {
+        if ((body.code !== 'DOUBLE_AMOUNT' && body.code !== 'EXTRA_SUSPECT') || typeof body.cancel !== 'boolean') {
+          return json({ message: '请求参数无效。' }, 400)
+        }
+        return json(await setShunItemPending(guard.user.id, body.code, body.requestId, body.cancel))
+      }
+      if (action === 'gift') {
+        if (Object.keys(body).some((key) => key !== 'requestId')) return json({ message: '赠送不接受指定接收者。' }, 400)
+        return json(await sendShunItemGift(guard.user.id, body.requestId))
+      }
+      if (action === 'extra-attempt') return json(await applyShunExtraAttempt(guard.user.id, body.requestId))
       // The take is settled here and now; the optional letter is a separate,
       // later decision (`POST /api/shun-master/round/<id>/letter`).
+      if (body.friendId !== undefined && (typeof body.friendId !== 'string' || !/^[a-z0-9]{1,40}$/.test(body.friendId))) {
+        return json({ message: '请求参数无效。' }, 400)
+      }
+      if (body.friendId) return json(await shunAttempt(guard.user.id, body.requestId, undefined, body.friendId))
       return json(await shunAttempt(guard.user.id, body.requestId))
     }
     return json({ message: '请求参数无效。' }, 400)

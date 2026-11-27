@@ -1598,8 +1598,10 @@ model DirectMessage {
 
   @@unique([senderId, clientMessageId])
   @@index([conversationId, createdAt])
+
   @@index([senderId, createdAt])
   @@index([stickerId])
+  @@index([type, createdAt, id], map: "DirectMessage_shun_share_scan_idx")
 }
 
 model EmailVerification {
@@ -3849,6 +3851,7 @@ model GrowthTaskCompletion {
   @@unique([userId, taskCode, periodKey, sourceEventId])
   @@index([userId, taskCode, completedAt])
   @@index([userId, periodKey, completedAt])
+  @@index([createdAt, id], map: "GrowthTaskCompletion_shun_scan_idx")
 }
 
 model GrowthWeeklyMilestoneClaim {
@@ -4525,6 +4528,7 @@ model ProfileWallMessage {
   @@index([deletedAt])
   @@index([parentId])
   @@index([receiverId, createdAt])
+
   @@index([senderId, createdAt])
 }
 
@@ -7188,6 +7192,8 @@ model ShunMasterRound {
   /// Platform bonus actually granted (0 when the roll lost or was disabled).
   bonusAwarded  Int     @default(0)
 
+  itemEffects ShunItemRoundEffect[]
+
   @@unique([actorId, requestId])
   @@unique([actorId, day, victimId])
   @@index([victimId, day])
@@ -7215,6 +7221,7 @@ model ShunMasterAnonymousLetter {
   hiddenById  String?
 
   @@index([recipientId, createdAt])
+
   @@index([senderId, createdAt])
   @@index([hiddenAt])
 }
@@ -7240,6 +7247,7 @@ model ShunMasterCaptureLetter {
   hiddenById  String?
 
   @@index([recipientId, createdAt])
+
   @@index([senderId, createdAt])
   @@index([hiddenAt])
 }
@@ -7312,4 +7320,200 @@ model MobilePushDelivery {
 
   @@index([status, nextAttemptAt])
   @@index([userId, createdAt])
+}
+
+enum ShunItemCode {
+  EXTRA_ATTEMPT
+  FRIEND_GIFT
+  EXTRA_SUSPECT
+  REVENGE
+  TARGET_FRIEND
+  DOUBLE_AMOUNT
+  RETRY_CAPTURE
+}
+
+enum ShunItemEventType {
+  DAILY_MAIN
+  COMMUNITY_DROP
+  WEEKLY_REWARD
+  GIFT_RECEIVED
+  USED
+  GIFT_SENT
+  RESERVED
+  RELEASED
+}
+
+model ShunItemConfigVersion {
+  version Int @id @default(autoincrement())
+  createdBy String
+  createdAt DateTime @default(now())
+  enabled Boolean @default(false)
+  rules Json
+  definitions ShunItemDefinition[]
+  giftIntents ShunItemGiftIntent[]
+  entries ShunItemEntry[]
+}
+
+model ShunItemDefinition {
+  version Int
+  code ShunItemCode
+  name String @db.VarChar(64)
+  description String @db.VarChar(512)
+  icon String @db.VarChar(64)
+  rarity String @db.VarChar(16)
+  enabled Boolean
+  weight Int
+  config ShunItemConfigVersion @relation(fields: [version], references: [version])
+
+  @@id([version, code])
+}
+
+model ShunItemInventory {
+  userId String
+  code ShunItemCode
+  available Int @default(0)
+  pending Int @default(0)
+
+  @@id([userId, code])
+}
+
+model ShunItemPending {
+  userId String @id
+  code ShunItemCode
+  day String @db.Char(10)
+  reservationId String @unique @db.VarChar(191)
+
+  @@index([day])
+}
+
+model ShunItemEntry {
+  id String @id @default(cuid())
+  userId String
+  requestKey String @db.VarChar(191)
+  code ShunItemCode
+  type ShunItemEventType
+  availableDelta Int
+  pendingDelta Int
+  configVersion Int
+  day String @db.Char(10)
+  createdAt DateTime @default(now())
+  config ShunItemConfigVersion @relation(fields: [configVersion], references: [version])
+  weeklyGrant ShunItemWeeklyGrant?
+  sentGift ShunItemGift? @relation("ShunItemGiftSent")
+  receivedGift ShunItemGift? @relation("ShunItemGiftReceived")
+  roundEffect ShunItemRoundEffect?
+
+  @@unique([userId, type, requestKey])
+  @@index([userId, createdAt, id])
+  @@index([day, type])
+}
+
+model ShunItemDaily {
+  userId String
+  day String @db.Char(10)
+  mainGranted Boolean @default(false)
+  behaviorGranted Boolean @default(false)
+  giftsReceived Int @default(0)
+  extraAttemptsGranted Int @default(0)
+  extraAttemptsUsed Int @default(0)
+
+  @@id([userId, day])
+}
+
+model ShunItemDailyCounter {
+  userId String
+  day String @db.Char(10)
+  counter String @db.VarChar(32)
+  count Int @default(0)
+
+  @@id([userId, day, counter])
+}
+
+model ShunItemWeeklyGrant {
+  userId String
+  weekStart String @db.Char(10)
+  milestone Int
+  entryId String @unique
+
+  entry ShunItemEntry @relation(fields: [entryId], references: [id])
+
+  @@id([userId, weekStart, milestone])
+}
+
+model ShunItemGift {
+  id String @id @default(cuid())
+  senderId String
+  receiverId String
+  sentEntryId String @unique
+  receivedEntryId String @unique
+  createdAt DateTime @default(now())
+
+  sentEntry ShunItemEntry @relation("ShunItemGiftSent", fields: [sentEntryId], references: [id])
+  receivedEntry ShunItemEntry @relation("ShunItemGiftReceived", fields: [receivedEntryId], references: [id])
+
+  intent ShunItemGiftIntent?
+
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
+}
+
+model ShunItemRoundEffect {
+  roundId String
+  code ShunItemCode
+  entryId String @unique
+  amount Int @default(0)
+  compensation Int @default(0)
+  createdAt DateTime @default(now())
+  round ShunMasterRound @relation(fields: [roundId], references: [id])
+
+  entry ShunItemEntry @relation(fields: [entryId], references: [id])
+
+  @@id([roundId, code])
+}
+
+model ShunItemRewardEvent {
+  sourceType String @db.VarChar(16)
+  sourceId String
+  userId String
+  day String @db.Char(10)
+  kind String @db.VarChar(16)
+  occurrenceKey String? @db.VarChar(191)
+  configVersion Int
+  occurredAt DateTime
+  dropRoll Int
+  itemRoll Int
+  mainRoll Int
+  weeklyRolls Json
+  processedAt DateTime?
+  retryAt DateTime @default(now())
+  attempts Int @default(0)
+
+  @@id([sourceType, sourceId])
+  @@index([processedAt, retryAt])
+  @@index([userId, kind, occurrenceKey, processedAt], map: "ShunItemRewardEvent_dedupe_idx")
+}
+
+enum ShunItemGiftIntentStatus {
+  PENDING
+  SETTLED
+  TERMINATED
+}
+
+model ShunItemGiftIntent {
+  id String @id @default(cuid())
+  senderId String
+  requestKey String @db.VarChar(191)
+  receiverId String
+  code ShunItemCode
+  configVersion Int
+  status ShunItemGiftIntentStatus @default(PENDING)
+  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  giftId String? @unique
+  result Json?
+  config ShunItemConfigVersion @relation(fields: [configVersion], references: [version])
+  gift ShunItemGift? @relation(fields: [giftId], references: [id])
+
+  @@unique([senderId, requestKey])
+  @@index([status, createdAt])
 }

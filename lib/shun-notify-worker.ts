@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { runShunItemRewardSweep } from './shun-item-rewards'
 import { shunSendDueCaptureNotification, shunSendDueNotification } from '@/lib/shun-master'
 import { SHUN_CAPTURE_NOTIFY_STATUS, SHUN_NOTIFY_STATUS } from '@/lib/shun-config'
 import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from '@/lib/deployment-db-maintenance-hold'
@@ -98,6 +99,9 @@ export function startShunNotifyWorker(isMaintenanceHeld = isDeploymentDbMaintena
   const tick = () => {
     if (stopped) return
     if (!isDbMaintenanceAllowed(isMaintenanceHeld)) return
+    void runShunItemRewardSweep().catch((error) => {
+      console.error('[shun-item.worker.failed]', { errorName: error instanceof Error ? error.name : 'UNKNOWN' })
+    })
     void runShunNotifySweepOnce().catch((error) => {
       console.error('[shun-notify.worker.failed]', {
         errorName: error instanceof Error ? error.name : 'UNKNOWN',

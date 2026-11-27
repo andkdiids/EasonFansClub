@@ -54,7 +54,7 @@ test('the result modal and the sending paper stay cream in the midnight theme', 
 
 test('every investigation entry uses the same label', () => {
   assert.doesNotMatch(client, />抓捕追回</, '记录入口不得再出现旧文案')
-  assert.match(client, /openCapture\(row\.id\)\)\}>前往调查</, '谁顺了我的记录入口必须叫「前往调查」')
+  assert.match(client, /openCapture\(row\.id\)\)\}>\{capture\?\.id === row\.id \? '收起调查' : '立即调查'\}/, '谁顺了我的记录入口原地展开')
   assert.match(client, /onCancel=\{\(event\) => \{ event\.preventDefault\(\); closeResult\(\) \}\}/)
   // Already investigated: the row shows the real outcome and offers no second try.
   assert.match(client, /\{row\.result && <p>\{row\.result === 'SUCCESS' \? `已追回 \$\{row\.recovered\} 挂号费` : '抓捕失败 · 未追回'\}<\/p>\}/)
