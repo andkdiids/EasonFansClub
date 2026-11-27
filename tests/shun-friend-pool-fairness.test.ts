@@ -108,7 +108,7 @@ test('§6 管理员诊断接口只读、鉴权、无 PII', () => {
 test('§6 诊断面板只在后台出现且不暴露敏感字段', () => {
   const panel = read('app/admin/shun-master/ShunDiagnosePanel.tsx')
   assert.match(panel, /api\/admin\/shun-master\/diagnose/)
-  assert.match(panel, /SHUN_PROTECTION_ON/)
+  assert.doesNotMatch(panel, /SHUN_PROTECTION_ON/)
   assert.match(panel, /POOL_EMPTY_AFTER_FILTERS/)
   const admin = read('app/admin/shun-master/ShunMasterAdmin.tsx')
   assert.match(admin, /ShunDiagnosePanel/)

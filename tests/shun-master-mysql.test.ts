@@ -44,6 +44,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     await publish(config)
     const [protectedUser, banned, deleted, protectedAdmin] = await Promise.all(Array.from({ length: 4 }, () => createUser(100)))
     await seedRefusal(protectedUser.id)
+    await seedRefusal(victim.id)
     await seedRefusal(protectedAdmin.id)
     await prisma.user.update({ where: { id: victim.id }, data: { email: null, emailVerifiedAt: null, role: 'ADMIN' } })
     await prisma.user.update({ where: { id: actors[0].id }, data: { role: 'MODERATOR' } })
@@ -52,8 +53,8 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     await prisma.user.update({ where: { id: protectedAdmin.id }, data: { role: 'SUPER_ADMIN' } })
     await assert.rejects(shunAttempt(banned.id, randomUUID()), { code: 'ACCOUNT' })
     const pool = await getShunCandidateSummary(prisma, shunDay(new Date()), 4)
-    assert.equal(pool.eligible, 1)
-    assert.equal(pool.excluded.refused, 2)
+    assert.equal(pool.eligible, 3)
+    assert.equal('refused' in pool.excluded, false)
     assert.equal(pool.excluded.account, 2)
     assert.ok(pool.excluded.balance >= 9)
     assert.equal(await prisma.shunMasterMember.count({ where: { userId: victim.id } }), 0)
@@ -62,6 +63,7 @@ test('isolated MySQL enforces limits, privacy, idempotency and balanced recovery
     // Exclude every actor from the other actors' target pools even after their winnings are credited.
     await prisma.block.createMany({ data: actors.flatMap((actor, index) => actors.slice(index + 1).map((other) =>
       ({ blockerId: actor.id, blockedId: other.id }))) })
+    await prisma.block.createMany({ data: actors.flatMap((actor) => [protectedUser, protectedAdmin].map((target) => ({ blockerId: actor.id, blockedId: target.id }))) })
     const outcomes = await Promise.allSettled(actors.map((actor, index) => shunAttempt(actor.id, ids[index])))
     assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 4)
     const rounds = await prisma.shunMasterRound.findMany({ orderBy: { createdAt: 'asc' } })

@@ -78,12 +78,7 @@ export async function GET(request: Request) {
     // Per-reason friend-pool fallback distribution (null = friend pool was used).
     fallbacks: fallbackSources.map((row) => ({ reason: row.friendPoolFallback, count: row._count._all })),
   }
-  const [candidatePool, refusalCount, activeRefusals] = await Promise.all([
-    getShunCandidateSummary(prisma, shunDay(new Date()), config.victimCap),
-    prisma.shunMasterProtection.count({ where: { protected: true } }),
-    prisma.shunMasterProtection.findMany({ where: { protected: true }, orderBy: [{ updatedAt: 'desc' }, { userId: 'asc' }],
-      take: 50, select: { userId: true, updatedAt: true } }),
-  ])
+  const candidatePool = await getShunCandidateSummary(prisma, shunDay(new Date()), config.victimCap)
   // Admin-only recovery-bonus audit. Cumulative on purpose: the published
   // figures are "累计额外奖励挂号费 / 累计原额追回挂号费", and the trigger rate
   // must be comparable with the configured chance.
@@ -107,7 +102,7 @@ export async function GET(request: Request) {
     // clock so the panel shows exactly what the settlement gate would decide.
     openHoursNow: shunOpenHoursState(config, requestedAt), serverNow: requestedAt.toISOString(),
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
-    outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalCount, activeRefusals, refusalAudit,
+    outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalAudit,
     matchStats, notifyStats, bonusStats })
 }
 

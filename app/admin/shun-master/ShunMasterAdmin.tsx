@@ -22,9 +22,7 @@ type Summary = {
   audit: { action: string; occurredAt: string; operatorUserId: string | null; summary: string; metadata: unknown }[]
   abuse: { id: string; createdAt: string; userId: string; metadata: { endpoint?: string } | null }[]
   outstanding: { count: number; oldest: string | null }
-  candidatePool: { day: string; eligible: number; excluded: { account: number; refused: number; balance: number; dailyCap: number } }
-  refusalCount: number
-  activeRefusals: { userId: string; updatedAt: string }[]
+  candidatePool: { day: string; eligible: number; excluded: { account: number; balance: number; dailyCap: number } }
   refusalAudit: { id: string; userId: string; action: 'LEAVE' | 'PROTECT' | 'UNPROTECT' | 'REJOIN'; occurredAt: string }[]
   matchStats: { day: string; total: number; friendHits: number; friendRate: number; unknownTier: number
     tiers: { tier: number; label: string; count: number }[]
@@ -183,10 +181,9 @@ export function ShunMasterAdmin() {
         <h2 className="font-semibold">符合今日扣费目标条件 {data.candidatePool.eligible} 人</h2>
         <p>本次筛查共 {accountCount} 个账户。</p>
         <p>{data.candidatePool.day}（北京时间）。每笔匹配会另外排除发起者本人、互相拉黑者、关联账号和已顺取的对象。</p>
-        <p>账户不符合 {data.candidatePool.excluded.account} · 明确拒绝 {data.candidatePool.excluded.refused} · 余额不足 {data.candidatePool.excluded.balance} · 被顺次数已满 {data.candidatePool.excluded.dailyCap}</p>
-        <details><summary>历史拒绝审计 · 有效记录 {data.refusalCount} 条</summary>
+        <p>账户不符合 {data.candidatePool.excluded.account} · 余额不足 {data.candidatePool.excluded.balance} · 被顺次数已满 {data.candidatePool.excluded.dailyCap}</p>
+        <details><summary>历史参与状态审计</summary>
           <p>最近更新的有效拒绝记录（最多 50 条）</p>
-          <ul>{data.activeRefusals.map((item) => <li key={item.userId}>{item.userId} · {new Date(item.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</li>)}</ul>
           <p>最近 50 条历史退出、保护与恢复动作。</p>
           <ul>{data.refusalAudit.map((item) => <li key={item.id}>{new Date(item.occurredAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} · {refusalLabels[item.action]} · {item.userId}</li>)}</ul>
         </details>
