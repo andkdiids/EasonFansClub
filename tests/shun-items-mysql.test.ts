@@ -37,7 +37,7 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     }
   }
   const rejectNotificationFor = (recipientId: string, operation: () => Promise<unknown>) =>
-    withNotificationFailure(recipientId, () => assert.rejects(operation, /Column 'id' cannot be null/))
+    withNotificationFailure(recipientId, () => assert.rejects(operation, { code: 'P2011' }))
   const previousUsers = await prisma.user.findMany({ where: { points: { gt: 0 } }, select: { id: true } })
   const previous = process.env.SHUN_ITEMS_ENABLED
   process.env.SHUN_ITEMS_ENABLED = 'true'
@@ -104,7 +104,7 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     fixtureDdl(`CREATE TRIGGER ${giftTrigger} BEFORE INSERT ON Notification FOR EACH ROW SET NEW.id = IF(NEW.recipientId = '${retryFriend.id}', NULL, NEW.id)`)
     const retryIds = [randomUUID(), randomUUID()]
     try {
-      for (const id of retryIds) await assert.rejects(sendShunItemGift(retrySender.id, id, () => now))
+      for (const id of retryIds) await assert.rejects(sendShunItemGift(retrySender.id, id, () => now), { code: 'P2011' })
     } finally {
       fixtureDdl(`DROP TRIGGER ${giftTrigger}`)
     }
