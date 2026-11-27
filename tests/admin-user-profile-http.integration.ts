@@ -16,7 +16,7 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   const create = (role: 'USER' | 'SUPER_ADMIN') => {
     const name = 'admin-profile-qa-' + randomUUID()
     return prisma.user.create({
-      data: { username: name, usernameNormalized: name, nickname: name, role, passwordHash: 'fixture', bio: '旧简介' },
+      data: { username: name, usernameNormalized: name, nickname: name, role, passwordHash: 'fixture', bio: '旧简介', Profile: { create: { displayName: name } } },
     })
   }
   const [admin, target] = await Promise.all([create('SUPER_ADMIN'), create('USER')])
@@ -41,13 +41,18 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.equal((await read(targetBearer)).status, 403)
   const start = await read(adminBearer)
   assert.equal(start.status, 200)
-  const { user } = await start.json()
+  const { user, options } = await start.json()
   assert.equal(user.bio, '旧简介')
-  assert.deepEqual(Object.keys(user).sort(), ['bio', 'birthdayPublic', 'id', 'nickname', 'showBadgeActivity', 'showBadgeProgressNotifications', 'uid', 'updatedAt'])
-  const patch = { bio: '管理员更新简介', birthdayPublic: !user.birthdayPublic, expectedUpdatedAt: user.updatedAt }
+  assert.deepEqual(Object.keys(user).sort(), ['bio', 'birthDay', 'birthMonth', 'birthdayPublic', 'customGender', 'gender', 'id', 'location', 'nickname', 'showBadgeActivity', 'showBadgeProgressNotifications', 'uid', 'updatedAt'].sort())
+  assert.ok(options.genders.includes('PRIVATE'))
+  const patch = {
+    bio: '管理员更新简介', birthdayPublic: !user.birthdayPublic, expectedUpdatedAt: user.updatedAt,
+    birthMonth: 2, birthDay: 29, gender: 'PRIVATE', location: { countryCode: 'CN', regionCode: 'CN-44' },
+  }
   assert.equal((await save(targetBearer, patch)).status, 403)
   assert.equal((await save({ ...browser, Origin: 'https://untrusted.example.invalid' }, patch)).status, 403)
   assert.equal((await save(adminBearer, { ...patch, role: 'SUPER_ADMIN' })).status, 400)
+  assert.equal((await save(adminBearer, { ...patch, birthDay: 30 })).status, 400)
   assert.equal((await save(adminBearer, patch)).status, 200)
   assert.equal((await save(browser, { ...patch, bio: '过期修改' })).status, 409)
   const browserRead = await read(browser)
@@ -55,11 +60,15 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   const reloaded = (await browserRead.json()).user
   assert.equal(reloaded.bio, patch.bio)
   assert.equal(reloaded.birthdayPublic, patch.birthdayPublic)
+  assert.equal(reloaded.birthMonth, 2)
+  assert.equal(reloaded.birthDay, 29)
+  assert.equal(reloaded.gender, 'PRIVATE')
+  assert.equal(reloaded.location.regionCode, 'CN-44')
   assert.equal(await prisma.adminActionLog.count({
     where: { targetUserId: target.id, adminId: admin.id, action: 'UPDATE_USER_PROFILE' },
   }), 1)
   const timeline = (headers: Record<string, string>) => fetch(
-    origin + '/api/admin/user-operations?' + new URLSearchParams({ view: 'timeline', projection: 'mobile', userId: target.id, pageSize: '1' }),
+    origin + '/api/admin/user-operations?' + new URLSearchParams({ view: 'timeline', projection: 'mobile', userId: target.id, pageSize: '20' }),
     { headers, redirect: 'manual' },
   )
   assert.equal((await timeline(targetBearer)).status, 403)
@@ -67,8 +76,9 @@ test('administrator profile edits enforce origin, role and version over HTTP', {
   assert.equal(history.status, 200)
   const { events, pagination } = await history.json()
   assert.equal(pagination.page, 1)
-  assert.equal(events[0].action, 'UPDATE_USER_PROFILE')
-  assert.equal(events[0].operator.uid, admin.uid)
-  assert.deepEqual(events[0].detail.changedFields.split('、').sort(), ['bio', 'birthdayPublic'])
-  assert.equal(events[0].detail.oldValue, undefined)
+  const profileEdit = events.find((event: { action: string }) => event.action === 'UPDATE_USER_PROFILE')
+  assert.ok(profileEdit)
+  assert.equal(profileEdit.operator.uid, admin.uid)
+  assert.ok(profileEdit.detail.changedFields.split('、').includes('bio'))
+  assert.equal(profileEdit.detail.oldValue, undefined)
 })

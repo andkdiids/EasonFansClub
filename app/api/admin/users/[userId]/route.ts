@@ -12,8 +12,8 @@ import { adjustRegistrationFeeBalance } from '@/lib/registration-fee'
 import { publicImageUrl } from '@/lib/images'
 import { validateLoginAccountValue, validateNicknameValue } from '@/lib/login-account'
 import { checkBannedWords, NICKNAME_BANNED_WORD_MESSAGE, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD } from '@/lib/content-moderation'
-import { normalizeUserLocationInput } from '@/lib/user-location'
-import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput } from '@/lib/gender'
+import { getLocationRegions, LOCATION_COUNTRIES, locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
+import { CUSTOM_GENDER_MAX_LENGTH, GENDER_VALUES, validateGenderInput } from '@/lib/gender'
 import { isValidBirthdayParts, type BirthdayParts } from '@/lib/zodiac'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getEquippedBadgesForUser } from '@/lib/badge-service'
@@ -66,10 +66,23 @@ export async function GET(request: Request, context: RouteContext) {
     const { userId } = await context.params
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, uid: true, nickname: true, bio: true, birthdayPublic: true, showBadgeActivity: true, showBadgeProgressNotifications: true, updatedAt: true },
+      select: {
+        id: true, uid: true, nickname: true, bio: true, birthdayPublic: true, showBadgeActivity: true, showBadgeProgressNotifications: true, updatedAt: true,
+        birthMonth: true, birthDay: true, gender: true, customGender: true,
+        Profile: { select: { locationCountryCode: true, locationCountry: true, locationRegionCode: true, locationRegion: true } },
+      },
     })
     if (!user) return NextResponse.json({ message: '用户不存在' }, { status: 404, headers: noStoreHeaders })
-    return NextResponse.json({ user }, { headers: noStoreHeaders })
+    const { Profile, ...fields } = user
+    return NextResponse.json({
+      user: { ...fields, location: locationFromProfile(Profile) },
+      options: {
+        genders: GENDER_VALUES,
+        countries: LOCATION_COUNTRIES.map(({ code, name }) => ({
+          code, name, regions: getLocationRegions(code).map(({ code, name }) => ({ code, name })),
+        })),
+      },
+    }, { headers: noStoreHeaders })
   }
   const guard = await requireUserDeletionPermission()
   if (!guard.user) return guard.response
@@ -93,10 +106,12 @@ export async function PATCH(request: Request, context: RouteContext) {
   const mobileProfile = action === 'updateMobileProfile'
   let expectedUpdatedAt: Date | undefined
   if (mobileProfile) {
-    const settings = ['birthdayPublic', 'showBadgeActivity', 'showBadgeProgressNotifications']
+    const settings = ['birthdayPublic', 'showBadgeActivity', 'showBadgeProgressNotifications', 'birthMonth', 'birthDay', 'gender', 'customGender', 'location']
     const allowedFields = new Set(['action', 'nickname', 'bio', 'reason', 'expectedUpdatedAt', ...settings])
     if (Object.keys(body).some((key) => !allowedFields.has(key))
       || (body.nickname === undefined && body.bio === undefined && settings.every(key => body[key] === undefined))
+      || ((body.birthMonth === undefined) !== (body.birthDay === undefined))
+      || (body.customGender !== undefined && body.gender === undefined)
       || (body.bio !== undefined && (typeof body.bio !== 'string' || body.bio.length > 300))
       || typeof body.expectedUpdatedAt !== 'string') {
       return NextResponse.json({ message: '资料编辑参数无效' }, { status: 400 })
@@ -222,9 +237,6 @@ export async function PATCH(request: Request, context: RouteContext) {
         reason: sanitizeText(body?.reason, 180) || '管理员编辑用户资料',
       }))
       invalidateCurrentUserCache(userId)
-      if (mobileProfile) {
-        return NextResponse.json({ message: result.changed ? '用户资料已更新' : '用户资料未发生变化' }, { headers: noStoreHeaders })
-      }
       if (result.changedFields.includes('username')) {
         await safeNotificationWrite(
           () => createNotification({
@@ -242,6 +254,9 @@ export async function PATCH(request: Request, context: RouteContext) {
       }
       if (result.birthdayChanged) {
         await triggerBadgeEvaluation(userId, 'USER_BIRTHDAY_UPDATED', new Date().toISOString())
+      }
+      if (mobileProfile) {
+        return NextResponse.json({ message: result.changed ? '用户资料已更新' : '用户资料未发生变化' }, { headers: noStoreHeaders })
       }
       const equippedBadges = result.birthdayChanged
         ? await getEquippedBadgesForUser(userId).catch((error) => {

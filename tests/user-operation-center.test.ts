@@ -12,7 +12,7 @@ test('用户操作中心使用管理员权限并提供两个主分区', () => {
   const navigation = read('lib/admin-navigation.ts')
 
   assert.match(page, /requireAdminPage\('\/admin\/user-operations', 'user_manage'\)/u)
-  assert.match(api, /requireAdmin\('user_manage'\)/u)
+  assert.match(api, /requireAdmin\('user_manage', request\)/u)
   assert.match(client, />今日操作记录<\/button>/u)
   assert.match(client, />高风险用户<\/button>/u)
   assert.match(navigation, /href: '\/admin\/user-operations'/u)
