@@ -317,18 +317,20 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
    * still delivers the plain notification, so a lost response can never leave
    * the victim unnotified.
    */
-  async function sendPlain() {
+  async function sendPlain(continueTaking = false) {
     const round = result
     if (!round || lock.current || step === 'sending') return
     lock.current = true
+    let notified = false
     setBusy('notify')
     setError('')
     try {
       await api<{ status: string }>(`round/${round.id}/notify`, {})
+      notified = true
       setResult(undefined)
       setStep('result')
       setMessage('')
-      setNotice('已发送被顺通知。')
+      setNotice(continueTaking ? '' : '今日收工，明天继续！')
       await Promise.all([loadStatus(), loadRecords()])
     } catch (error) {
       setError(error instanceof Error ? error.message : '通知发送失败，请重试。')
@@ -336,6 +338,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       lock.current = false
       setBusy('')
     }
+    if (notified && continueTaking) await attempt()
   }
   /** Sends the letter, then plays the delivery animation — only after the server confirms. */
   async function sendLetter() {
@@ -380,6 +383,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   }
   async function openCapture(id: string) {    const response = await api<Capture | { record: Round }>(`capture/${id}/start`, {})
     setSelected(undefined)
+    setCaught(undefined)
+    setCaptureStep('result')
+    setCaptureMessage('')
     if ('record' in response) { setCaught(response.record); setCapture(undefined); return }
     setClockOffset(Date.parse(response.serverNow) - Date.now())
     setCapture({ id, data: response })
@@ -544,6 +550,80 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   // Same 60-character contract for the capture counter note.
   const captureLength = [...captureMessage.trim()].length
   const canSendCapture = captureLength > 0 && captureLength <= MESSAGE_MAX && !busy
+  const investigation = (recordId: string | undefined) => <>
+        {capture && capture.id === recordId && <section className={styles.capture} aria-label="抓捕追回" id="shun-capture" tabIndex={-1}>
+          <h2>{capture.data.mode === 2 ? `黄金抓捕期 · ${countdown(remaining(capture.data.goldenUntil))}` : '三选一抓捕'}</h2>
+          <fieldset><legend>选择一位 EF</legend>{capture.data.candidates.map((person) => <label key={person.uid}>
+            <input type="radio" name="suspect" checked={person.uid === selected} onChange={() => setSelected(person.uid)} />
+            <PersonLabel person={person} />
+          </label>)}</fieldset>
+          <button disabled={!!busy || selected === undefined} onClick={() => void confirmCapture()}>确认抓捕</button>
+          <button disabled={!!busy} onClick={() => setCapture(undefined)}>返回记录</button>
+        </section>}
+        {caught && caught.id === recordId && <div className={styles.result} role="status" id="shun-caught" tabIndex={-1}>
+          {caught.result !== 'SUCCESS' ? <>
+            <strong>让 TA 溜了！</strong>
+            <PersonLabel person={caught.person} link />
+            <p>{caught.amount} 挂号费未追回</p>
+            <button onClick={() => { setCaught(undefined); setCaptureStep('result') }}>返回记录</button>
+          </> : captureStep === 'delivered' || captureStep === 'expired' ? <>
+            <strong>{captureStep === 'delivered' ? '留言已送达！✉️' : '本次通知已发送'}</strong>
+            <p className={styles.letterSent}>{captureStep === 'delivered'
+              ? '你的留言已经送给被抓到的 EF。'
+              : '抓捕通知已经送达，无法再补充留言。'}</p>
+            <div className={styles.tabs}>
+              {/* Permanent opt-out removes every new take entry point, but the
+                  already-settled capture note flow still completes. */}
+              <button type="button" autoFocus
+                disabled={!!busy || status?.optedOut || !status?.enabled || !status?.remaining || !openNow}
+                onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage(''); void attempt() }}>
+                {status?.optedOut ? '已退出顺大师' : !openNow ? '休息中 💤'
+                  : status?.remaining ? '再顺一手' : '今日次数已用完'}
+              </button>
+              <button type="button" onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>返回顺大师</button>
+            </div>
+          </> : captureStep === 'write' || captureStep === 'sending' ? <>
+            <strong>给被抓到的 EF 留句话</strong>
+            <PersonLabel person={caught.person} link />
+            <p>成功追回 {caught.recovered} 挂号费{caught.bonusAwarded ? ` · 额外奖励 ${caught.bonusAwarded}` : ''}</p>
+            <textarea aria-label="反击留言内容" placeholder="抓到你啦！有什么想对 TA 说的？" value={captureMessage} autoFocus
+              onChange={(event) => {
+                const next = event.target.value.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
+                setCaptureMessage([...next].slice(0, MESSAGE_MAX).join(''))
+              }} />
+            <div className={styles.composeMeta}><span>{captureLength}/{MESSAGE_MAX}</span><span>这条留言会署名</span></div>
+            <div className={styles.composeActions}>
+              <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSendCapture || captureStep === 'sending'}
+                onClick={() => void sendCaptureLetter()}>{captureStep === 'sending' ? '发送中…' : '发送留言'}</button>
+              <button type="button" disabled={!!busy || captureStep === 'sending'}
+                onClick={() => { setError(''); setCaptureStep('result') }}>返回</button>
+              <button type="button" disabled={!!busy || captureStep === 'sending'} onClick={closeCaptureResult}>关闭</button>
+            </div>
+          </> : <>
+            <strong>抓到你啦！</strong>
+            <PersonLabel person={caught.person} link />
+            <p>成功追回 {caught.recovered} 挂号费</p>
+            {!!caught.bonusAwarded && <div className={styles.bonus} data-shun-bonus>
+              <strong>意外惊喜！🎉</strong>
+              <p>额外获得 {caught.bonusAwarded} 挂号费！</p>
+              <p>本次共获得 {caught.recovered + caught.bonusAwarded} 挂号费</p>
+            </div>}
+            {caught.hasCaptureLetter
+              ? <p className={styles.letterSent}>你已经给 TA 留过一句话，无法再补充。</p>
+              : <p className={styles.letterSent}>要不要给 TA 留句话？不留言也可以。</p>}
+            <div className={styles.composeActions}>
+              {!caught.hasCaptureLetter && <>
+                <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
+                  onClick={() => { setError(''); setCaptureStep('write') }}>给 TA 留句话</button>
+                <button type="button" disabled={!!busy} onClick={() => void sendCapturePlain()}>
+                  {busy === 'capture-notify' ? '发送中…' : '不留言'}
+                </button>
+              </>}
+              <button type="button" disabled={!!busy} onClick={closeCaptureResult}>关闭</button>
+            </div>
+          </>}
+        </div>}
+  </>
   return <main className={styles.page}>
     <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div></header>
     {error && <p className={styles.alert} role="alert">{error}</p>}
@@ -607,78 +687,6 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           </select></label>
           {range === 'date' && <input type="date" aria-label="选择北京时间日期" value={dateKey} onChange={(event) => setDateKey(event.target.value)} />}
         </div>
-        {capture && <section className={styles.capture} aria-label="抓捕追回" id="shun-capture" tabIndex={-1}>
-          <h2>{capture.data.mode === 2 ? `黄金抓捕期 · ${countdown(remaining(capture.data.goldenUntil))}` : '三选一抓捕'}</h2>
-          <fieldset><legend>选择一位 EF</legend>{capture.data.candidates.map((person) => <label key={person.uid}>
-            <input type="radio" name="suspect" checked={person.uid === selected} onChange={() => setSelected(person.uid)} />
-            <PersonLabel person={person} />
-          </label>)}</fieldset>
-          <button disabled={!!busy || selected === undefined} onClick={() => void confirmCapture()}>确认抓捕</button>
-          <button disabled={!!busy} onClick={() => setCapture(undefined)}>返回记录</button>
-        </section>}
-        {caught && <div className={styles.result} role="status" id="shun-caught" tabIndex={-1}>
-          {caught.result !== 'SUCCESS' ? <>
-            <strong>让 TA 溜了！</strong>
-            <PersonLabel person={caught.person} link />
-            <p>{caught.amount} 挂号费未追回</p>
-            <button onClick={() => { setCaught(undefined); setCaptureStep('result') }}>返回记录</button>
-          </> : captureStep === 'delivered' || captureStep === 'expired' ? <>
-            <strong>{captureStep === 'delivered' ? '留言已送达！✉️' : '本次通知已发送'}</strong>
-            <p className={styles.letterSent}>{captureStep === 'delivered'
-              ? '你的留言已经送给被抓到的 EF。'
-              : '抓捕通知已经送达，无法再补充留言。'}</p>
-            <div className={styles.tabs}>
-              {/* Permanent opt-out removes every new take entry point, but the
-                  already-settled capture note flow still completes. */}
-              <button type="button" autoFocus
-                disabled={!!busy || status?.optedOut || !status?.enabled || !status?.remaining || !openNow}
-                onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage(''); void attempt() }}>
-                {status?.optedOut ? '已退出顺大师' : !openNow ? '休息中 💤'
-                  : status?.remaining ? '再顺一手' : '今日次数已用完'}
-              </button>
-              <button type="button" onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage('') }}>返回顺大师</button>
-            </div>
-          </> : captureStep === 'write' || captureStep === 'sending' ? <>
-            <strong>给被抓到的 EF 留句话</strong>
-            <PersonLabel person={caught.person} link />
-            <p>成功追回 {caught.recovered} 挂号费{caught.bonusAwarded ? ` · 额外奖励 ${caught.bonusAwarded}` : ''}</p>
-            <textarea aria-label="反击留言内容" placeholder="抓到你啦！有什么想对 TA 说的？" value={captureMessage} autoFocus
-              onChange={(event) => {
-                const next = event.target.value.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '')
-                setCaptureMessage([...next].slice(0, MESSAGE_MAX).join(''))
-              }} />
-            <div className={styles.composeMeta}><span>{captureLength}/{MESSAGE_MAX}</span><span>这条留言会署名</span></div>
-            <div className={styles.composeActions}>
-              <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSendCapture || captureStep === 'sending'}
-                onClick={() => void sendCaptureLetter()}>{captureStep === 'sending' ? '发送中…' : '发送留言'}</button>
-              <button type="button" disabled={!!busy || captureStep === 'sending'}
-                onClick={() => { setError(''); setCaptureStep('result') }}>返回</button>
-              <button type="button" disabled={!!busy || captureStep === 'sending'} onClick={closeCaptureResult}>关闭</button>
-            </div>
-          </> : <>
-            <strong>抓到你啦！</strong>
-            <PersonLabel person={caught.person} link />
-            <p>成功追回 {caught.recovered} 挂号费</p>
-            {!!caught.bonusAwarded && <div className={styles.bonus} data-shun-bonus>
-              <strong>意外惊喜！🎉</strong>
-              <p>额外获得 {caught.bonusAwarded} 挂号费！</p>
-              <p>本次共获得 {caught.recovered + caught.bonusAwarded} 挂号费</p>
-            </div>}
-            {caught.hasCaptureLetter
-              ? <p className={styles.letterSent}>你已经给 TA 留过一句话，无法再补充。</p>
-              : <p className={styles.letterSent}>要不要给 TA 留句话？不留言也可以。</p>}
-            <div className={styles.composeActions}>
-              {!caught.hasCaptureLetter && <>
-                <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
-                  onClick={() => { setError(''); setCaptureStep('write') }}>给 TA 留句话</button>
-                <button type="button" disabled={!!busy} onClick={() => void sendCapturePlain()}>
-                  {busy === 'capture-notify' ? '发送中…' : '不留言'}
-                </button>
-              </>}
-              <button type="button" disabled={!!busy} onClick={closeCaptureResult}>关闭</button>
-            </div>
-          </>}
-        </div>}
         {rows.map((row) => <article className={styles.record} key={row.id} id={`shun-record-${row.id}`} tabIndex={-1}>
           <PersonLabel person={row.person} link />
           <p>{myTime.format(new Date(row.createdAt))} · {side === 'in' ? '−' : '+'}{row.amount} 挂号费</p>
@@ -691,9 +699,11 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           )}
           {side === 'in' && !row.result && (row.canCapture ? <>
             {remaining(row.goldenUntil) > 0 && <span>黄金抓捕期 · {countdown(remaining(row.goldenUntil))}</span>}
-            <button disabled={!!busy} onClick={() => void perform('start', () => openCapture(row.id))}>前往调查</button>
+            <button disabled={!!busy} onClick={() => capture?.id === row.id ? setCapture(undefined) : void perform('start', () => openCapture(row.id))}>{capture?.id === row.id ? '收起调查' : '立即调查'}</button>
           </> : <p>可用嫌疑人不足，本次不可抓捕。</p>)}
+          {investigation(row.id)}
         </article>)}
+        {![capture?.id, caught?.id].some((id) => id && rows.some((row) => row.id === id)) && investigation(capture?.id ?? caught?.id)}
         {loading && <p role="status">记录加载中…</p>}
         {recordError && <p role="alert">{recordError} <button onClick={() => void loadRecords()}>重试</button></p>}
         {range === 'date' && !dateKey && <p>请选择日期。</p>}
@@ -705,15 +715,15 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       onCancel={(event) => { event.preventDefault(); closeResult() }}>
       {result && <div className={styles.modalBody}>
         {step === 'delivered' || step === 'expired' ? <>
-          <h2 id="shun-result-title">{step === 'delivered' ? '匿名信已送达 ✉️' : '本次通知已发送'}</h2>
+          <h2 id="shun-result-title">{step === 'delivered' ? '匿名留言已送达！' : '本次通知已发送'}</h2>
           <p className={styles.letterSent}>{step === 'delivered'
             ? 'TA 会在收到挂号费被顺走的同时，读到只有 TA 能看到的这句话。'
             : '普通通知已经送达，无法再补充匿名留言。'}</p>
           <div className={styles.tabs}>
-            <button type="button" disabled={!!busy || !status?.remaining || !status?.enabled || !openNow}
-              onClick={() => { setResult(undefined); void attempt() }}>{!openNow ? '休息中 💤'
-                : status?.remaining ? '再顺一手' : '今日次数已用完'}</button>
-            <button type="button" autoFocus onClick={() => { setResult(undefined); setStep('result') }}>返回顺大师</button>
+            {status?.remaining && status.enabled && openNow
+              ? <button type="button" disabled={!!busy} onClick={() => void attempt()}>再顺一手</button>
+              : <><p>{status?.remaining ? '当前暂不可顺取。' : '今日收工，明天继续！'}</p>
+                <button type="button" onClick={() => { setResult(undefined); setStep('result') }}>完成</button></>}
           </div>
         </> : <>
           <h2 id="shun-result-title">{step === 'write' ? '给 TA 留一句匿名的话' : '顺走啦！'}</h2>
@@ -728,9 +738,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <div className={styles.composeMeta}><span>{messageLength}/{MESSAGE_MAX}</span><span>TA 不会知道是你</span></div>
             <div className={styles.composeActions}>
               <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!canSend || step === 'sending'}
-                onClick={() => void sendLetter()}>{step === 'sending' ? '发送中…' : '发送留言'}</button>
-              <button type="button" disabled={!!busy || step === 'sending'} onClick={() => { setError(''); setStep('result') }}>返回</button>
-              <button type="button" disabled={!!busy || step === 'sending'} onClick={closeResult}>关闭</button>
+                onClick={() => void sendLetter()}>{step === 'sending' ? '发送中…' : '发送匿名留言'}</button>
+              <button type="button" disabled={!!busy || step === 'sending'} onClick={() => { setError(''); setStep('result') }}>取消留言</button>
             </div>
           </> : <>
             <strong>+{result.amount} 挂号费</strong>
@@ -738,8 +747,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <div className={styles.composeActions}>
               <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
                 onClick={() => { setError(''); setStep('write') }}>匿名留言</button>
-              <button type="button" disabled={!!busy} onClick={() => void sendPlain()}>{busy === 'notify' ? '发送中…' : '不留言'}</button>
-              <button type="button" disabled={!!busy} onClick={closeResult}>关闭</button>
+              <button type="button" disabled={!!busy} onClick={() => void sendPlain(Boolean(status?.remaining))}>{busy === 'notify' ? '发送中…' : status?.remaining ? '不留言并再顺一手' : '不留言'}</button>
             </div>
           </>}
         </>}
