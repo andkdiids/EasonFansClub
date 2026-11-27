@@ -1160,6 +1160,20 @@ export async function updateClinicAdminContent(input: { target: 'record' | 'cons
   if (result.changed) void triggerBadgeEvaluation(result.authorId, 'CLINIC_CONSULTATION_CHANGED', input.id)
 }
 
+export async function removeReportedClinicConsultation(reportId: string, adminId: string) {
+  const report = await prisma.clinicReport.findUnique({
+    where: { id: reportId },
+    select: { consultationId: true, reason: true },
+  })
+  if (!report?.consultationId) {
+    throw new ClinicServiceError('REPORT_CONSULTATION_NOT_FOUND', '此举报没有关联会诊。', 404)
+  }
+  await removeClinicConsultation(report.consultationId, adminId, true, {
+    reason: `举报处理：${report.reason}`.slice(0, 200),
+  })
+  return handleClinicReport({ reportId, status: 'RESOLVED', adminId })
+}
+
 export async function handleClinicReport(input: { reportId: string; status: ReportStatus; adminId: string }) {
   return prisma.$transaction(async (tx) => {
     const report = await tx.clinicReport.findUnique({ where: { id: input.reportId }, select: { id: true, status: true, reporterId: true } })

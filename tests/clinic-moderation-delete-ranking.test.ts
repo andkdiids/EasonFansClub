@@ -258,3 +258,9 @@ test('§20 其他模块评论删除（论坛回复）未被改动', () => {
   assert.match(reply, /DELETE_REPLY/)
   assert.match(reply, /reply_manage/)
 })
+test('Mobile report removal derives the consultation from the report and uses shared moderation', () => {
+  const route = readFileSync('app/api/admin/clinic/route.ts', 'utf8')
+  const service = readFileSync('lib/clinic-service.ts', 'utf8')
+  assert.match(route, /rejectInvalidRequestOrigin\(request\)[\s\S]*requireAdmin\('clinic_manage', request\)[\s\S]*removeReportedClinicConsultation\(body.reportId, guard.user.id\)/)
+  assert.match(service, /function removeReportedClinicConsultation[\s\S]*where: \{ id: reportId \}[\s\S]*removeClinicConsultation\(report.consultationId, adminId, true,[\s\S]*handleClinicReport\(\{ reportId, status: 'RESOLVED', adminId \}\)/)
+})
