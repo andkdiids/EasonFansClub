@@ -75,6 +75,65 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
       where: { userId_code: { userId: sender.id, code: 'EXTRA_ATTEMPT' } }, data: { available: -1 },
     }))
 
+    const [retrySender, retryFriend, alternate] = await Promise.all([fixture(), fixture(), fixture()])
+    const link = (friendId: string) => {
+      const [userAId, userBId] = [retrySender.id, friendId].sort()
+      return { userAId, userBId }
+    }
+    await prisma.friendship.create({ data: link(retryFriend.id) })
+    await shunTransaction(async (tx) => {
+      await lockShunItemUsers(tx, [retrySender.id])
+      for (const requestKey of ['gift-failure-one', 'gift-failure-two']) await postShunItemMovement(tx, {
+        userId: retrySender.id, code: 'FRIEND_GIFT', day, configVersion: config.version, type: 'WEEKLY_REWARD', requestKey,
+      })
+    })
+    const giftTrigger = 'shun_qa_gift_' + randomUUID().replaceAll('-', '')
+    assert.match(retryFriend.id, /^[a-z0-9]+$/)
+    fixtureDdl(`CREATE TRIGGER ${giftTrigger} BEFORE INSERT ON Notification FOR EACH ROW SET NEW.id = IF(NEW.recipientId = '${retryFriend.id}', NULL, NEW.id)`)
+    const retryIds = [randomUUID(), randomUUID()]
+    try {
+      for (const id of retryIds) await assert.rejects(sendShunItemGift(retrySender.id, id, () => now))
+    } finally {
+      fixtureDdl(`DROP TRIGGER ${giftTrigger}`)
+    }
+    const intents = await prisma.shunItemGiftIntent.findMany({ where: { senderId: retrySender.id } })
+    assert.equal(intents.length, 2)
+    assert.ok(intents.every((intent) => intent.status === 'PENDING' && intent.receiverId === retryFriend.id))
+    assert.equal(await prisma.shunItemGift.count({ where: { senderId: retrySender.id } }), 0)
+    assert.equal(await prisma.shunItemEntry.count({ where: { userId: retrySender.id, type: 'GIFT_SENT' } }), 0)
+    assert.equal(await prisma.shunItemInventory.findUniqueOrThrow({
+      where: { userId_code: { userId: retrySender.id, code: 'FRIEND_GIFT' } },
+    }).then(({ available }) => available), 2)
+    await prisma.friendship.create({ data: link(alternate.id) })
+
+    const midnight = new Date(day + 'T00:00:00+08:00')
+    const beforeMidnight = new Date(midnight.getTime() + 86_399_000)
+    const afterMidnight = new Date(midnight.getTime() + 86_400_000)
+    // Use the recorded clock for the midnight pair so the intent is only one second old.
+    await prisma.shunItemGiftIntent.updateMany({ where: { senderId: retrySender.id }, data: { createdAt: beforeMidnight } })
+    const expected = intents.find(({ requestKey }) => requestKey === 'gift:' + retryIds[0])
+    assert.ok(expected)
+    const replays = await Promise.all(retryIds.slice(0, 1).concat(retryIds[0]).map((id) =>
+      sendShunItemGift(retrySender.id, id, () => afterMidnight)))
+    assert.deepEqual(replays[0], replays[1])
+    assert.equal(replays[0].receiver?.uid, retryFriend.uid)
+    assert.equal(replays[0].code, expected.code)
+    assert.equal(await prisma.notification.count({ where: { recipientId: retryFriend.id, key: `shun:${replays[0].id}:item-gift` } }), 1)
+    assert.equal(await prisma.shunItemDaily.findUniqueOrThrow({
+      where: { userId_day: { userId: retryFriend.id, day: shunDay(afterMidnight) } },
+    }).then(({ giftsReceived }) => giftsReceived), 1)
+    await prisma.friendship.delete({ where: { userAId_userBId: link(retryFriend.id) } })
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await assert.rejects(sendShunItemGift(retrySender.id, retryIds[1], () => afterMidnight), { code: 'NO_GIFT_FRIEND' })
+    }
+    assert.equal(await prisma.shunItemGiftIntent.findUniqueOrThrow({
+      where: { senderId_requestKey: { senderId: retrySender.id, requestKey: 'gift:' + retryIds[1] } },
+    }).then(({ status }) => status), 'TERMINATED')
+    assert.equal(await prisma.shunItemGift.count({ where: { senderId: retrySender.id } }), 1)
+    assert.equal(await prisma.shunItemInventory.count({ where: { userId: alternate.id } }), 0)
+    assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, retrySender.id)), [])
+    assert.deepEqual(await shunTransaction((tx) => reconcileShunItemInventory(tx, retryFriend.id)), [])
+
     const firstGift = randomUUID()
     const [one, replay] = await Promise.all([
       sendShunItemGift(sender.id, firstGift, () => now), sendShunItemGift(sender.id, firstGift, () => now),

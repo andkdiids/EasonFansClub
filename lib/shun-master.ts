@@ -1001,12 +1001,12 @@ export async function shunItemBox(userId: string) {
 
 export async function sendShunItemGift(senderId: string, requestId: string, clock = () => new Date()) {
   if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
-  const matchSeed = randomBytes(32)
-  const itemRoll = randomInt(100)
+  const requestKey = `gift:${requestId}`
+  const key = { senderId_requestKey: { senderId, requestKey } }
   try {
-    return await shunTransaction(async (tx) => {
+    const prepared = await shunTransaction(async (tx) => {
       await settings(tx)
-      const requestKey = `gift:${requestId}`
+      if (await tx.shunItemGiftIntent.findUnique({ where: key })) return null
       const prior = await tx.shunItemEntry.findUnique({
         where: { userId_type_requestKey: { userId: senderId, type: 'GIFT_SENT', requestKey } },
         include: { sentGift: { include: { receivedEntry: { include: { config: { include: { definitions: true } } } } } } },
@@ -1014,7 +1014,7 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
       if (prior?.sentGift) {
         const { id, receiverId, receivedEntry } = prior.sentGift
         const name = receivedEntry.config.definitions.find(({ code }) => code === receivedEntry.code)?.name
-        return { id, code: receivedEntry.code, name, receiver: await shunPerson(tx, receiverId) }
+        return { legacy: { id, code: receivedEntry.code, name, receiver: await shunPerson(tx, receiverId) } }
       }
 
       const active = await tx.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })
@@ -1049,6 +1049,7 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
         ...blocks.map(({ blockerId, blockedId }) => blockerId === senderId ? blockedId : blockerId)])
       // A fresh seed per request gives each eligible friend the same chance.
       // Reusing it inside a transaction retry preserves the same random order.
+      const matchSeed = randomBytes(32)
       const candidates = eligibleFriends.filter(({ id }) => !excluded.has(id)).map(({ id }) => ({
         id, rank: createHmac('sha256', matchSeed).update(id).digest('hex'),
       })).sort((a, b) => a.rank.localeCompare(b.rank))
@@ -1057,9 +1058,55 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
 
       const pool = (Object.keys(SHUN_GIFT_WEIGHTS) as Array<keyof typeof SHUN_GIFT_WEIGHTS>)
         .map((code) => [code, rules.gifts[code]] as const)
-      const code = drawShunItem(pool, () => itemRoll)
-      const name = draft.definitions.find((item) => item.code === code)?.name ?? SHUN_ITEM_CATALOG[code].name
-      const configVersion = active.version
+      const code = drawShunItem(pool)
+      await tx.shunItemGiftIntent.create({ data: {
+        senderId, requestKey, receiverId, code, configVersion: active.version, createdAt: clock(),
+      } })
+      return null
+    })
+    if (prepared) return prepared.legacy
+
+    // A settlement rollback leaves this independently committed intent available.
+    const settlement = await shunTransaction(async (tx) => {
+      await settings(tx)
+      const intent = await tx.shunItemGiftIntent.findUniqueOrThrow({ where: key, include: {
+        config: { include: { definitions: true } },
+      } })
+      if (intent.status === 'SETTLED') return { result: intent.result as unknown as {
+        id: string; code: typeof intent.code; name: string; receiver: Awaited<ReturnType<typeof shunPerson>>
+      } }
+      if (intent.status === 'TERMINATED') return null
+
+      const { receiverId, code, configVersion } = intent
+      const now = clock()
+      const terminate = async () => {
+        await tx.shunItemGiftIntent.update({ where: key, data: { status: 'TERMINATED', finishedAt: now } })
+        return null
+      }
+      if (now.getTime() - intent.createdAt.getTime() >= 86_400_000) return terminate()
+      const [userAId, userBId] = [senderId, receiverId].sort()
+      const links = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM Friendship WHERE userAId = ${userAId} AND userBId = ${userBId} FOR UPDATE`
+      if (!links.length) return terminate()
+      try {
+        await lockShunItemUsers(tx, [senderId, receiverId])
+      } catch (error) {
+        if (error instanceof ShunItemInventoryError && error.code === 'MISSING_USER') return terminate()
+        throw error
+      }
+      if (await tx.user.count({ where: { ...transactionAccount, id: { in: [senderId, receiverId] } } }) !== 2) return terminate()
+      const blocked = await tx.block.findFirst({ where: { OR: [
+        { blockerId: senderId, blockedId: receiverId }, { blockerId: receiverId, blockedId: senderId },
+      ] } })
+      const active = await tx.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })
+      const draft = validateShunItemDraft(active)
+      if (blocked || !draft?.enabled || !draft.definitions.some((item) => item.code === 'FRIEND_GIFT' && item.enabled)) return terminate()
+      const day = shunDay(now)
+      const daily = await tx.shunItemDaily.findUnique({ where: { userId_day: { userId: receiverId, day } } })
+      if ((daily?.giftsReceived ?? 0) >= draft.rules.giftsReceived) return terminate()
+      const inventory = await tx.shunItemInventory.findUnique({ where: { userId_code: { userId: senderId, code: 'FRIEND_GIFT' } } })
+      if (!inventory?.available) return terminate()
+      const name = intent.config.definitions.find((item) => item.code === code)?.name ?? SHUN_ITEM_CATALOG[code].name
       const { entry: sent } = await postShunItemMovement(tx, {
         userId: senderId, code: 'FRIEND_GIFT', type: 'GIFT_SENT', requestKey, day, configVersion,
       })
@@ -1078,8 +1125,14 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
       await notify(tx, gift.id, receiverId, '天使的礼物',
         `你的好友 ${senderPerson?.nickname ?? 'EF'} 为你送来了一份天使的礼物，你获得了道具『${name}』！`,
         'item-gift', '/shun-master?items=1')
-      return { id: gift.id, code, name, receiver }
+      const result = { id: gift.id, code, name, receiver }
+      await tx.shunItemGiftIntent.update({ where: key, data: {
+        status: 'SETTLED', finishedAt: now, giftId: gift.id, result,
+      } })
+      return { result }
     })
+    if (!settlement) throw new ShunError('NO_GIFT_FRIEND', '本次赠送已结束，未扣除道具。')
+    return settlement.result
   } catch (error) {
     if (error instanceof ShunItemInventoryError && error.code === 'INSUFFICIENT_ITEMS') {
       throw new ShunError('ITEM_STOCK', '天使的礼物库存不足。', 409)

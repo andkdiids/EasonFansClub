@@ -295,6 +295,17 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     assert.equal(fields.filter((field) => field === index).length, 1)
     comparableBlocks.set(model, fields.filter((field) => field !== index))
   }
+  for (const [model, relation] of [
+    ['ShunItemConfigVersion', 'giftIntents ShunItemGiftIntent[]'],
+    ['ShunItemGift', 'intent ShunItemGiftIntent?'],
+  ] as const) {
+    const fields = comparableBlocks.get(model)!
+    assert.equal(fields.filter((field) => field === relation).length, 1)
+    comparableBlocks.set(model, fields.filter((field) => field !== relation))
+  }
+  for (const model of ['ShunItemGiftIntent', 'ShunItemGiftIntentStatus']) {
+    assert.ok(comparableBlocks.delete(model), `required gift intent schema block retained: ${model}`)
+  }
   const approvedShunItems = blocks(execFileSync('git', ['show',
     '1d5a266a833fb99c843900eb5dd96f7c0865ff60:prisma/schema.prisma'], { encoding: 'utf8' }))
   for (const name of ['ShunItemCode', 'ShunItemEventType', 'ShunItemConfigVersion', 'ShunItemDefinition',

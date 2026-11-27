@@ -8,6 +8,7 @@ const baseline = 'ed804daa'
 const migrations = [
   '20261127040000_add_shun_item_accounting',
   '20261127050000_add_shun_reward_event_receipts',
+  '20261127060000_add_shun_gift_intents',
 ]
 const [client, database, port = '33327'] = process.argv.slice(2)
 if (!client || !/^ecfc_shun_[a-z0-9_]+_qa$/.test(database ?? '') || !/^33[3-9]\d{2}$/.test(port)) {

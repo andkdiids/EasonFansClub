@@ -7350,6 +7350,7 @@ model ShunItemConfigVersion {
   enabled Boolean @default(false)
   rules Json
   definitions ShunItemDefinition[]
+  giftIntents ShunItemGiftIntent[]
   entries ShunItemEntry[]
 }
 
@@ -7450,6 +7451,8 @@ model ShunItemGift {
   sentEntry ShunItemEntry @relation("ShunItemGiftSent", fields: [sentEntryId], references: [id])
   receivedEntry ShunItemEntry @relation("ShunItemGiftReceived", fields: [receivedEntryId], references: [id])
 
+  intent ShunItemGiftIntent?
+
   @@index([senderId, createdAt])
   @@index([receiverId, createdAt])
 }
@@ -7488,4 +7491,29 @@ model ShunItemRewardEvent {
   @@id([sourceType, sourceId])
   @@index([processedAt, retryAt])
   @@index([userId, kind, occurrenceKey, processedAt], map: "ShunItemRewardEvent_dedupe_idx")
+}
+
+enum ShunItemGiftIntentStatus {
+  PENDING
+  SETTLED
+  TERMINATED
+}
+
+model ShunItemGiftIntent {
+  id String @id @default(cuid())
+  senderId String
+  requestKey String @db.VarChar(191)
+  receiverId String
+  code ShunItemCode
+  configVersion Int
+  status ShunItemGiftIntentStatus @default(PENDING)
+  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  giftId String? @unique
+  result Json?
+  config ShunItemConfigVersion @relation(fields: [configVersion], references: [version])
+  gift ShunItemGift? @relation(fields: [giftId], references: [id])
+
+  @@unique([senderId, requestKey])
+  @@index([status, createdAt])
 }
