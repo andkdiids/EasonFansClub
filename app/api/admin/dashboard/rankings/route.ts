@@ -6,7 +6,7 @@ import { requireAdmin } from '@/lib/security'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const guard = await requireAdmin('stats_view')
+  const guard = await requireAdmin('stats_view', request)
   if (!guard.user) return guard.response
 
   const params = new URL(request.url).searchParams
@@ -27,8 +27,10 @@ export async function GET(request: Request) {
         endDate: result.range.endDateKey,
         label: result.range.label,
       },
-      postRanking: result.postRanking,
-      commentRanking: result.commentRanking,
+      ...(params.get('view') === 'consultations' ? {} : {
+        postRanking: result.postRanking,
+        commentRanking: result.commentRanking,
+      }),
       consultationRanking: result.consultationRanking,
     }, {
       headers: { 'Cache-Control': 'private, no-store, max-age=0' },

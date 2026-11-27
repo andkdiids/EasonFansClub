@@ -323,7 +323,7 @@ test('三个统计模型已有 authorId + createdAt 索引，本轮不需要新�
 
 test('排行榜 API 复用统一 stats_view 管理员权限并返回无缓存响应', () => {
   const route = source('app/api/admin/dashboard/rankings/route.ts')
-  assert.match(route, /requireAdmin\('stats_view'\)/)
+  assert.match(route, /requireAdmin\('stats_view', request\)/)
   assert.match(route, /parseDashboardRankingPeriod/)
   assert.match(route, /\|\| 'this_week'/)
   assert.match(route, /startDate/)
