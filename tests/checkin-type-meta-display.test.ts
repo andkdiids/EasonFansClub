@@ -101,7 +101,7 @@ test('后台最近签到概览不再合并免费与付费，细分来源', () =>
 
 test('后台补签记录列表：按来源筛选 + 昵称/UID 搜索 + 被补签日期 + 分页', () => {
   const route = source('app/api/admin/checkin-makeup/records/route.ts')
-  assert.match(route, /requireAdmin\('checkin_manage'\)/)
+  assert.match(route, /requireAdmin\('checkin_manage', request\)/)
   assert.match(route, /type: \{ in: resolveTypeFilter\(typeFilter\) \}/)
   assert.match(route, /filter === 'FREE_QUIZ'\) return \['MAKEUP_FREE_QUIZ'\]/)
   assert.match(route, /filter === 'PAID'\) return \['MAKEUP_PAID'\]/)
