@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
-import { recordFaultEvidence, replayInterruptedHttp } from './helpers/shun-fault-evidence'
+import { recordFaultEvidence, injectHttpFailure } from './helpers/shun-fault-evidence'
 import { chromium } from 'playwright'
 import { authCookieName, createSessionToken } from '../lib/auth'
 import { prisma } from '../lib/prisma'
@@ -54,6 +54,28 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       day: shunDay(new Date()), requestKey: 'browser-gift-refresh-retry', configVersion: active.version,
     })
   })
+  async function verifyBeforeSend(page: import('playwright').Page, url: string, click: () => Promise<void>, id: string, retry = click) {
+    const snapshot = () => Promise.all([
+      prisma.shunMasterRound.count(),
+      prisma.shunItemEntry.count(),
+      prisma.pointLog.count(),
+      prisma.notification.count(),
+    ])
+    const before = await snapshot()
+    await injectHttpFailure(page, url, 'before-send')
+    await click()
+    await page.getByText('网络连接中断，请重试。', { exact: true }).first().waitFor()
+    const after = await snapshot()
+    assert.deepEqual(after, before)
+    await recordFaultEvidence(join(output!, 'fault-matrix.jsonl'), {
+      id: id + '-BEFORE-SEND', business: id, scenario: 'Request discarded before contacting the server',
+      method: 'Playwright request abort and real MySQL row counts', before, after, result: 'PASS',
+      logPath: process.env.SHUN_ITEMS_BROWSER_LOG ?? join(output!, '..', 'transport-before-send.log'),
+    })
+    console.log('PASS ' + id + '-BEFORE-SEND')
+    await retry()
+  }
+
   const browser = await chromium.launch({
     headless: true,
     ...(process.env.SHUN_ITEMS_BROWSER_PATH ? { executablePath: process.env.SHUN_ITEMS_BROWSER_PATH } : {}),
@@ -142,15 +164,13 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
           await box.getByText(new RegExp(receiver.nickname)).waitFor()
           assert.equal(await box.getByRole('region', { name: '通讯录好友' }).count(), 0)
           await page.screenshot({ path: join(output, 'v42-pc-gift.png') })
-      const verifyTRANSPORT01 = await replayInterruptedHttp(page, '**/api/shun-master/extra-attempt')
-          await box.getByRole('button', { name: '使用', exact: true }).click()
+      await verifyBeforeSend(page, '**/api/shun-master/extra-attempt', () => box.getByRole('button', { name: '使用', exact: true }).click(), 'TRANSPORT-01')
           await box.getByRole('listitem').filter({ hasText: '顺手牵羊' }).getByText('持有 0').first().waitFor()
           assert.equal((await prisma.shunItemDaily.findUniqueOrThrow({
             where: { userId_day: { userId: sender.id, day: shunDay(new Date()) } },
           })).extraAttemptsGranted, 1)
           assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id, receiverId: receiver.id } }), 1)
-      verifyTRANSPORT01()
-      console.log('PASS TRANSPORT-01 HTTP same-request replay')
+
         } else {
           await box.getByText(/送出礼物/).waitFor()
         }
@@ -183,13 +203,11 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       const itemBox = actorPage.getByRole('dialog', { name: /百宝箱/ })
       await itemBox.getByRole('button', { name: '选择好友', exact: true }).click()
       assert.ok(await itemBox.getByRole('button', { name: unfundedFriend.nickname + ' · 暂不可顺取' }).isDisabled())
-      const verifyTRANSPORT04 = await replayInterruptedHttp(actorPage, '**/api/shun-master/attempt')
-      await itemBox.getByRole('button', { name: receiver.nickname, exact: true }).click()
+      await verifyBeforeSend(actorPage, '**/api/shun-master/attempt', () => itemBox.getByRole('button', { name: receiver.nickname, exact: true }).click(), 'TRANSPORT-04', () => actorPage.getByRole('button', { name: '顺一手', exact: true }).click())
       const result = actorPage.getByRole('dialog', { name: '顺走啦！' })
       await result.getByRole('button', { name: '不留言并再顺一手' }).waitFor()
       await result.getByRole('button', { name: '匿名留言', exact: true }).click()
-      verifyTRANSPORT04()
-      console.log('PASS TRANSPORT-04 HTTP same-request replay')
+
       await actorPage.getByRole('textbox', { name: '匿名留言内容' }).fill('隔离测试中的匿名留言')
       await actorPage.getByRole('button', { name: '发送匿名留言' }).click()
       const round = await prisma.shunMasterRound.findFirstOrThrow({
@@ -210,16 +228,12 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       await investigation.locator('label').filter({ hasNotText: sender.nickname }).getByRole('radio').check()
       await investigation.getByRole('button', { name: '确认抓捕' }).click()
       await card.getByText('让 TA 溜了！').waitFor()
-      const verifyTRANSPORT06 = await replayInterruptedHttp(victimPage, '**/api/shun-master/capture/*/retry-item')
-      await card.getByRole('button', { name: '使用时光倒流' }).click()
+      await verifyBeforeSend(victimPage, '**/api/shun-master/capture/*/retry-item', () => card.getByRole('button', { name: '使用时光倒流' }).click(), 'TRANSPORT-06')
       await card.getByText(/时光倒流 · 已追回/).waitFor()
-      verifyTRANSPORT06()
-      console.log('PASS TRANSPORT-06 HTTP same-request replay')
-      const verifyTRANSPORT03 = await replayInterruptedHttp(victimPage, '**/api/shun-master/capture/*/revenge-item')
-      await card.getByRole('button', { name: '使用最佳损友' }).click()
+
+      await verifyBeforeSend(victimPage, '**/api/shun-master/capture/*/revenge-item', () => card.getByRole('button', { name: '使用最佳损友' }).click(), 'TRANSPORT-03')
       await card.getByText(/最佳损友 · 反击/).waitFor()
-      verifyTRANSPORT03()
-      console.log('PASS TRANSPORT-03 HTTP same-request replay')
+
       await victimPage.screenshot({ path: join(output, 'v42-h5-record-effects.png') })
       await victimPage.reload()
       await card.getByText(/时光倒流 · 已追回/).waitFor()
@@ -277,15 +291,13 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       await doubleCard.getByRole('button', { name: '设为待生效' }).click()
       await doubleCard.getByRole('button', { name: '取消待生效' }).waitFor()
       await box.getByRole('button', { name: '关闭' }).click()
-      const verifyTransport05 = await replayInterruptedHttp(page, '**/api/shun-master/attempt')
-      await page.getByRole('button', { name: '顺一手', exact: true }).click()
+      await verifyBeforeSend(page, '**/api/shun-master/attempt', () => page.getByRole('button', { name: '顺一手', exact: true }).click(), 'TRANSPORT-05')
       const result = page.getByRole('dialog', { name: '顺走啦！' })
       const continueButton = result.getByRole('button', { name: '不留言并再顺一手' })
       await continueButton.waitFor()
       const first = await prisma.shunMasterRound.findFirstOrThrow({ where: { actorId: doubler.id, victimId: firstTarget.id } })
       assert.equal(first.amount, first.rolled * 2)
-      verifyTransport05()
-      console.log('PASS TRANSPORT-05 HTTP same-request replay')
+
       await prisma.user.update({ where: { id: secondTarget.id }, data: { points: 30 } })
       await continueButton.click()
       const endButton = result.getByRole('button', { name: '不留言', exact: true })
@@ -323,12 +335,10 @@ test('V4.2 authenticated PC and H5 item box, randomized gifting and refresh', {
       await trapItem.getByRole('button', { name: '设为待生效' }).click()
       await trapItem.getByRole('button', { name: '取消待生效' }).waitFor()
       await box.getByRole('button', { name: '关闭' }).click()
-      const verifyTransport02 = await replayInterruptedHttp(page, '**/api/shun-master/attempt')
-      await page.getByRole('button', { name: '顺一手', exact: true }).click()
+      await verifyBeforeSend(page, '**/api/shun-master/attempt', () => page.getByRole('button', { name: '顺一手', exact: true }).click(), 'TRANSPORT-02')
       await page.getByRole('dialog', { name: '顺走啦！' }).waitFor()
       const round = await prisma.shunMasterRound.findFirstOrThrow({ where: { actorId: trapper.id, victimId: trapped.id } })
-      verifyTransport02()
-      console.log('PASS TRANSPORT-02 HTTP same-request replay')
+
       await trapContext.addCookies([{ name: authCookieName, value: await createSessionToken(trapped), url: base }])
       await page.goto(base + '/shun-master?record=' + round.id)
       const card = page.locator('#shun-record-' + round.id)
