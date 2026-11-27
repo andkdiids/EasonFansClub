@@ -2,7 +2,7 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { normalizeTopicName } from '@/lib/post-topics'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +35,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const guard = await requireAdmin('post_manage')
+  const originError = rejectInvalidRequestOrigin(request)
+  if (originError) return originError
+  const guard = await requireAdmin('post_manage', request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   const name = normalizeTopicName(body?.name)

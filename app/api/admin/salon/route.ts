@@ -254,6 +254,10 @@ export async function PATCH(request: Request) {
         && (lockedCurrent.status !== 'APPROVED' || body.expectedApprovedVersion !== lockedCurrent.updatedAt.toISOString())) {
         throw new Error('SALON_POST_ALREADY_REVIEWED')
       }
+      if (action === 'update' && body.expectedApprovedVersion !== undefined && body.category !== undefined
+        && (lockedCurrent.concertId || lockedCurrent.category === 'CONCERT' || requestedCategory === 'CONCERT')) {
+        throw new Error('SALON_POST_ALREADY_REVIEWED')
+      }
       current = lockedCurrent
       if (reviewStatus) {
         if (lockedCurrent.status === reviewStatus) throw new Error('SALON_REVIEW_ALREADY_REVIEWED')

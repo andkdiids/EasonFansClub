@@ -266,6 +266,8 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
       }),
       reviewer: row.approvedBy ? author({ id: row.approvedBy.id, uid: row.approvedBy.uid, nickname: row.approvedBy.nickname }) : null, reviewedAt: asIso(row.approvedAt), rejectReason: row.rejectReason,
       editVersion: row.updatedAt.toISOString(),
+      salonCategoryCode: row.category,
+      salonCategoryEditable: !row.concert && row.category !== 'CONCERT',
     }))
   }
 
@@ -346,7 +348,8 @@ export async function GET(request: Request) {
   const targetId = sanitizeText(params.get('targetId') || params.get('sourceId') || params.get('reviewId'), 200).trim() || null
   const rawPage = Number(params.get('page') || '1')
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
-  const definitions = await accessibleDefinitions(guard.user)
+  const definitions = (await accessibleDefinitions(guard.user)).filter(definition =>
+    params.get('excludeConcert') !== '1' || definition.type !== 'CONCERT')
   const selected = sourceType === 'ALL' ? definitions : definitions.filter((item) => item.type === sourceType)
   const prefetchSize = Math.max(PAGE_SIZE * 3, PAGE_SIZE * page)
   // The normal queue is always loaded from the requested type/status/page.
