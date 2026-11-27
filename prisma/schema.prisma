@@ -7156,6 +7156,12 @@ model ShunMasterRound {
   // players, notifications, letters or any public endpoint.
   friendHit Boolean @default(false)
   victimTier Int?
+  // Friend-pool observability: how many eligible friends existed for this
+  // attempt and, when the friend pool was not used, the exact reason it fell
+  // back to the global pool (FRIEND_CHANCE_OFF / NO_FRIENDS /
+  // POOL_EMPTY_AFTER_FILTERS / DICE_LOSS). NULL means the friend pool was used.
+  friendPoolSize Int @default(0)
+  friendPoolFallback String? @db.VarChar(32)
   // Deferred notification state machine.
   // PENDING    → the take is settled but the victim has not been told yet
   // SENT_PLAIN → an ordinary "your fee was taken" notification was sent

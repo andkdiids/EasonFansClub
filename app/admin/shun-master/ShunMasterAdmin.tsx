@@ -2,6 +2,14 @@
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { ACTIVITY_TIER_LABELS, shunConfigError, type ShunConfig } from '@/lib/shun-config'
+import { ShunDiagnosePanel } from './ShunDiagnosePanel'
+
+const FALLBACK_LABELS: Record<string, string> = {
+  FRIEND_CHANCE_OFF: '好友概率为 0',
+  NO_FRIENDS: '发起人无好友',
+  POOL_EMPTY_AFTER_FILTERS: '好友全部被资格规则排除',
+  DICE_LOSS: '好友池非空但概率未命中',
+}
 
 type Summary = {
   rulesVersion: number
@@ -19,7 +27,8 @@ type Summary = {
   activeRefusals: { userId: string; updatedAt: string }[]
   refusalAudit: { id: string; userId: string; action: 'LEAVE' | 'PROTECT' | 'UNPROTECT' | 'REJOIN'; occurredAt: string }[]
   matchStats: { day: string; total: number; friendHits: number; friendRate: number; unknownTier: number
-    tiers: { tier: number; label: string; count: number }[] }
+    tiers: { tier: number; label: string; count: number }[]
+    fallbacks: { reason: string | null; count: number }[] }
   notifyStats: { day: string; pending: number; plain: number; letter: number; auto: number; retryAttempts: number }
   // V5: cumulative recovery-bonus audit (admin-only).
   bonusStats: { recoveredCount: number; bonusCount: number; bonusRate: number; bonusTotal: number; recoveredTotal: number }
@@ -211,6 +220,10 @@ export function ShunMasterAdmin() {
         {data.matchStats.unknownTier > 0 && <p>另有 {data.matchStats.unknownTier} 笔发生在本次统计上线前的记录，未记录活跃度档位。</p>}
         <p className="text-sm text-[var(--foreground-muted)]">该统计仅管理员可见，前台不展示好友概率、目标池来源或活跃度抽样细节。</p>
       </details>
+      <details><summary>好友池回退原因分布 · {data.matchStats.day}</summary>
+        <ul>{(data.matchStats.fallbacks ?? []).map((row) => <li key={row.reason ?? 'used'}>{row.reason === null ? '好友池命中' : FALLBACK_LABELS[row.reason] ?? row.reason} · {row.count} 笔</li>)}</ul>
+        {!(data.matchStats.fallbacks ?? []).some((row) => row.reason === null) && <p>当天没有任何一笔从好友池命中。</p>}
+      </details>
       <div className="min-w-0 overflow-x-auto"><table className="w-full border text-left">
         <thead><tr>{['记录', '顺走入账方', '被顺扣款方', '顺取时间', '抽中 / 实付', '结果', '原额追回 / 平台补偿'].map((title) => <th className="p-2" key={title}>{title}</th>)}</tr></thead>
         <tbody>{data.records.map((row) => <tr key={row.id} className="border-t">
@@ -226,6 +239,7 @@ export function ShunMasterAdmin() {
       <details className="min-w-0 break-words"><summary>近期高频请求拦截</summary>{data.abuse.length
         ? <ul>{data.abuse.map((item) => <li key={item.id}>{item.createdAt} · {item.userId} · {item.metadata?.endpoint}</li>)}</ul>
         : <p>暂无拦截记录。</p>}</details>
+      <ShunDiagnosePanel />
     </>}
   </main>
 }

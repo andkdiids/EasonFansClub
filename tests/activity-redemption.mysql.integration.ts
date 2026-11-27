@@ -35,7 +35,9 @@ async function main() {
     const lookup = await getActivityRedemptionLookupByToken('qa-current-token')
     assert.equal(lookup.activity.coverUrl, activityData.coverUrl)
     assert.equal(lookup.activity.locationName, '会场')
-    assert.deepEqual(lookup.entitlements.filter((e) => e.type === 'MATERIAL').map((e) => [e.id, e.quantity]), [[orderA.id, 2], [orderB.id, 3]])
+    // MySQL makes no ORDER BY guarantee here (page-split order flips between
+    // runs), so compare as an order-insensitive multiset.
+    assert.deepEqual(lookup.entitlements.filter((e) => e.type === 'MATERIAL').map((e) => [e.id, e.quantity]).sort((a, b) => (a[0] < b[0] ? -1 : 1)), [[orderA.id, 2], [orderB.id, 3]].sort((a, b) => (a[0] < b[0] ? -1 : 1)))
     const prizes = lookup.entitlements.filter((e) => e.type === 'LOTTERY_PRIZE')
     assert.equal(prizes.length, 3)
     assert.ok(prizes.every((p) => p.quantity === 1), 'prize stock must never become recipient quantity')
