@@ -18,6 +18,7 @@ import { withReviewTargetHistory } from '@/lib/review-target-history'
 import { prisma } from '@/lib/prisma'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getSalonEditReviewPostIds } from '@/lib/salon-review-notifications'
+import { parseSalonCategory, type SalonCategoryValue } from '@/lib/salon-shared'
 import { rejectInvalidRequestOrigin, requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
 import {
   canApplyReviewDecision,
@@ -106,10 +107,11 @@ function postWhere(status: ReviewStatus | 'ALL', keyword: string): Prisma.PostWh
   }
 }
 
-function salonWhere(status: ReviewStatus | 'ALL', keyword: string): Prisma.SalonPostWhereInput {
+function salonWhere(status: ReviewStatus | 'ALL', keyword: string, category?: SalonCategoryValue): Prisma.SalonPostWhereInput {
   const uid = numericKeyword(keyword)
   return {
     status: status === 'ALL' ? { in: reviewStatuses } : status,
+    ...(category ? { category } : {}),
     ...(keyword ? {
       OR: [
         { id: keyword },
@@ -188,7 +190,7 @@ function withTargetId<T>(where: T, targetId: string | null): T {
   return targetId ? ({ AND: [where, { id: targetId }] } as T) : where
 }
 
-async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, take: number, targetId: string | null = null): Promise<ReviewItem[]> {
+async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, take: number, targetId: string | null = null, salonCategory?: SalonCategoryValue): Promise<ReviewItem[]> {
   if (type === 'POST') {
     const [rows, boardRows] = await Promise.all([
       prisma.post.findMany({
@@ -242,7 +244,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
 
   if (type === 'SALON') {
     const rows = await prisma.salonPost.findMany({
-      where: withTargetId(salonWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }], take,
+      where: withTargetId(salonWhere(status, targetId ? '' : keyword, salonCategory), targetId), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }], take,
       select: {
         id: true, title: true, content: true, category: true, status: true, rejectReason: true, createdAt: true, updatedAt: true, approvedAt: true,
         author: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
@@ -317,9 +319,9 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
   }))
 }
 
-async function countType(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string) {
+async function countType(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, salonCategory?: SalonCategoryValue) {
   if (type === 'POST') return prisma.post.count({ where: postWhere(status, keyword) })
-  if (type === 'SALON') return prisma.salonPost.count({ where: salonWhere(status, keyword) })
+  if (type === 'SALON') return prisma.salonPost.count({ where: salonWhere(status, keyword, salonCategory) })
   if (type === 'CREATION') return prisma.studioProject.count({ where: studioWhere(status, keyword) })
   if (type === 'STICKER') return prisma.stickerPack.count({ where: stickerWhere(status, keyword) })
   if (type === 'CONCERT') return prisma.concertContribution.count({ where: contributionWhere(status, keyword) })
@@ -336,6 +338,7 @@ export async function GET(request: Request) {
   if (!guard.user) return guard.response
   const params = new URL(request.url).searchParams
   const sourceType = parseReviewSourceType(params.get('type'))
+  const salonCategory = sourceType === 'SALON' ? parseSalonCategory(params.get('salonCategory')) || undefined : undefined
   const statusParam = params.get('status')
   const status = parseReviewStatus(statusParam)
   const keyword = sanitizeText(params.get('keyword'), 80).trim()
@@ -350,13 +353,16 @@ export async function GET(request: Request) {
   // client which status tab to use, but it must never replace the queue with
   // a target-only query.
   const [batches, targetBatches, countRows] = await Promise.all([
-    Promise.all(selected.map((definition) => loadTypeItems(definition.type, status, keyword, prefetchSize))),
+    Promise.all(selected.map((definition) => salonCategory
+      ? loadTypeItems(definition.type, status, keyword, prefetchSize, null, salonCategory)
+      : loadTypeItems(definition.type, status, keyword, prefetchSize))),
     targetId
       ? Promise.all(selected.map((definition) => loadTypeItems(definition.type, 'ALL', keyword, 1, targetId)))
       : Promise.resolve([] as ReviewItem[][]),
     Promise.all(definitions.map(async (definition) => {
       const [total, pending, approved, rejected] = await Promise.all([
-        countType(definition.type, 'ALL', keyword), countType(definition.type, 'PENDING', keyword), countType(definition.type, 'APPROVED', keyword), countType(definition.type, 'REJECTED', keyword),
+        countType(definition.type, 'ALL', keyword, salonCategory), countType(definition.type, 'PENDING', keyword, salonCategory),
+        countType(definition.type, 'APPROVED', keyword, salonCategory), countType(definition.type, 'REJECTED', keyword, salonCategory),
       ])
       return { type: definition.type, label: definition.label, total, pending, approved, rejected }
     })),
