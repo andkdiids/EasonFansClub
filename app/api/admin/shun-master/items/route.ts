@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     ...(version === null ? {} : { configVersion: version }),
     ...(code ? { code: code as never } : {}),
   }
-  const [active, stock, entries, gifts, giftRecords, effects, audit, abuse, discrepancy, statusCounts, entryStats] = await Promise.all([
+  const [active, stock, entries, gifts, giftRecords, effects, audit, abuse, discrepancy, statusCounts, entryStats, guaranteeCount] = await Promise.all([
     prisma.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } }),
     userId ? prisma.shunItemInventory.findMany({ where: { userId } }) : [],
     prisma.shunItemEntry.findMany({ where: entryWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }),
@@ -77,6 +77,10 @@ export async function GET(request: Request) {
       where: { ...entryWhere, type: { in: ['GIFT_SENT', 'GIFT_RECEIVED', 'GIFT_REWARD'] } },
       _count: { _all: true }, _sum: { availableDelta: true },
     }),
+    // V4.2.2 隐藏保底：后台/审计可区分概率掉落与保底掉落（用户端不可见）。
+    prisma.shunItemEntry.count({
+      where: { ...entryWhere, type: 'COMMUNITY_DROP', requestKey: { endsWith: ':GUARANTEE' } },
+    }),
   ])
   const rules = active ? validateShunItemDraft(active)?.rules ?? defaultShunItemRules : defaultShunItemRules
   return json({
@@ -86,6 +90,8 @@ export async function GET(request: Request) {
     stock, entries, gifts, effects, audit, abuse, discrepancy,
     // V4.2.1 赠礼规则与双向赠礼统计（回礼 / 收礼分开计数）。
     giftRules: { receiveDailyLimit: rules.giftsReceived, pool: rules.gifts },
+    // 保底属于内部机制：仅在后台展示，用户端 API 不返回任何相关字段。
+    communityGuarantee: { budget: Object.values(rules.drops).reduce((sum, drop) => sum + drop.dailyChecks, 0), granted: guaranteeCount },
     giftStatus: statusCounts.map((row) => ({ status: row.status, count: row._count._all })),
     giftLedger: entryStats.map((row) => ({ type: row.type, count: row._count._all, amount: row._sum.availableDelta ?? 0 })),
     giftRecords: giftRecords.map((gift) => ({

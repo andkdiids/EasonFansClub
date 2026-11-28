@@ -277,11 +277,6 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
             <span>{row.note}</span>
           </li>)}
         </ol>
-        <p className={styles.itemFootnote}>
-          每日通过「今天只做一件事」必得 1 个道具，社区行为最多额外获得 1 个道具；
-          每周奖励、收到好友赠礼及主动赠礼获得的回礼，独立于每日上限计算。
-        </p>
-        <p className={styles.itemFootnote}>以上概率与次数来自服务端当前生效配置。</p>
       </section>}
       {tab === 'history' && <section aria-label="道具历史记录">
         <div className={styles.itemFilters}>

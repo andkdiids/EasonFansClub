@@ -1038,6 +1038,17 @@ const SHUN_DROP_SOURCE_LABELS: Record<string, string> = {
   CHECK_IN: '每日挂号', PRESCRIPTION: '领取处方', COMMENT: '有效评论', SHARE: '分享帖子', LIKE: '点赞帖子',
 }
 
+/**
+ * 历史记录里的来源文案。保底掉落的 requestKey 形如 `day:KIND:GUARANTEE`，
+ * 取第二段即可与概率掉落显示同一来源，用户看不出保底。
+ */
+export function shunItemSourceLabel(type: string, requestKey: string): string | null {
+  const parts = requestKey.split(':')
+  if (type === 'COMMUNITY_DROP') return parts[1] ? SHUN_DROP_SOURCE_LABELS[parts[1]] ?? null : null
+  if (type === 'WEEKLY_REWARD') return parts[1] ? `连续 ${parts[1]} 天` : null
+  return null
+}
+
 function historyCursor(entry: { id: string; createdAt: Date }) {
   return `${entry.createdAt.getTime()}_${entry.id}`
 }
@@ -1096,11 +1107,7 @@ export async function shunItemHistory(userId: string, filter: ShunItemHistoryFil
     const received = entry.type === 'GIFT_RECEIVED'
     const counterpartId = gift ? (sent || entry.type === 'GIFT_REWARD' ? gift.receiverId : gift.senderId) : null
     // 社区互动展示具体行为来源；旧记录（requestKey 只有日期）没有后缀时退回统称。
-    const suffix = entry.requestKey.includes(':') ? entry.requestKey.split(':').pop() : null
-    const sourceLabel = entry.type === 'COMMUNITY_DROP'
-      ? (suffix ? SHUN_DROP_SOURCE_LABELS[suffix] ?? null : null)
-      : entry.type === 'WEEKLY_REWARD' ? (suffix ? `连续 ${suffix} 天` : null)
-        : null
+    const sourceLabel = shunItemSourceLabel(entry.type, entry.requestKey)
     return {
       id: entry.id,
       type: entry.type,
