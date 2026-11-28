@@ -7340,6 +7340,7 @@ enum ShunItemEventType {
   USED
   GIFT_SENT
   GIFT_REWARD
+  ADMIN_GRANT
   RESERVED
   RELEASED
 }
@@ -7522,4 +7523,51 @@ model ShunItemGiftIntent {
 
   @@unique([senderId, requestKey])
   @@index([status, createdAt])
+}
+
+model ShunItemGrantTask {
+  id             String    @id @default(cuid())
+  createdBy      String
+  idempotencyKey String    @unique @db.VarChar(64)
+  reason         String    @db.VarChar(200)
+  notify         Boolean   @default(true)
+  status         String    @default("PENDING") @db.VarChar(20)
+  configVersion  Int
+  totalUsers     Int       @default(0)
+  totalItems     Int       @default(0)
+  succeededUsers Int       @default(0)
+  failedUsers    Int       @default(0)
+  skippedUsers   Int       @default(0)
+  grantedItems   Int       @default(0)
+  createdAt      DateTime  @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  cancelledAt    DateTime?
+  items          ShunItemGrantTaskItem[]
+  grants         ShunItemGrant[]
+
+  @@index([status, createdAt])
+}
+
+model ShunItemGrantTaskItem {
+  taskId   String
+  code     ShunItemCode
+  quantity Int
+  task     ShunItemGrantTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, code])
+}
+
+model ShunItemGrant {
+  id            String    @id @default(cuid())
+  taskId        String
+  userId        String
+  status        String    @default("PENDING") @db.VarChar(20)
+  failureReason String?   @db.VarChar(200)
+  createdAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  task          ShunItemGrantTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([taskId, status, userId])
 }

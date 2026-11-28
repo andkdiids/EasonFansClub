@@ -800,8 +800,25 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         </div>}
   </>
   return <main className={styles.page}>
-    <header className={styles.heading}><ShunMasterLogo size={38} /><div><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div>
-      {box?.enabled && <button type="button" className={styles.itemToggle} onClick={() => { setBoxError(''); setBoxOpen(true); void loadItems() }}>百宝箱 · {box.total}{newItems && <span className={styles.itemDot} aria-label="有新道具" />}</button>}
+    {/* 标题区从首屏就固定左对齐，右侧动作位始终存在，加载中只显示固定宽度占位，
+        避免库存回来后标题从居中跳到左侧。 */}
+    <header className={styles.heading}>
+      <ShunMasterLogo size={38} />
+      <div className={styles.headingText}><h1>顺大师</h1><p>顺手一牵，缘分随天。</p></div>
+      <div className={styles.headingAction}>
+        {box?.enabled
+          ? <button type="button" className={styles.itemToggle} onClick={() => { setBoxError(''); setBoxOpen(true); void loadItems() }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 9h18v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM3 9l1.6-4h14.8L21 9M12 9v12M9.5 5.5 10 9M14.5 5.5 14 9" />
+            </svg>
+            <span className={styles.itemToggleText}>百宝箱 · {box.total}</span>
+            {newItems && <span className={styles.itemDot} aria-label="有新道具" />}
+          </button>
+          : box === undefined
+            // 数据未返回：占位与真实按钮同宽，且不显示库存 0。
+            ? <span className={styles.itemToggleSkeleton} aria-label="百宝箱加载中" role="status" />
+            : null}
+      </div>
     </header>
     {box?.enabled && <ShunItemBox box={box} open={boxOpen} busy={!!busy} errorMessage={boxError} gifting={busy === 'gift'} delivery={delivery}
       onClose={() => setBoxOpen(false)} onUse={submitBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId) }} />}

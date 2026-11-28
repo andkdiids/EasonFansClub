@@ -26,6 +26,8 @@ const changes: Record<ShunItemEventType, readonly [number, number]> = {
   GIFT_SENT: [-1, 0],
   // V4.2.1 赠送者回礼：与主线/社区掉落一样是一件真实入账的道具。
   GIFT_REWARD: [1, 0],
+  // V4.2.3 管理员发放：直接入库，独立于所有日常额度。
+  ADMIN_GRANT: [1, 0],
   USED: [-1, 0],
   RESERVED: [-1, 1],
   RELEASED: [1, -1],

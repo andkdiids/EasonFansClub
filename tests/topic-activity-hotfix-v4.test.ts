@@ -308,8 +308,15 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   // column plus its relation, and one history index. Registered explicitly so
   // any other unapproved schema change is still rejected below.
   comparableBlocks.set('ShunItemEventType', comparableBlocks.get('ShunItemEventType')!
-    .filter((value) => value !== 'GIFT_REWARD'))
+    .filter((value) => value !== 'GIFT_REWARD' && value !== 'ADMIN_GRANT'))
   assert.ok(newBlocks.get('ShunItemEventType')?.includes('GIFT_REWARD'), 'V4.2.1 gift reward event registered')
+  assert.ok(newBlocks.get('ShunItemEventType')?.includes('ADMIN_GRANT'), 'V4.2.3 admin grant event registered')
+  // V4.2.3 approved additive footprint: three tables for the admin batch grant.
+  // Nothing pre-existing is edited; the enum value above is the only other change.
+  for (const model of ['ShunItemGrantTask', 'ShunItemGrantTaskItem', 'ShunItemGrant']) {
+    assert.ok(comparableBlocks.delete(model), `V4.2.3 admin grant model registered: ${model}`)
+    assert.ok(newBlocks.has(model), `V4.2.3 admin grant model present: ${model}`)
+  }
   comparableBlocks.set('ShunItemGiftIntent', comparableBlocks.get('ShunItemGiftIntent')!
     .filter((field) => field !== 'senderCode ShunItemCode?'))
   comparableBlocks.set('ShunItemGift', comparableBlocks.get('ShunItemGift')!.filter((field) =>
