@@ -3,10 +3,10 @@ import { SHUN_COMMUNITY_DROP_RULES, SHUN_GIFT_WEIGHTS, SHUN_ITEM_CATALOG, type S
 const descriptions: Record<ShunItemCode, string> = {
   EXTRA_ATTEMPT: '增加一次今天的主动顺取机会。',
   FRIEND_GIFT: '随机送给一位通讯录好友一份礼物，你也将收到一份随机回礼。',
-  EXTRA_SUSPECT: '下一次成功顺取的抓捕名单多一位候选人。',
+  EXTRA_SUSPECT: '下一次成功顺取的抓捕名单增加一位候选人，可与其他攻击类道具叠加使用。',
   REVENGE: '抓捕成功后，对真实顺取者反击一次。',
-  TARGET_FRIEND: '指定一位通讯录好友进行顺取。',
-  DOUBLE_AMOUNT: '下一次成功顺取金额翻倍，最多 14 挂号费。',
+  TARGET_FRIEND: '指定一位通讯录好友进行顺取，可突破好友每日普通被顺取上限。每位好友每日最多被任我顺顺取一次。',
+  DOUBLE_AMOUNT: '下一次成功顺取金额翻倍，最多14挂号费，可与其他攻击类道具叠加使用。',
   RETRY_CAPTURE: '重试一次失败的抓捕，原额追回。',
 }
 
@@ -73,7 +73,9 @@ export function validateShunItemDraft(input: unknown): ShunItemDraft | null {
       || typeof item.enabled !== 'boolean' || !integer(item.weight, 0, 100)) return null
     if (defaults.code === 'TARGET_FRIEND' && item.name.trim() !== '任我顺') return null
     definitions.push({
-      code: defaults.code, name: item.name.trim(), description: defaults.code === 'FRIEND_GIFT' ? defaults.description : item.description.trim(),
+      code: defaults.code, name: item.name.trim(),
+      description: ['FRIEND_GIFT', 'TARGET_FRIEND', 'DOUBLE_AMOUNT', 'EXTRA_SUSPECT'].includes(defaults.code)
+        ? defaults.description : item.description.trim(),
       icon: item.icon, rarity: item.rarity, enabled: item.enabled, weight: item.weight,
     })
   }

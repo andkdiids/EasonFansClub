@@ -85,8 +85,9 @@ test('the letter is written inside the same transaction as the transfer', () => 
 test('a replayed request cannot rewrite the stored letter', () => {
   const attemptStart = service.indexOf('export async function shunAttempt')
   const body = service.slice(attemptStart, service.indexOf('export async function shunRecords'))
-  const replay = body.slice(0, body.indexOf('shunMasterAnonymousLetter.create'))
-  assert.match(replay, /if \(previous\) return present\(tx, previous, 'out'\)/, '重放必须直接返回既有记录')
+  const replay = body.slice(0, body.indexOf('export function shunPlainNotificationContent'))
+  assert.match(replay, /if \(previous\) \{[\s\S]{0,1400}?return present\(tx, previous, 'out'\)/, '重放必须直接返回既有记录')
+  assert.match(replay, /REQUEST_CONFLICT/, '同键不同道具组合必须拒绝')
   assert.doesNotMatch(replay, /anonymousLetter\.(update|upsert)/, '重放不得修改已创建的信件')
 })
 
@@ -156,7 +157,7 @@ test('the plain notice keeps the documented copy', () => {
 
 test('the transfer route no longer accepts a message while the notify route screens it', () => {
   assert.doesNotMatch(attemptRoute, /anonymousMessage/, '顺一手请求不再携带留言')
-  assert.match(attemptRoute, /shunAttempt\(guard\.user\.id, body\.requestId\)/, '顺一手只使用 requestId')
+  assert.match(attemptRoute, /shunAttempt\(guard\.user\.id, body\.requestId, undefined, \{/, '顺一手只使用 requestId 与本次显式道具组合')
   // V5 扩展到四个动作：被顺通知 / 匿名信 / 抓捕通知 / 抓捕反击留言，其它一律 404。
   assert.match(notifyRoute, /const take = action === 'notify' \|\| action === 'letter'/, '被顺流程只允许两种动作')
   assert.match(notifyRoute, /const capture = action === 'captured' \|\| action === 'capture-letter'/, '抓捕流程只允许两种动作')
@@ -170,7 +171,7 @@ test('the transfer route no longer accepts a message while the notify route scre
 })
 
 test('顺一手 executes the take directly and shows the target first', () => {
-  assert.match(client, /onClick=\{\(\) => void attempt\(\)\}/, '顺一手必须直接发起顺取')
+  assert.match(client, /onClick=\{startTake\}/, '顺一手必须先检查本次可用道具再发起顺取')
   assert.doesNotMatch(client, /setCompose/, '先选留言再顺取的旧流程必须彻底删除')
   assert.match(client, /'给 TA 留一句匿名的话' : '顺走啦！'/, '结果弹窗标题固定为「顺走啦！」')
   assert.match(client, /\+{result\.amount} 挂号费/, '结果弹窗必须展示本次顺走的挂号费')
