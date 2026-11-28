@@ -158,13 +158,15 @@ function isGifUrl(value: string | null | undefined) {
 
 function serializePost(row: DiscoveryRow) {
   const contentImages = splitContentImages(row.content).images
-  const imageMedia = row.PostMedia.find((item) => item.type === 'IMAGE')
+  const imageMedia = row.PostMedia.find((item) => item.type === 'IMAGE' || item.type === 'LIVE_PHOTO')
   const activityCover = row.TopicActivity?.type === 'TOPIC_ACTIVITY' && row.TopicActivity.coverUrl ? publicImageUrl(row.TopicActivity.coverUrl) || row.TopicActivity.coverUrl : null
   const coverSource = activityCover || contentImages[0] || imageMedia?.thumbnail || imageMedia?.url || row.sticker?.url || null
   const cover = coverSource ? {
     url: publicImageVariantUrl(coverSource, 'card') || coverSource,
     width: contentImages[0] ? null : imageMedia?.width || null,
     height: contentImages[0] ? null : imageMedia?.height || null,
+    mediaType: imageMedia?.type ?? 'IMAGE',
+    videoUrl: imageMedia?.livePhotoId ? `/api/media/live-photo/${imageMedia.livePhotoId}/video` : null,
   } : null
   const media = row.PostMedia.map((item) => ({
     id: item.id,
@@ -174,6 +176,7 @@ function serializePost(row: DiscoveryRow) {
     width: item.width,
     height: item.height,
     sortOrder: item.sortOrder,
+    videoUrl: item.livePhotoId ? `/api/media/live-photo/${item.livePhotoId}/video` : null,
   }))
   const sticker = row.sticker ? {
     url: publicImageUrl(row.sticker.url) || row.sticker.url,
@@ -273,7 +276,7 @@ const discoverySelect = {
   PostFavorite: { select: { id: true } },
   PostMedia: {
     orderBy: { sortOrder: 'asc' as const },
-    select: { id: true, type: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true },
+    select: { id: true, type: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true, livePhotoId: true },
   },
   sticker: { select: { url: true, type: true } },
   TopicActivity: { select: { id: true, type: true, title: true, startsAt: true, endsAt: true, participationRule: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true, coverUrl: true, status: true, pinToPlaza: true } },

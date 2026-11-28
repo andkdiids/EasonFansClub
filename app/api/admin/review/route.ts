@@ -203,7 +203,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
           User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
           ReviewedBy: { select: { id: true, uid: true, nickname: true } },
           Board: { select: { name: true, slug: true } },
-          PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
+          PostMedia: { where: { type: { in: ['IMAGE', 'LIVE_PHOTO'] } }, orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true, livePhotoId: true } },
         },
       }),
       prisma.board.findMany({
@@ -228,7 +228,13 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
       media: row.PostMedia.flatMap((media, index) => {
         const src = publicImageUrl(media.url)
         if (!src) return []
-        return [{ id: media.id, src, previewSrc: publicImageUrl(media.thumbnail) || undefined, alt: `帖子图片 ${index + 1}` }]
+        return [{
+          id: media.id,
+          src,
+          previewSrc: publicImageUrl(media.thumbnail) || undefined,
+          alt: `帖子图片 ${index + 1}`,
+          ...(media.livePhotoId ? { livePhoto: { id: media.livePhotoId, videoUrl: `/api/media/live-photo/${media.livePhotoId}/video` } } : {}),
+        }]
       }),
       postDetails: {
         boardId: row.boardId,

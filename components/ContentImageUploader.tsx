@@ -18,6 +18,9 @@ import {
 import type { ContentImageUploadErrorCode } from '@/lib/content-image-upload'
 import { MAX_CONTENT_IMAGES, reorderContentImageUrls } from '@/lib/content-images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { isLivePhotoMarker, livePhotoIdFromMarker, toLivePhotoMarker } from '@/lib/live-photo-markers'
+import { LivePhotoClientError, uploadLivePhotoMedia, waitForLivePhotoAsset } from '@/lib/live-photo-browser'
+import { LivePhotoSurface } from '@/components/live-photo/LivePhotoSurface'
 
 type PointerDragState = {
   pointerId: number
@@ -107,6 +110,13 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   const [clipboardReading, setClipboardReading] = useState(false)
   const [editingImage, setEditingImage] = useState<EditingImage | null>(null)
   const [replacingUrl, setReplacingUrl] = useState<string | null>(null)
+  const [livePickerOpen, setLivePickerOpen] = useState(false)
+  const [liveCover, setLiveCover] = useState<File | null>(null)
+  const [liveVideo, setLiveVideo] = useState<File | null>(null)
+  const [liveProgress, setLiveProgress] = useState<number | null>(null)
+  const [liveStage, setLiveStage] = useState('')
+  const [liveError, setLiveError] = useState('')
+  const liveControllerRef = useRef<AbortController | null>(null)
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
   const onBusyChangeRef = useRef(onBusyChange)
@@ -125,7 +135,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   function getUploadState(): ContentImageUploadState {
     const pendingCount = pendingUploadsRef.current.filter((item) => isBusyPhase(item.phase)).length
     const failedCount = pendingUploadsRef.current.filter((item) => item.phase === 'failed').length
-    const blocked = pendingCount > 0 || failedCount > 0 || Boolean(editingImageRef.current) || Boolean(replacingUrlRef.current)
+    const blocked = pendingCount > 0 || failedCount > 0 || Boolean(editingImageRef.current) || Boolean(replacingUrlRef.current) || liveControllerRef.current !== null
     return { pendingCount, failedCount, blocked }
   }
 
@@ -143,9 +153,13 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     pendingUploadsRef.current = pendingUploads
     editingImageRef.current = editingImage
     replacingUrlRef.current = replacingUrl
-    onBusyChangeRef.current?.(pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl))
+    onBusyChangeRef.current?.(pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl) || liveProgress !== null)
     onUploadStateChangeRef.current?.(getUploadState())
-  }, [editingImage, pendingUploads, replacingUrl])
+  }, [editingImage, pendingUploads, replacingUrl, liveProgress])
+
+  useEffect(() => () => {
+    liveControllerRef.current?.abort()
+  }, [])
 
   useEffect(() => {
     const currentUrls = new Set(value)
@@ -202,6 +216,70 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     const current = valueRef.current
     if (current.includes(url)) return
     const next = [...current, url]
+    valueRef.current = next
+    onChangeRef.current(next)
+  }
+
+  async function submitLivePhoto() {
+    if (!liveCover) {
+      setLiveError('请选择静态封面或动态照片文件')
+      return
+    }
+    if (existingCount + valueRef.current.length >= MAX_CONTENT_IMAGES) {
+      setLiveError(`最多只能添加 ${MAX_CONTENT_IMAGES} 个媒体`)
+      return
+    }
+    const controller = new AbortController()
+    liveControllerRef.current = controller
+    setLiveProgress(0)
+    setLiveStage('上传中…')
+    setLiveError('')
+    try {
+      const uploaded = await uploadLivePhotoMedia({
+        cover: liveCover,
+        video: liveVideo,
+        requestId: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `live-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        onProgress: setLiveProgress,
+        signal: controller.signal,
+      })
+      setLiveStage('媒体处理中…')
+      await waitForLivePhotoAsset(uploaded.assetId, {
+        signal: controller.signal,
+        onStatus: (status) => setLiveStage(status === 'READY' ? '处理完成' : '媒体处理中…'),
+      })
+      if (disposedRef.current) return
+      appendUploadedUrl(toLivePhotoMarker(uploaded.assetId))
+      setLivePickerOpen(false)
+      setLiveCover(null)
+      setLiveVideo(null)
+      setLiveProgress(null)
+      setLiveStage('')
+    } catch (reason) {
+      if (disposedRef.current) return
+      setLiveError(reason instanceof LivePhotoClientError && reason.code !== 'ABORTED'
+        ? reason.message
+        : reason instanceof Error ? reason.message : '实况照片上传失败，请重试')
+      setLiveProgress(null)
+      setLiveStage('')
+    } finally {
+      if (liveControllerRef.current === controller) liveControllerRef.current = null
+    }
+  }
+
+  function closeLivePicker() {
+    liveControllerRef.current?.abort()
+    liveControllerRef.current = null
+    setLivePickerOpen(false)
+    setLiveProgress(null)
+    setLiveStage('')
+    setLiveError('')
+  }
+
+  function convertLiveToStatic(url: string) {
+    const id = livePhotoIdFromMarker(url)
+    if (!id || typeof window === 'undefined') return
+    const staticUrl = new URL(`/api/media/live-photo/${id}/cover`, window.location.origin).href
+    const next = valueRef.current.map((item) => item === url ? staticUrl : item)
     valueRef.current = next
     onChangeRef.current(next)
   }
@@ -463,10 +541,10 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     setDragging(null)
   }
 
-  const busy = pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl)
+  const busy = pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl) || liveProgress !== null
   const pendingCount = pendingUploads.filter((item) => isBusyPhase(item.phase)).length
   const failedCount = pendingUploads.filter((item) => item.phase === 'failed').length
-  const totalCount = existingCount + value.length + pendingCount
+  const totalCount = existingCount + value.length + pendingCount + (liveProgress !== null ? 1 : 0)
   const canAddMore = totalCount < MAX_CONTENT_IMAGES
   const retryCapacityFull = totalCount >= MAX_CONTENT_IMAGES
 
@@ -491,6 +569,14 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
           className="min-w-0 max-w-full flex-1 basis-52 rounded-lg border border-sky-100 bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {clipboardReading ? '读取剪贴板…' : '从剪贴板添加'}
+        </button>
+        <button
+          type="button"
+          disabled={!canAddMore || busy}
+          onClick={() => setLivePickerOpen(true)}
+          className="min-w-0 max-w-full flex-1 basis-52 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          添加实况照片
         </button>
       </div>
 
@@ -559,9 +645,27 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
               className={`relative cursor-grab select-none ${draggingUrl === url ? 'z-10 opacity-60' : ''}`}
               style={{ touchAction: 'none' }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={local?.previewUrl || publicImageVariantUrl(url, 'thumb-md') || url} alt="已上传内容，拖拽可调整顺序" className="pointer-events-none h-24 w-full rounded-xl object-cover" loading="lazy" />
+              {isLivePhotoMarker(url) ? (
+                <LivePhotoSurface
+                  coverUrl={`/api/media/live-photo/${livePhotoIdFromMarker(url)}/cover`}
+                  videoUrl={`/api/media/live-photo/${livePhotoIdFromMarker(url)}/video`}
+                  alt="已上传实况照片，点击 LIVE 可预览"
+                  loading="lazy"
+                  imageClassName="pointer-events-none h-24 w-full rounded-xl object-cover"
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={local?.previewUrl || publicImageVariantUrl(url, 'thumb-md') || url} alt="已上传内容，拖拽可调整顺序" className="pointer-events-none h-24 w-full rounded-xl object-cover" loading="lazy" />
+              )}
               <span className="absolute inset-x-1 bottom-1 rounded bg-emerald-700/85 px-1 py-0.5 text-center text-[11px] font-black text-white" role="status">上传成功</span>
+              {isLivePhotoMarker(url) ? (
+                <button
+                  type="button"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => convertLiveToStatic(url)}
+                  className="absolute left-1 top-1 rounded-full bg-amber-700/90 px-2 py-1 text-xs text-white"
+                >关闭实况</button>
+              ) : null}
               {local ? <button
                 type="button"
                 disabled={replacingUrl === url}
@@ -584,6 +688,56 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       {error ? <p className="text-sm font-bold text-red-600" role="alert">{error}</p> : null}
       {busy ? <p className="text-xs font-bold text-slate-500" role="status">图片处理完成后才能发布帖子。</p> : null}
       {failedCount ? <p className="text-xs font-bold text-red-600" role="alert">有图片上传失败，请重试或删除失败图片后再发布。</p> : null}
+      {livePickerOpen ? (
+        <div className="fixed inset-0 z-[var(--layer-modal)] flex items-end justify-center bg-black/60 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label="添加实况照片">
+          <div className="w-full max-w-md space-y-3 rounded-2xl bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-black text-slate-900">添加实况照片</h2>
+              <button type="button" onClick={closeLivePicker} className="rounded px-2 py-1 text-sm text-slate-600">关闭</button>
+            </div>
+            <p className="text-xs leading-relaxed text-slate-600">
+              分别选择静态封面与配对视频；也可只选择一张包含动态资源的照片。视频最长 5 秒，上传后自动处理，超限会明确提示。
+            </p>
+            <label className="block text-sm font-bold text-slate-700">
+              静态封面 / 动态照片
+              <input
+                type="file"
+                accept="image/jpeg,image/heic,image/heif,.jpg,.jpeg,.heic,.heif"
+                disabled={liveProgress !== null}
+                onChange={(event) => setLiveCover(event.target.files?.[0] || null)}
+                className="mt-1 block w-full text-xs"
+              />
+            </label>
+            {liveCover ? <p className="text-xs text-slate-500">已选择：{liveCover.name}</p> : null}
+            <label className="block text-sm font-bold text-slate-700">
+              配对动态视频（可选）
+              <input
+                type="file"
+                accept="video/mp4,video/quicktime,.mp4,.mov"
+                disabled={liveProgress !== null}
+                onChange={(event) => setLiveVideo(event.target.files?.[0] || null)}
+                className="mt-1 block w-full text-xs"
+              />
+            </label>
+            {liveVideo ? <p className="text-xs text-slate-500">已配对：{liveVideo.name}</p> : null}
+            {liveProgress !== null ? (
+              <div className="space-y-1" role="status">
+                <div className="h-2 overflow-hidden rounded bg-slate-100">
+                  <div className="h-full bg-amber-500 transition-all" style={{ width: `${liveProgress}%` }} />
+                </div>
+                <p className="text-xs text-slate-600">{liveStage || '上传中…'} {liveProgress}%</p>
+              </div>
+            ) : null}
+            {liveError ? <p className="text-xs font-bold text-red-600" role="alert">{liveError}</p> : null}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => void submitLivePhoto()} disabled={!liveCover || liveProgress !== null || busy} className="flex-1 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+                {liveProgress !== null ? '处理中…' : '上传实况照片'}
+              </button>
+              <button type="button" onClick={closeLivePicker} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700">取消</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {editingImage ? <ImageEditor file={editingImage.file} onCancel={() => setEditingImage(null)} onComplete={(editedFile) => editingImage.kind === 'pending' ? completePendingEdit(editingImage.id, editedFile) : void completeUploadedEdit(editingImage.url!, editedFile)} /> : null}
     </div>
   )

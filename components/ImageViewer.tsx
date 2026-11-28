@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Mous
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { publicImageUrl } from '@/lib/images'
 import { resolveImageViewerFullUrl } from '@/lib/image-viewer-url'
+import { LivePhotoPlayback, LivePhotoSurface, useLivePhotoPlayback } from '@/components/live-photo/LivePhotoSurface'
 
 export const IMAGE_VIEWER_MIN_ZOOM = 0.5
 export const IMAGE_VIEWER_MAX_ZOOM = 4
@@ -23,6 +24,7 @@ export type ImageViewerItem = {
   /** Explicitly control whether a protected/original route is available. */
   originalUrl?: string | null
   downloadUrl?: string
+  videoUrl?: string | null
 }
 
 type ViewerImageState = 'loading' | 'loaded' | 'error'
@@ -92,6 +94,7 @@ export function ImageViewer({
   previewSrc,
   originalUrl,
   downloadUrl,
+  videoUrl,
   gallery,
   initialIndex = 0,
   autoPlay = false,
@@ -108,6 +111,7 @@ export function ImageViewer({
   previewSrc?: string
   originalUrl?: string | null
   downloadUrl?: string
+  videoUrl?: string | null
   gallery?: readonly ImageViewerItem[]
   initialIndex?: number
   autoPlay?: boolean
@@ -147,6 +151,8 @@ export function ImageViewer({
   const safeCurrentIndex = clampIndex(currentIndex, viewerItems.length)
   const activeItem = viewerItems[safeCurrentIndex] ?? viewerItems[0] ?? { src, alt, previewSrc }
   const activeAlt = activeItem.alt || alt
+  const viewerVideoUrl = activeItem.videoUrl ?? videoUrl ?? null
+  const viewerPlayback = useLivePhotoPlayback(viewerVideoUrl)
   const publicSrc = publicImageUrl(activeItem.src) || activeItem.src
   const requestedPreviewSrc = activeItem.previewSrc ? publicImageUrl(activeItem.previewSrc) || activeItem.previewSrc : null
   const renderPreviewSrc = requestedPreviewSrc || publicImageVariantUrl(publicSrc, 'card') || publicSrc
@@ -232,6 +238,7 @@ export function ImageViewer({
 
   function openViewer() {
     clearAutoPlayTimeout()
+    viewerPlayback.stop()
     const nextIndex = clampIndex(initialIndex, viewerItems.length)
     isInteractingRef.current = false
     setCurrentIndex(nextIndex)
@@ -251,6 +258,7 @@ export function ImageViewer({
 
   function close() {
     clearAutoPlayTimeout()
+    viewerPlayback.stop()
     isInteractingRef.current = false
     setOpen(false)
     setIsInteracting(false)
@@ -321,6 +329,7 @@ export function ImageViewer({
   }, [open, safeCurrentIndex, renderOriginalSrc])
 
   function goTo(nextIndex: number, reason: 'manual' | 'auto' = 'manual') {
+    viewerPlayback.stop()
     if (reason === 'manual') restartAutoPlayTimer()
     const nextSafeIndex = reason === 'auto'
       ? (nextIndex % viewerItems.length + viewerItems.length) % viewerItems.length
@@ -500,6 +509,18 @@ export function ImageViewer({
       data-auto-playing={isAutoPlaying && !isInteracting && isPageVisible ? 'true' : 'false'}
       className="fixed inset-0 z-[var(--layer-image-viewer)] h-[100dvh] w-[100vw] bg-black/95 text-white"
     >
+      {viewerVideoUrl ? (
+        <LivePhotoPlayback
+          videoUrl={viewerVideoUrl}
+          playing={viewerPlayback.playing}
+          muted={viewerPlayback.muted}
+          onToggle={viewerPlayback.toggle}
+          onStop={viewerPlayback.stop}
+          onMuteToggle={() => viewerPlayback.setMuted((value) => !value)}
+          className="live-photo-viewer-badge"
+          variant="viewer"
+        />
+      ) : null}
       <div className="absolute inset-x-0 top-0 z-20 flex min-h-14 items-start justify-between gap-3 border-b border-white/10 bg-black/70 px-3 pb-2 pt-[env(safe-area-inset-top)] backdrop-blur sm:px-5">
         <div className="flex min-w-0 items-center gap-3 pt-2">
           <span className="truncate text-xs font-bold text-white/70">{activeAlt}</span>
@@ -561,19 +582,33 @@ export function ImageViewer({
 
   return (
     <>
-      <button type="button" onClick={(event) => { event.stopPropagation(); openViewer() }} className={buttonClassName} aria-label={`查看大图：${alt}`} aria-haspopup="dialog">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={renderPreviewSrc}
+      {videoUrl ? (
+        <LivePhotoSurface
+          coverUrl={renderPreviewSrc}
+          videoUrl={videoUrl}
           alt={alt}
-          draggable={false}
           loading={loading}
           fetchPriority={fetchPriority}
-          decoding="async"
           onError={onError}
-          className={imageClassName}
+          buttonClassName={buttonClassName}
+          imageClassName={imageClassName}
+          onOpen={openViewer}
         />
-      </button>
+      ) : (
+        <button type="button" onClick={(event) => { event.stopPropagation(); openViewer() }} className={buttonClassName} aria-label={`查看大图：${alt}`} aria-haspopup="dialog">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={renderPreviewSrc}
+            alt={alt}
+            draggable={false}
+            loading={loading}
+            fetchPriority={fetchPriority}
+            decoding="async"
+            onError={onError}
+            className={imageClassName}
+          />
+        </button>
+      )}
       {viewer}
     </>
   )

@@ -26,9 +26,9 @@ export async function GET(_request: Request, { params }: Params) {
       moderationStatus: true,
       status: true,
       PostMedia: {
-        where: { type: 'IMAGE' },
+        where: { type: { in: ['IMAGE', 'LIVE_PHOTO'] } },
         orderBy: { sortOrder: 'asc' },
-        select: { id: true, url: true, sortOrder: true },
+        select: { id: true, url: true, sortOrder: true, type: true, livePhotoId: true },
       },
     },
   })
@@ -61,6 +61,8 @@ export async function GET(_request: Request, { params }: Params) {
         url: publicImageUrl(media.url) || media.url,
         sortOrder: media.sortOrder,
         broken: isSupabaseStorageUrl(media.url),
+        mediaType: media.type,
+        videoUrl: media.livePhotoId ? `/api/media/live-photo/${media.livePhotoId}/video` : null,
       })),
     },
   })

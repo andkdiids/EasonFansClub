@@ -380,6 +380,7 @@ function ReviewCard({ item, busy, focused, selectedBoardId, onBoardChange, onApp
   if (!mediaItems.length && item.cover?.trim()) {
     mediaItems.push({ id: `${item.sourceType}:${item.sourceId}:cover`, src: item.cover.trim(), alt: `${item.title}图片` })
   }
+  const galleryItems = mediaItems.map((media) => ({ ...media, videoUrl: media.livePhoto?.videoUrl ?? null }))
   const primaryMedia = mediaItems[0]
   const showMediaColumn = Boolean(primaryMedia) || item.sourceType !== 'POST'
   const boardSelection = selectedBoardId || item.postDetails?.boardId || ''
@@ -391,7 +392,8 @@ function ReviewCard({ item, busy, focused, selectedBoardId, onBoardChange, onApp
           src={primaryMedia.src}
           previewSrc={primaryMedia.previewSrc}
           alt={primaryMedia.alt}
-          gallery={mediaItems}
+          videoUrl={primaryMedia.livePhoto?.videoUrl ?? null}
+          gallery={galleryItems}
           imageClassName="h-full w-full object-cover"
           buttonClassName="block h-full w-full cursor-zoom-in overflow-hidden text-left"
         />

@@ -11,6 +11,8 @@ import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { enforceApiRateLimit, resolveRequestAuth, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
+import { livePhotoIdFromMarker } from '@/lib/live-photo-markers'
+import { resolveLivePhotoMedia } from '@/lib/live-photo-service'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { splitContentImages } from '@/lib/content-images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
@@ -185,7 +187,7 @@ export async function GET(request: Request) {
         },
         Board: { select: { name: true, slug: true } },
         TopicActivity: { select: { id: true, type: true, title: true, endsAt: true, rewardPoints: true, rewardBadgeIds: true, coverUrl: true } },
-        PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true, thumbnail: true } },
+        PostMedia: { where: { type: { in: ['IMAGE', 'LIVE_PHOTO'] } }, orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true, thumbnail: true } },
         sticker: { select: { url: true } },
       },
     })
@@ -508,7 +510,24 @@ export async function POST(request: Request) {
       await syncPostTopics(tx, post.id, topicNames, user.id)
       if (imageUrls.length) {
         phase = 'post-transaction.media-create'
-        await tx.postMedia.createMany({ data: imageUrls.map((url, sortOrder) => ({ postId: post.id, type: 'IMAGE', url, sortOrder })) })
+        const liveAssets = await resolveLivePhotoMedia(imageUrls, user.id, tx)
+        await tx.postMedia.createMany({ data: imageUrls.map((url, sortOrder) => {
+          const liveId = livePhotoIdFromMarker(url)
+          const asset = liveId ? liveAssets.get(liveId) : null
+          if (!liveId || !asset) return { postId: post.id, type: 'IMAGE' as const, url, sortOrder }
+          const coverUrl = `/api/media/live-photo/${liveId}/cover`
+          return {
+            postId: post.id,
+            type: 'LIVE_PHOTO' as const,
+            url: coverUrl,
+            thumbnail: coverUrl,
+            width: asset.width,
+            height: asset.height,
+            size: asset.size,
+            sortOrder,
+            livePhotoId: liveId,
+          }
+        }) })
       }
 
       return { post }

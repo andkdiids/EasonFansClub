@@ -10,6 +10,8 @@ import { hasAdminPermission, isSuperAdmin, isPrivilegedPostAuthor } from '@/lib/
 import { deletePost } from '@/lib/post-deletion'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
+import { isLivePhotoMarker, livePhotoIdFromMarker } from '@/lib/live-photo-markers'
+import { resolveLivePhotoMedia, cleanupAssetsForDeletedPost } from '@/lib/live-photo-service'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -263,6 +265,12 @@ async function postDeleteResponse(postId: string, user: SessionUser, canManagePo
     }
 
     try {
+      await cleanupAssetsForDeletedPost(postId)
+    } catch (error) {
+      console.error('[posts.delete.live-photo-cleanup]', { postId, userId: user.id, ...describePostDeleteError(error) })
+    }
+
+    try {
       revalidatePath('/forum')
       revalidatePath('/community')
       revalidatePath('/trending')
@@ -386,6 +394,8 @@ export async function GET(request: Request, { params }: Params) {
         ...media,
         url: publicImageUrl(media.url) || media.url,
         thumbnail: publicImageUrl(media.thumbnail),
+        mediaType: media.type,
+        videoUrl: media.livePhotoId ? `/api/media/live-photo/${media.livePhotoId}/video` : null,
       })),
       replies: Reply.map(({ User: replyAuthor, ...reply }) => ({
         ...reply,
@@ -816,13 +826,13 @@ async function handleEditPost(
     ? body.keepMediaIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
     : null
   const addImageUrls = Array.isArray(body.addImageUrls)
-    ? body.addImageUrls.filter(isAcceptableImageUrl)
+    ? body.addImageUrls.filter((entry) => isLivePhotoMarker(entry) || isAcceptableImageUrl(entry))
     : []
 
-  // 统计当前帖子已保留的图片数量，确保总量不超过上限。
+  // 统计当前帖子已保留的媒体数量，实况照片与普通图片共用 9 个位置。
   setPhase('edit-media-read')
   const currentMedia = await prisma.postMedia.findMany({
-    where: { postId, type: 'IMAGE' },
+    where: { postId, type: { in: ['IMAGE', 'LIVE_PHOTO'] } },
     orderBy: { sortOrder: 'asc' },
     select: { id: true, sortOrder: true },
   })
@@ -949,7 +959,7 @@ async function handleEditPost(
     // 删除被移除的图片（keepMediaIds 显式排除的）。
     if (removedCount > 0) {
       await tx.postMedia.deleteMany({
-        where: { postId, type: 'IMAGE', id: { notIn: keptIds } },
+        where: { postId, id: { notIn: keptIds } },
       })
     }
 
@@ -966,13 +976,27 @@ async function handleEditPost(
       })
     }
     if (addImageUrls.length) {
+      const liveAssets = await resolveLivePhotoMedia(addImageUrls, user.id, tx)
       await tx.postMedia.createMany({
-        data: addImageUrls.map((url, offset) => ({
-          postId,
-          type: 'IMAGE' as const,
-          url,
-          sortOrder: keptMedia.length + offset,
-        })),
+        data: addImageUrls.map((url, offset) => {
+          const liveId = livePhotoIdFromMarker(url)
+          const asset = liveId ? liveAssets.get(liveId) : null
+          if (!liveId || !asset) {
+            return { postId, type: 'IMAGE' as const, url, sortOrder: keptMedia.length + offset }
+          }
+          const coverUrl = `/api/media/live-photo/${liveId}/cover`
+          return {
+            postId,
+            type: 'LIVE_PHOTO' as const,
+            url: coverUrl,
+            thumbnail: coverUrl,
+            width: asset.width,
+            height: asset.height,
+            size: asset.size,
+            sortOrder: keptMedia.length + offset,
+            livePhotoId: liveId,
+          }
+        }),
       })
     }
 

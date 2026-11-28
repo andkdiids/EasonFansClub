@@ -96,6 +96,7 @@ export type ReviewMedia = {
   src: string
   previewSrc?: string
   alt: string
+  livePhoto?: { id: string; videoUrl: string }
 }
 
 export type ReviewBoardOption = {

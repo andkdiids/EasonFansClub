@@ -8,6 +8,7 @@ import { FavoriteButton, LikeButton } from '@/components/PostActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { livePhotoIdFromMarker } from '@/lib/live-photo-markers'
 import { formatUid } from '@/lib/uid'
 import type { ForumDiscoveryMedia, ForumDiscoveryPost, ForumDiscoverySticker } from '@/lib/forum-discovery'
 import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
@@ -26,11 +27,12 @@ export type FishModeOpenOptions = {
 
 type FishModeMediaEntry = {
   id: string
-  type: 'IMAGE' | 'GIF' | 'VIDEO'
+  type: 'IMAGE' | 'GIF' | 'VIDEO' | 'LIVE_PHOTO'
   url: string
   thumbnail: string | null
   width: number | null
   height: number | null
+  videoUrl?: string | null
 }
 
 function isGifUrl(value: string | null | undefined) {
@@ -47,23 +49,26 @@ function buildMediaEntries(source: FishModeMediaSource): FishModeMediaEntry[] {
   }
 
   source.contentImages?.forEach((url, index) => {
+    const liveId = livePhotoIdFromMarker(url)
     push({
       id: `${source.id}-content-image-${index}`,
-      type: isGifUrl(url) ? 'GIF' : 'IMAGE',
-      url,
-      thumbnail: publicImageVariantUrl(url, 'card') || url,
+      type: liveId ? 'LIVE_PHOTO' : isGifUrl(url) ? 'GIF' : 'IMAGE',
+      url: liveId ? `/api/media/live-photo/${liveId}/cover` : url,
+      thumbnail: liveId ? `/api/media/live-photo/${liveId}/cover` : publicImageVariantUrl(url, 'card') || url,
       width: null,
       height: null,
+      ...(liveId ? { videoUrl: `/api/media/live-photo/${liveId}/video` } : {}),
     })
   })
   source.media?.forEach((media) => {
     push({
       id: media.id,
-      type: media.type === 'VIDEO' ? 'VIDEO' : isGifUrl(media.url) ? 'GIF' : 'IMAGE',
+      type: media.type === 'VIDEO' ? 'VIDEO' : media.type === 'LIVE_PHOTO' ? 'LIVE_PHOTO' : isGifUrl(media.url) ? 'GIF' : 'IMAGE',
       url: media.url,
       thumbnail: media.thumbnail || publicImageVariantUrl(media.url, 'card') || media.url,
       width: media.width,
       height: media.height,
+      ...(media.videoUrl ? { videoUrl: media.videoUrl } : {}),
     })
   })
   if (source.sticker) {
@@ -100,6 +105,7 @@ function FishModeImageGrid({ items }: Readonly<{ items: FishModeMediaEntry[] }>)
     src: item.url,
     previewSrc: item.thumbnail || undefined,
     alt: '帖子图片',
+    videoUrl: item.videoUrl,
   })), [items])
 
   return (
@@ -110,6 +116,7 @@ function FishModeImageGrid({ items }: Readonly<{ items: FishModeMediaEntry[] }>)
           src={item.url}
           previewSrc={item.thumbnail || undefined}
           alt="帖子图片"
+          videoUrl={item.videoUrl}
           gallery={gallery}
           initialIndex={index}
           autoPlay={false}

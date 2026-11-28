@@ -8,6 +8,7 @@ import { postDetailHref } from '@/lib/post-navigation'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
 import { activityDateLabel } from '@/lib/activity'
+import { LivePhotoSurface } from '@/components/live-photo/LivePhotoSurface'
 
 function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost; priority: boolean }>) {
   const [fit, setFit] = useState<'cover' | 'contain'>(getForumDiscoveryCoverFit(post.cover?.width, post.cover?.height))
@@ -20,6 +21,22 @@ function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost;
         <span className={`forum-discovery-text-cover-title forum-discovery-text-cover-title-${post.title.length > 34 ? 'small' : post.title.length > 18 ? 'medium' : 'large'}`}>
           {post.title}
         </span>
+      </div>
+    )
+  }
+
+  if (cover.mediaType === 'LIVE_PHOTO' && cover.videoUrl) {
+    return (
+      <div className="forum-discovery-cover">
+        <LivePhotoSurface
+          coverUrl={cover.url}
+          videoUrl={cover.videoUrl}
+          alt="帖子实况照片封面"
+          loading={priority ? 'eager' : 'lazy'}
+          fetchPriority={priority ? 'high' : 'auto'}
+          imageClassName={`forum-discovery-cover-image is-${fit}`}
+          onError={() => setFailed(true)}
+        />
       </div>
     )
   }
