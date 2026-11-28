@@ -29,6 +29,7 @@ import { normalizePostReturnTo, postBackHref, postBoardFallbackHref, postDetailH
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
+import { POST_MEDIA_VISIBLE_TYPES, toPostMediaDisplayItems } from '@/lib/post-media-view'
 import { publicModerationText } from '@/lib/content-moderation'
 import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
 import { buildPublicPostWhere as publicPostWhere, getPostModerationAccess, isPublicPostModerationStatus } from '@/lib/post-moderation'
@@ -74,7 +75,9 @@ const postMetadataSelect = {
   moderationStatus: true,
   expiresAt: true,
   PostMedia: {
-    where: { type: 'IMAGE' as const },
+    // A live photo is also a visible still; filtering to 'IMAGE' here dropped
+    // it from the share/OG metadata as well.
+    where: { type: { in: [...POST_MEDIA_VISIBLE_TYPES] } },
     orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
     take: 9,
     select: { url: true },
@@ -313,7 +316,16 @@ type PostBoard = Prisma.BoardGetPayload<{ select: typeof postBoardSelect }>
 const postStickerSelect = { url: true, name: true, moderationStatus: true, type: true } satisfies Prisma.StickerSelect
 type PostSticker = Prisma.StickerGetPayload<{ select: typeof postStickerSelect }>
 
-const postMediaSelect = { id: true, url: true, width: true, height: true } satisfies Prisma.PostMediaSelect
+const postMediaSelect = {
+  id: true,
+  type: true,
+  url: true,
+  thumbnail: true,
+  width: true,
+  height: true,
+  sortOrder: true,
+  livePhotoId: true,
+} satisfies Prisma.PostMediaSelect
 type PostMedia = Prisma.PostMediaGetPayload<{ select: typeof postMediaSelect }>
 
 function postDetailErrorInfo(error: unknown) {
@@ -433,9 +445,12 @@ async function loadPostSupport(post: PostCore, userId?: string | null): Promise<
     post.stickerId
       ? readPostDetailQuery(post.id, 'sticker.findUnique', () => prisma.sticker.findUnique({ where: { id: post.stickerId! }, select: postStickerSelect }))
       : Promise.resolve(null),
+    // The detail page must read exactly the same media set as the feed. The
+    // former `type: 'IMAGE'` filter removed every live photo here, which took
+    // the static cover with it and left the post body with no image at all.
     readPostDetailQuery(post.id, 'postMedia.findMany', () => prisma.postMedia.findMany({
-      where: { postId: post.id, type: 'IMAGE' },
-      orderBy: { sortOrder: 'asc' },
+      where: { postId: post.id, type: { in: [...POST_MEDIA_VISIBLE_TYPES] } },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       select: postMediaSelect,
     })),
     readPostDetailQuery(post.id, 'like.findMany', () => prisma.like.findMany({
@@ -965,6 +980,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     ? publicImageUrl(topicActivity.coverUrl)
       || publicImageUrl(post.PostMedia[0]?.url || null)
     : null
+  // One normalisation for the renderer: static cover first, LIVE playback only
+  // when the clip URL is real. A topic activity that reused the first image as
+  // its cover still hides that duplicate.
+  const displayMedia = toPostMediaDisplayItems(post.PostMedia)
+    .filter((item) => !(topicActivity && topicActivityCoverUrl && item.coverUrl === topicActivityCoverUrl))
   const authorLoadFailed = support.authorLoadFailed
   const canInteractWithPost = post.publicationStatus === 'PUBLISHED'
     && post.publishedAt !== null
@@ -1389,12 +1409,14 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         <img src={publicImageVariantUrl(post.sticker.url, 'thumb-md') || post.sticker.url} alt={publicModerationText(post.sticker.name, post.sticker.moderationStatus) || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" loading="lazy" />
             </div>
           ) : null}
-          {post.PostMedia.some((item) => !(topicActivity && topicActivityCoverUrl && publicImageUrl(item.url) === topicActivityCoverUrl)) ? (
+          {displayMedia.length ? (
             <PostMediaCarousel
-              items={post.PostMedia.filter((item) => !(topicActivity && topicActivityCoverUrl && publicImageUrl(item.url) === topicActivityCoverUrl)).map((item) => ({
+              items={displayMedia.map((item) => ({
                 id: item.id,
-                url: publicImageUrl(item.url) || item.url,
-                broken: isSupabaseStorageUrl(item.url),
+                url: item.coverUrl,
+                mediaType: item.mediaType,
+                videoUrl: item.videoUrl,
+                broken: isSupabaseStorageUrl(item.coverUrl),
               }))}
             />
           ) : null}

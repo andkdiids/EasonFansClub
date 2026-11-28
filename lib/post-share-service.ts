@@ -10,6 +10,7 @@ import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl } from '@/lib/share-card'
 import { parsePostShareSnapshot, postShareUrl, POST_SHARE_UNAVAILABLE_TITLE, type PostShareMessageView, type PostShareSnapshot } from '@/lib/post-share-types'
 import { buildPublicPostWhere } from '@/lib/post-moderation'
+import { POST_MEDIA_VISIBLE_TYPES } from '@/lib/post-media-view'
 
 export const postShareSelect = {
   id: true,
@@ -33,7 +34,7 @@ export const postShareSelect = {
   },
   Board: { select: { name: true, slug: true } },
   PostMedia: {
-    where: { type: 'IMAGE' as const },
+    where: { type: { in: [...POST_MEDIA_VISIBLE_TYPES] } },
     orderBy: { sortOrder: 'asc' as const },
     take: 1,
     select: { url: true },

@@ -39,6 +39,7 @@ import {
   type ContentImageUploadPhase,
 } from '@/lib/content-image-browser'
 import { CONTENT_IMAGE_ACCEPT } from '@/lib/content-image-upload'
+import { detectSelectedMedia } from '@/lib/live-photo-browser'
 import {
   RICH_TEXT_COLOR_TOKENS,
   RICH_TEXT_FONT_SIZE_TOKENS,
@@ -1172,6 +1173,13 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           const progress = `${index + 1}/${job.files.length}`
           setImageUploadNotice(`正在处理图片 ${progress}…`)
           try {
+            // Inline body images are re-encoded as normal content images, so an
+            // embedded motion clip cannot survive here. Say so instead of
+            // silently posting a still that the author expected to be live.
+            const detected = await detectSelectedMedia([file]).catch(() => null)
+            if (detected?.items.some((item) => item.kind === 'live-photo')) {
+              setImageUploadNotice('正文内嵌图片会作为普通照片插入；如需保留实况效果，请用「添加图片」上传。')
+            }
             const result = await uploadContentImage(file, (phase: ContentImageUploadPhase) => {
               const label = phase === 'compressing'
                 ? '正在压缩图片'

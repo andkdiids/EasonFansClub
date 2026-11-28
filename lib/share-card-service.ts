@@ -22,6 +22,7 @@ import { uploadSiteImage } from '@/lib/site-media-storage'
 import { getStudioTool } from '@/lib/studio/tools'
 import { PUBLIC_STUDIO_PROJECT_WHERE, studioProjectMetadata } from '@/lib/studio/public'
 import { loadMaterialShareCardData } from '@/lib/material-share-service'
+import { POST_MEDIA_VISIBLE_TYPES } from '@/lib/post-media-view'
 
 const shareCardIdPattern = /^[a-zA-Z0-9_-]{1,191}$/
 
@@ -33,7 +34,7 @@ const postShareCardSelect = {
   moderationStatus: true,
   createdAt: true,
   PostMedia: {
-    where: { type: 'IMAGE' as const },
+    where: { type: { in: [...POST_MEDIA_VISIBLE_TYPES] } },
     orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
     select: { url: true, width: true, height: true },
   },

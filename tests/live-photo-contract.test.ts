@@ -183,3 +183,78 @@ test('the composer no longer explains the internals', () => {
   // The one hint that stays is shown only when a clip was objectively missing.
   assert.match(uploader, /missingVideoNotice/)
 })
+
+test('the post detail page reads the same media set as the feed', () => {
+  const detail = read('app/posts/[postId]/page.tsx')
+  // The root cause of "the photo disappeared on the detail page": a lone
+  // 'IMAGE' filter dropped every live photo, and with it the static cover.
+  assert.doesNotMatch(detail, /where:\s*\{\s*type:\s*'IMAGE'/)
+  assert.doesNotMatch(detail, /type:\s*'IMAGE'\s*as const/)
+  assert.match(detail, /POST_MEDIA_VISIBLE_TYPES/, 'the detail page must share the visible-type list')
+  assert.match(detail, /toPostMediaDisplayItems\(/, 'media is normalised once, before rendering')
+  assert.match(detail, /videoUrl: item\.videoUrl/, 'the carousel needs the clip URL for LIVE playback')
+  assert.match(detail, /mediaType: item\.mediaType/)
+  const media = read('lib/post-media-core.ts')
+  assert.match(media, /mediaType === 'LIVE_PHOTO'/)
+  // The still cover must never depend on the clip being playable.
+  assert.match(media, /resolve\.cover\(record\.url\) \|\| record\.url/)
+})
+
+test('no post-facing query still filters to a single image type', () => {
+  for (const file of [
+    'lib/post-share-service.ts',
+    'lib/share-card-service.ts',
+    'lib/recent-activity.ts',
+  ]) {
+    const source = read(file)
+    assert.doesNotMatch(source, /type:\s*'IMAGE'\s*as const/, `${file} must not exclude live photos`)
+    assert.match(source, /POST_MEDIA_VISIBLE_TYPES/, `${file} must share the visible-type list`)
+  }
+  const fishMode = read('components/ForumFishModePostRow.tsx')
+  assert.match(fishMode, /item\.type === 'IMAGE' \|\| item\.type === 'LIVE_PHOTO'/, 'fish mode must keep live photos in the grid')
+})
+
+test('the LIVE mark is a ring pair, not a camera', () => {
+  const badge = read('components/live-photo/LivePhotoBadge.tsx')
+  assert.doesNotMatch(badge, /<rect/, 'no camera body')
+  assert.doesNotMatch(badge, /M18\.5 10\.2/, 'no camera lens triangle')
+  assert.doesNotMatch(badge, /🎥|📹|▶/, 'no emoji or play glyph as the mark')
+  const circles = badge.match(/<circle/g) || []
+  assert.equal(circles.length, 3, 'dotted outer ring plus two concentric circles')
+  assert.match(badge, /strokeDasharray/, 'the outer ring is dotted')
+  // A badge inside a card link must not navigate on click.
+  assert.match(badge, /event\.preventDefault\(\)/)
+  assert.match(badge, /event\.stopPropagation\(\)/)
+
+  const surface = read('components/live-photo/LivePhotoSurface.tsx')
+  assert.match(surface, /LivePhotoBadge/, 'one badge implementation for the whole site')
+  assert.doesNotMatch(surface, /<rect x="2\.5"/)
+})
+
+test('playback stops when it leaves the screen or the page hides', () => {
+  const surface = read('components/live-photo/LivePhotoSurface.tsx')
+  assert.match(surface, /IntersectionObserver/, 'scrolling a clip out of view must stop it')
+  assert.match(surface, /visibilitychange/, 'a backgrounded tab must stop the clip')
+  assert.match(surface, /pagehide/)
+  assert.match(surface, /activePlayback\?\.stop\(\)/, 'only one clip may play at a time')
+  assert.match(surface, /useState\(true\)/, 'sound starts muted')
+})
+
+test('diagnostics cover successful uploads and name the real failure class', () => {
+  const uploader = read('components/ContentImageUploader.tsx')
+  assert.match(uploader, /uploadResourceVerdict/, 'a verdict replaces guessing from video=unknown')
+  for (const verdict of [
+    'LIVE_PHOTO_READY',
+    'DYNAMIC_RESOURCE_UNPARSABLE',
+    'DYNAMIC_RESOURCE_PROCESSING_FAILED',
+    'NO_DYNAMIC_RESOURCE',
+  ]) {
+    assert.match(uploader, new RegExp(verdict), `${verdict} must be distinguishable in the report`)
+  }
+  assert.match(uploader, /function copyAllDiagnostics/, 'finished uploads stay inspectable')
+  assert.match(uploader, /void ensureDiagnosticsPermission\(\)/, 'asked for as soon as a file is selected')
+  // Presence only: the Apple pairing token itself must never be copied.
+  assert.match(uploader, /appleIdentifier\?: boolean/)
+  assert.match(uploader, /appleIdentifier: true/)
+  assert.doesNotMatch(uploader, /appleIdentifier: item\.appleIdentifier\b/)
+})

@@ -135,7 +135,9 @@ export function FishModeMediaDisclosure({ source, minimal = false }: Readonly<{ 
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null)
   const items = useMemo(() => buildMediaEntries(source), [source])
   const summary = useMemo(() => getFishModeMediaSummary(source), [source])
-  const imageItems = items.filter((item) => item.type === 'IMAGE')
+  // A live photo is a still with a clip attached, so it belongs to the image
+  // grid. Filtering to 'IMAGE' alone dropped it from every list on this page.
+  const imageItems = items.filter((item) => item.type === 'IMAGE' || item.type === 'LIVE_PHOTO')
   const gifItems = items.filter((item) => item.type === 'GIF')
   const videoItems = items.filter((item) => item.type === 'VIDEO')
 

@@ -125,3 +125,19 @@ Web 的图片入口使用 `accept="image/*"`，不使用 MIME + 扩展名的长�
 1. iOS 通过 `PHLivePhoto` 分别导出照片与 `PHVideoRequestOptions` 视频资源，调用本接口手动配对；若导出文件保留 Apple 配对标识，服务端会自动识别为 `APPLE`。
 2. Android 通过相册文件读取 Motion Photo；若浏览器/文件接口能取得嵌入 MP4，服务端自动解析 `MOTION_PHOTO`。仅取得静态照片时，应fallback 为普通图片上传。
 3. 上传后轮询 `READY` 再关联帖子；不要在未完成时发布。
+
+## Web 端展示约定（所有帖子页面共用）
+
+- 帖子媒体只有一处类型白名单：`lib/post-media-core.ts` 的 `POST_MEDIA_VISIBLE_TYPES = ['IMAGE', 'LIVE_PHOTO']`。
+  任何页面（广场、详情、分享卡、最近动态）都不得再单独写 `type: 'IMAGE'`：实况照片的 `url` 同时就是静态封面，一旦被类型过滤掉，页面不是退化成静态图，而是**整张图片消失**。
+- 渲染前统一经 `toPostMediaDisplayItems()` 归一化一次，输出 `{ mediaType, coverUrl, videoUrl, width, height, sortOrder }`：
+  - `coverUrl` 永远可渲染，与动态资源是否可播放无关；
+  - 仅当 `LIVE_PHOTO` 且能解析出合法 assetId 时才给出 `videoUrl`，否则是 `null`（不伪造可播放状态）；
+  - 重复的同一 media 只渲染一次，保持作者原始顺序。
+- 旧帖子无需重新发布：只要 `PostMedia` 行与 `LivePhoto` 关联仍在，代码修复即自动恢复展示；不会重新转码已 `READY` 的资源。
+
+## 移动端浏览器能力边界
+
+- `accept="image/*"` 是所有 Android / 微信构建唯一稳定映射到相册的取值；MIME + 扩展名长列表会退回“档案/文件”选择器。
+- iOS 原生相册选择器内部的 LIVE 标识由系统绘制，Web 无法控制；`<input type="file">` 只交回静态照片（HEIC/JPEG），不会附带配对 MOV。因此 iOS Safari / iOS 微信只能上传静态照片，这不是本项目的缺陷，也不得用静态图伪造实况。
+- Android 的 Motion Photo 是**自带嵌入视频的 JPG**，不需要选择器接受 MOV/MP4；服务端负责提取与转码。
