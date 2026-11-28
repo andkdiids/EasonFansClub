@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resolveByteRange } from '@/lib/live-photo-range'
-import { canViewLivePhotoAsset, isLivePhotoPublic } from '@/lib/live-photo-service'
+import { canViewLivePhotoAsset } from '@/lib/live-photo-service'
 import { headPrivateLivePhotoObject, readPrivateLivePhotoObject } from '@/lib/live-photo-storage'
 import { isAdminRole, resolveRequestAuth } from '@/lib/security'
 
@@ -47,13 +47,34 @@ export async function deliverLivePhoto(request: Request, assetId: string, kind: 
     })
   }
 
+  // Same rule the guard already applied, read off the relation it loaded, so a
+  // second round trip cannot disagree with the access decision.
+  const isPublic = asset.PostMedia.some(({ Post }) => (
+    !Post.isDeleted && Post.moderationStatus === 'APPROVED' && Post.publicationStatus === 'PUBLISHED'
+  ))
+
+  /**
+   * Public media used to be cached for a full year without revalidation, which
+   * meant a takedown could never reach anyone who had already opened it. The route is
+   * not behind a shared cache (nginx only proxies `/api`), so the browser is
+   * the only stale copy — a bounded lifetime plus a validator makes that copy
+   * re-check within a day, while a cheap 304 keeps repeat views fast.
+   */
+  const cacheControl = isPublic
+    ? 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400'
+    : 'private, no-store, max-age=0'
+  const etag = `"${assetId}-${kind}-${asset.updatedAt.getTime().toString(36)}"`
+  if (isPublic && request.headers.get('if-none-match') === etag) {
+    return new NextResponse(null, { status: 304, headers: { ETag: etag, 'Cache-Control': cacheControl } })
+  }
+
   const object = await readPrivateLivePhotoObject({ key, range })
-  const isPublic = await isLivePhotoPublic(assetId)
   const headers = new Headers({
     'Content-Type': object.contentType,
     'Content-Length': String(object.contentLength),
     'Accept-Ranges': 'bytes',
-    'Cache-Control': isPublic ? 'public, max-age=31536000, immutable' : 'private, no-store, max-age=0',
+    'Cache-Control': cacheControl,
+    ETag: etag,
     'X-Content-Type-Options': 'nosniff',
   })
   if (object.contentRange) headers.set('Content-Range', object.contentRange)
