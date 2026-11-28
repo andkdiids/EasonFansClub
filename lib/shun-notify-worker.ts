@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { runShunItemRewardSweep } from './shun-item-rewards'
+import { runShunItemGrantSweep } from './shun-item-grants'
 import { shunSendDueCaptureNotification, shunSendDueNotification } from '@/lib/shun-master'
 import { SHUN_CAPTURE_NOTIFY_STATUS, SHUN_NOTIFY_STATUS } from '@/lib/shun-config'
 import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from '@/lib/deployment-db-maintenance-hold'
@@ -101,6 +102,10 @@ export function startShunNotifyWorker(isMaintenanceHeld = isDeploymentDbMaintena
     if (!isDbMaintenanceAllowed(isMaintenanceHeld)) return
     void runShunItemRewardSweep().catch((error) => {
       console.error('[shun-item.worker.failed]', { errorName: error instanceof Error ? error.name : 'UNKNOWN' })
+    })
+    // 全站道具发放分批推进：进程重启后从 PENDING 行继续，不依赖管理员页面。
+    void runShunItemGrantSweep().catch((error) => {
+      console.error('[shun-item.grant.worker.failed]', { errorName: error instanceof Error ? error.name : 'UNKNOWN' })
     })
     void runShunNotifySweepOnce().catch((error) => {
       console.error('[shun-notify.worker.failed]', {

@@ -1029,7 +1029,7 @@ export async function shunItemBox(userId: string) {
 export type ShunItemHistoryFilter = 'all' | 'acquired' | 'used' | 'gift'
 
 const SHUN_HISTORY_TYPES: Record<Exclude<ShunItemHistoryFilter, 'all'>, string[]> = {
-  acquired: ['DAILY_MAIN', 'COMMUNITY_DROP', 'WEEKLY_REWARD', 'GIFT_RECEIVED', 'GIFT_REWARD'],
+  acquired: ['DAILY_MAIN', 'COMMUNITY_DROP', 'WEEKLY_REWARD', 'GIFT_RECEIVED', 'GIFT_REWARD', 'ADMIN_GRANT'],
   used: ['USED', 'RESERVED', 'RELEASED'],
   gift: ['GIFT_SENT', 'GIFT_RECEIVED', 'GIFT_REWARD'],
 }
@@ -1097,6 +1097,13 @@ export async function shunItemHistory(userId: string, filter: ShunItemHistoryFil
   for (const id of new Set(gifts.flatMap((gift) => [gift.senderId, gift.receiverId]))) {
     people.set(id, await shunPerson(prisma, id))
   }
+  // 管理员发放：从 requestKey（grant:taskId:code:unit）取出任务，带出用户可见原因。
+  const grantTaskIds = [...new Set(page.filter((row) => row.type === 'ADMIN_GRANT')
+    .map((row) => row.requestKey.split(':')[1]).filter(Boolean))]
+  const grantTasks = grantTaskIds.length ? await prisma.shunItemGrantTask.findMany({
+    where: { id: { in: grantTaskIds } }, select: { id: true, reason: true },
+  }) : []
+  const grantReasons = new Map(grantTasks.map((task) => [task.id, task.reason]))
   const names = new Map(active.definitions.map((definition) => [definition.code as string, definition.name]))
   const nameOf = (code: string) => names.get(code)
     ?? SHUN_ITEM_CATALOG[code as keyof typeof SHUN_ITEM_CATALOG]?.name ?? code
@@ -1114,6 +1121,7 @@ export async function shunItemHistory(userId: string, filter: ShunItemHistoryFil
       code: entry.code,
       name: nameOf(entry.code),
       sourceLabel,
+      grantReason: entry.type === 'ADMIN_GRANT' ? grantReasons.get(entry.requestKey.split(':')[1]) ?? null : null,
       amount: entry.availableDelta,
       pendingDelta: entry.pendingDelta,
       createdAt: entry.createdAt.toISOString(),

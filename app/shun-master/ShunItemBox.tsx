@@ -25,6 +25,7 @@ const sourceLabels: Record<string, string> = {
   WEEKLY_REWARD: '每周活跃奖励',
   GIFT_RECEIVED: '收到好友赠礼',
   GIFT_REWARD: '赠礼回礼',
+  ADMIN_GRANT: 'E院赠礼',
   GIFT_SENT: '赠送好友礼物',
   USED: '使用道具',
   RESERVED: '设为待生效',
@@ -79,6 +80,7 @@ type HistoryGift = {
 
 type HistoryRecord = {
   id: string; type: string; code: string; name: string; sourceLabel: string | null
+  grantReason?: string | null
   amount: number; pendingDelta: number; createdAt: string
   gift: HistoryGift | null
 }
@@ -310,6 +312,9 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
               {record.sourceLabel ? ` · ${record.sourceLabel}` : ''}
               {' · '}{record.name}
               {record.amount ? `（${record.amount > 0 ? '+' : ''}${record.amount}）` : ''}
+            </span>}
+            {record.type === 'ADMIN_GRANT' && record.grantReason && <span className={styles.itemHistoryDetail}>
+              <span>发放原因：{record.grantReason}</span>
             </span>}
             <time dateTime={record.createdAt}>{formatTime(record.createdAt)}</time>
           </li>)}
