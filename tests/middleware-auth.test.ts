@@ -103,6 +103,27 @@ test('未登录敏感 API 返回 JSON 401，不重定向 HTML', async () => {
   await expectUnauthorizedApi('/api/checkin')
 })
 
+test('实况照片封面与视频对匿名访客放行，其余实况接口仍要求登录', async () => {
+  for (const kind of ['cover', 'video']) {
+    const path = `/api/media/live-photo/asset_12345678/${kind}`
+    const response = await middleware(makeRequest(path))
+    assert.equal(response.status, 200, `${kind} 需要到达路由内的可见性校验`)
+    assert.equal(response.headers.get('x-middleware-next'), '1')
+    // 路由自身会按「已发布=public+immutable，否则 private+no-store」设置缓存头，
+    // 中间件不能再套一层 no-store，否则已发布帖子的封面永远无法被 CDN/浏览器缓存。
+    assert.equal(response.headers.get('cache-control'), null, '中间件不得覆盖实况媒体的缓存策略')
+  }
+
+  for (const path of [
+    '/api/media/live-photo',
+    '/api/media/live-photo/asset_12345678',
+    '/api/media/live-photo/asset_12345678/cancel',
+    '/api/media/live-photo/asset_12345678/convert',
+  ]) {
+    await expectUnauthorizedApi(path)
+  }
+})
+
 test('EasMusic 受保护音频与听歌统计允许 Bearer 到达路由认证，匿名仍被拦截', async () => {
   const routes: Array<[string, string]> = [
     ['/api/music/songs/song-1/playback/audio', 'GET'],

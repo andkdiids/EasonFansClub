@@ -595,6 +595,16 @@ export async function middleware(request: NextRequest) {
     return withNoStoreHeaders(NextResponse.next())
   }
 
+  // Live photo delivery is readable by anonymous visitors when the post is
+  // approved, and by the owner/reviewers otherwise; the route re-checks that
+  // itself. It also sets its own Cache-Control (public+immutable for approved
+  // posts, private+no-store otherwise), so it must not inherit the default
+  // no-store applied to other public paths. Only these two read-only endpoints
+  // are opened: status/cancel/convert stay behind the session guard.
+  if (/^\/api\/media\/live-photo\/[^/]+\/(?:cover|video)$/.test(pathname)) {
+    return NextResponse.next()
+  }
+
   if (isPublicPath(pathname)) {
     const response = NextResponse.next()
     return isImmutablePublicPath(pathname)
