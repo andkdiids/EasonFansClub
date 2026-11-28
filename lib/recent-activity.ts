@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { getForumBoardDisplayName } from '@/lib/boards'
 import { getShanghaiDateKey, parseBeijingDate, shiftShanghaiDateKey } from '@/lib/checkin'
-import { publicContentImageMarkers, splitContentImages } from '@/lib/content-images'
+import { contentImageSrc, publicContentImageMarkers, splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -155,7 +155,7 @@ function mapPost(row: ActivityPostRow): RecentActivityPost {
   const publicContent = publicContentImageMarkers(row.content)
   const richContent = row.moderationStatus === 'VIOLATION' ? null : row.richContent
   const summarySource = postContentPlainText(publicContent, richContent)
-  const embeddedImages = splitContentImages(publicContent).images
+  const embeddedImages = splitContentImages(publicContent).images.map(contentImageSrc)
   const mediaImages = row.PostMedia.flatMap((media) => {
     const imageUrl = publicImageVariantUrl(media.thumbnail || media.url, 'thumb-md')
     return imageUrl ? [imageUrl] : []

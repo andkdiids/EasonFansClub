@@ -17,7 +17,7 @@ import { profileImageUrl } from '@/lib/images'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
-import { splitContentImages } from '@/lib/content-images'
+import { contentImageSrc, splitContentImages } from '@/lib/content-images'
 import {
   canPinPostReply,
   shouldScrollToPostRepliesTop,
@@ -835,7 +835,7 @@ export function PostRepliesSection({
                 <img src={publicImageVariantUrl(reply.stickerUrl, 'thumb-sm') || reply.stickerUrl} alt="表情" className="max-h-20 max-w-20 object-contain" loading="lazy" />
               </div>
             ) : null}
-            {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
+            {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={contentImageSrc(url)} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               {replyLikeButton(reply)}
               {currentUserId && canInteract ? (
@@ -922,7 +922,7 @@ export function PostRepliesSection({
               <img src={publicImageVariantUrl(reply.stickerUrl, 'thumb-sm') || reply.stickerUrl} alt="表情" className="max-h-20 max-w-20 object-contain" loading="lazy" />
             </div>
           ) : null}
-          {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
+          {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={contentImageSrc(url)} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {replyLikeButton(reply)}
             {currentUserId && canInteract ? (

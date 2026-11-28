@@ -74,3 +74,14 @@ export function splitContentImages(content: string) {
 export function contentImageMarkerCount(content: string) {
   return [...content.matchAll(contentMarker)].length
 }
+
+/**
+ * Renderable URL for one entry produced by `splitContentImages`. A live photo
+ * marker is not an image URL, so it resolves to the guarded static cover; this
+ * keeps list cards, notifications and share previews from showing marker text.
+ */
+export function contentImageSrc(value: string) {
+  const liveId = livePhotoIdFromMarker(value)
+  if (liveId) return `/api/media/live-photo/${liveId}/cover`
+  return publicImageUrl(value) || value
+}

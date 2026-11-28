@@ -23,6 +23,8 @@ export type LivePhotoServiceErrorCode =
   | 'ASSET_NOT_FOUND'
   | 'FORBIDDEN'
   | 'STILL_REFERENCED'
+  | 'NOT_READY'
+  | 'CONVERT_FAILED'
   | 'STORAGE_UNAVAILABLE'
 
 export class LivePhotoServiceError extends Error {

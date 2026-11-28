@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { isConfiguredForumBoardId, mergeForumBoardSummaries, normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
-import { splitContentImages } from '@/lib/content-images'
+import { contentImageSrc, splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { publicImageUrl } from '@/lib/images'
@@ -161,7 +161,7 @@ function serializePost(row: DiscoveryRow) {
   const contentImages = splitContentImages(row.content).images
   const imageMedia = row.PostMedia.find((item) => item.type === 'IMAGE' || item.type === 'LIVE_PHOTO')
   const activityCover = row.TopicActivity?.type === 'TOPIC_ACTIVITY' && row.TopicActivity.coverUrl ? publicImageUrl(row.TopicActivity.coverUrl) || row.TopicActivity.coverUrl : null
-  const coverSource = activityCover || contentImages[0] || imageMedia?.thumbnail || imageMedia?.url || row.sticker?.url || null
+  const coverSource = activityCover || (contentImages[0] ? contentImageSrc(contentImages[0]) : null) || imageMedia?.thumbnail || imageMedia?.url || row.sticker?.url || null
   const cover = coverSource ? {
     url: publicImageVariantUrl(coverSource, 'card') || coverSource,
     width: contentImages[0] ? null : imageMedia?.width || null,

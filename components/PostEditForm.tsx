@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { ContentImageUploader, type ContentImageUploaderHandle } from '@/components/ContentImageUploader'
+import { LivePhotoSurface } from '@/components/live-photo/LivePhotoSurface'
 import { RichTextEditor } from '@/components/posts/RichTextEditor'
 import { PostTopicPicker } from '@/components/posts/PostTopicPicker'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
@@ -11,7 +12,7 @@ import { FORUM_DISCOVERY_SESSION_PREFIX, notifyForumDiscoveryFeedChanged } from 
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
 
-export type ExistingMedia = { id: string; url: string; broken: boolean }
+export type ExistingMedia = { id: string; url: string; broken: boolean; livePhotoId?: string | null }
 export type EditableBoard = { id: string; name: string; slug: string }
 export type ExistingTopic = { id: string; name: string }
 
@@ -76,6 +77,23 @@ export function PostEditForm({
 
   function toggleRemove(id: string) {
     setMedia((prev) => prev.map((item) => (item.id === id ? { ...item, removed: !item.removed } : item)))
+  }
+
+  /** Converts the published row in place, keeping its id so `keepMediaIds` stays valid. */
+  async function convertExistingLivePhoto(postMediaId: string, livePhotoId: string) {
+    setError('')
+    try {
+      const response = await fetch(`/api/media/live-photo/${livePhotoId}/convert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postMediaId }),
+      })
+      const payload: { url?: string; message?: string } = await response.json().catch(() => ({}))
+      if (!response.ok || !payload.url) throw new Error(payload.message || '转换失败，请重试')
+      setMedia((prev) => prev.map((item) => (item.id === postMediaId ? { ...item, url: payload.url!, livePhotoId: null } : item)))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '转换失败，请重试')
+    }
   }
 
   function removeAdded(index: number) {
@@ -193,10 +211,27 @@ export function PostEditForm({
                   <div className="flex h-28 items-center justify-center bg-slate-100 px-2 text-center text-xs font-bold text-slate-500">
                     图片已失效，建议删除后重新上传
                   </div>
+                ) : item.livePhotoId ? (
+                  <LivePhotoSurface
+                    coverUrl={`/api/media/live-photo/${item.livePhotoId}/cover`}
+                    videoUrl={`/api/media/live-photo/${item.livePhotoId}/video`}
+                    alt="帖子实况照片"
+                    imageClassName="h-28 w-full object-cover"
+                    loading="lazy"
+                  />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={publicImageVariantUrl(item.url, 'thumb-md') || item.url} alt="帖子图片" className="h-28 w-full object-cover" loading="lazy" />
                 )}
+                {item.livePhotoId ? (
+                  <button
+                    type="button"
+                    onClick={() => void convertExistingLivePhoto(item.id, item.livePhotoId!)}
+                    className="absolute bottom-1 left-1 rounded-full bg-amber-700/90 px-2 py-1 text-xs font-black text-white"
+                  >
+                    转为普通图片
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => toggleRemove(item.id)}

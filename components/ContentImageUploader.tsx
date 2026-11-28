@@ -275,13 +275,22 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     setLiveError('')
   }
 
-  function convertLiveToStatic(url: string) {
+  async function convertLiveToStatic(url: string) {
     const id = livePhotoIdFromMarker(url)
-    if (!id || typeof window === 'undefined') return
-    const staticUrl = new URL(`/api/media/live-photo/${id}/cover`, window.location.origin).href
-    const next = valueRef.current.map((item) => item === url ? staticUrl : item)
-    valueRef.current = next
-    onChangeRef.current(next)
+    if (!id) return
+    setError('')
+    try {
+      // The private cover is not readable by visitors, so the server must
+      // re-publish it as a normal content image before the marker is dropped.
+      const response = await fetch(`/api/media/live-photo/${id}/convert`, { method: 'POST' })
+      const payload: { url?: string; message?: string } = await response.json().catch(() => ({}))
+      if (!response.ok || !payload.url) throw new Error(payload.message || '关闭实况失败，请重试')
+      const next = valueRef.current.map((item) => item === url ? payload.url! : item)
+      valueRef.current = next
+      onChangeRef.current(next)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '关闭实况失败，请重试')
+    }
   }
 
   function removeUploadedUrl(url: string) {
@@ -662,7 +671,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
                 <button
                   type="button"
                   onPointerDown={(event) => event.stopPropagation()}
-                  onClick={() => convertLiveToStatic(url)}
+                  onClick={() => void convertLiveToStatic(url)}
                   className="absolute bottom-8 left-1 rounded-full bg-amber-700/90 px-2 py-1 text-xs text-white"
                 >关闭实况</button>
               ) : null}

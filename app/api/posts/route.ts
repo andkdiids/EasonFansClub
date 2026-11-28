@@ -14,7 +14,7 @@ import { publicImageUrl } from '@/lib/images'
 import { livePhotoIdFromMarker } from '@/lib/live-photo-markers'
 import { resolveLivePhotoMedia } from '@/lib/live-photo-service'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { splitContentImages } from '@/lib/content-images'
+import { contentImageSrc, splitContentImages } from '@/lib/content-images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { resolveIpLocation } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
@@ -196,7 +196,8 @@ export async function GET(request: Request) {
     const equippedBadges = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id), new Date(), viewer?.id)
     const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, PostTopic, TopicActivity, PostMedia, ...post }) => {
       const activityCover = TopicActivity?.type === 'TOPIC_ACTIVITY' && TopicActivity.coverUrl ? publicImageUrl(TopicActivity.coverUrl) || TopicActivity.coverUrl : null
-      const postImageCover = splitContentImages(content).images[0] || PostMedia[0]?.thumbnail || PostMedia[0]?.url || null
+      const firstContentImage = splitContentImages(content).images[0]
+      const postImageCover = (firstContentImage ? contentImageSrc(firstContentImage) : null) || PostMedia[0]?.thumbnail || PostMedia[0]?.url || null
       const coverSource = activityCover || postImageCover || publicImageUrl(sticker?.url)
       const coverUrl = coverSource ? publicImageVariantUrl(coverSource, 'card') || publicImageUrl(coverSource) || coverSource : null
       return ({
