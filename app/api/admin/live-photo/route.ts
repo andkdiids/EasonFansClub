@@ -4,6 +4,7 @@ import { requireRequestAdmin } from '@/lib/security'
 import { getLivePhotoConfig } from '@/lib/live-photo-config-store'
 import { normalizeLivePhotoConfig, publicLivePhotoConfig } from '@/lib/live-photo-config'
 import { getLivePhotoStats, listLivePhotoAssetsForAdmin } from '@/lib/live-photo-service'
+import { checkFfmpegAvailability } from '@/lib/live-photo-ffmpeg'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -13,12 +14,13 @@ const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
 export async function GET(request: Request) {
   const guard = await requireRequestAdmin(request, 'site_config_manage')
   if (!guard.user) return guard.response
-  const [config, stats, assets] = await Promise.all([
+  const [config, stats, assets, mediaTools] = await Promise.all([
     getLivePhotoConfig(),
     getLivePhotoStats(),
     listLivePhotoAssetsForAdmin(),
+    checkFfmpegAvailability(),
   ])
-  return NextResponse.json({ config, publicConfig: publicLivePhotoConfig(config), stats, assets }, { headers: noStore })
+  return NextResponse.json({ config, publicConfig: publicLivePhotoConfig(config), stats, assets, mediaTools }, { headers: noStore })
 }
 
 export async function PATCH(request: Request) {

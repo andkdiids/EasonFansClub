@@ -1,4 +1,3 @@
-import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -8,6 +7,7 @@ import sharp from 'sharp'
 import type { LivePhotoConfig } from '@/lib/live-photo-config'
 import { getLivePhotoConfig } from '@/lib/live-photo-config-store'
 import { prisma } from '@/lib/prisma'
+import { buildTranscodeArgs, getFfmpegExecutable } from '@/lib/live-photo-ffmpeg'
 import { readPrivateLivePhotoObject, uploadPrivateLivePhotoObject } from '@/lib/live-photo-storage'
 
 const queue: string[] = []
@@ -18,9 +18,7 @@ export function activeLivePhotoAssetIds() {
   return new Set([...running, ...queue])
 }
 
-export function getFfmpegExecutable() {
-  return process.env.FFMPEG_PATH?.trim() || ffmpegInstaller.path
-}
+export { getFfmpegExecutable }
 
 async function runFfmpeg(args: string[], timeoutMs: number, assetId: string) {
   return new Promise<void>((resolve, reject) => {
@@ -85,16 +83,17 @@ async function transcodeAsset(assetId: string, config: LivePhotoConfig) {
     const inputPath = path.join(directory, `source.${asset.sourceVideoKey.toLowerCase().endsWith('.mov') ? 'mov' : 'mp4'}`)
     const outputPath = path.join(directory, 'live.mp4')
     await writeFile(inputPath, videoSource.body)
-    const scale = `scale='min(${config.maxVideoEdge},iw)':-2`
-    const commonArgs = [
-      '-y', '-hide_banner', '-loglevel', 'error', '-i', inputPath,
-      '-map', '0:v:0', ...(config.keepAudio ? ['-map', '0:a?'] : ['-an']),
-      '-t', String(config.maxDurationSeconds), '-vf', scale, '-r', String(config.maxFps),
-      '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
-    ]
     let video: Buffer | undefined
     for (const crf of [config.quality, Math.min(40, config.quality + 6)]) {
-      await runFfmpeg([...commonArgs, '-crf', String(crf), ...(config.keepAudio ? ['-c:a', 'aac', '-b:a', '96k'] : []), '-movflags', '+faststart', '-map_metadata', '-1', outputPath], config.transcodeTimeoutMs, assetId)
+      await runFfmpeg(buildTranscodeArgs({
+        inputPath,
+        outputPath,
+        maxVideoEdge: config.maxVideoEdge,
+        maxFps: config.maxFps,
+        maxDurationSeconds: config.maxDurationSeconds,
+        quality: crf,
+        keepAudio: config.keepAudio,
+      }), config.transcodeTimeoutMs, assetId)
       const candidate = await readFile(outputPath)
       video = candidate
       if (candidate.byteLength <= config.maxAssetBytes) break

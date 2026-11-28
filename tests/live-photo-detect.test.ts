@@ -5,8 +5,10 @@ import {
   findEmbeddedMotionVideo,
   findTrailingMp4Start,
   motionPhotoTrailerLength,
+  hasAudioTrack,
   inspectSelection,
   parseMp4DurationMs,
+  parseMp4VideoSize,
   probeLivePhotoUpload,
   summarizeSelection,
 } from '../lib/live-photo-probe.ts'
@@ -61,8 +63,12 @@ function tkhd(width: number, height: number) {
 }
 
 function mp4(durationMs = 2400, width = 1080, height = 1920) {
-  const video = box('trak', concat(tkhd(width, height), hdlr('vide')))
-  const audio = box('trak', concat(tkhd(0, 0), hdlr('soun')))
+  // Real files nest `hdlr` inside `mdia` (`trak/mdia/hdlr`). The previous
+  // fixture put it directly under `trak`, which is exactly why a parser that
+  // only looked at direct children passed every test and still failed on every
+  // real phone clip with "cannot read the video frame size".
+  const video = box('trak', concat(tkhd(width, height), box('mdia', hdlr('vide'))))
+  const audio = box('trak', concat(tkhd(0, 0), box('mdia', hdlr('soun'))))
   return concat(ftyp('isom'), box('moov', concat(mvhd(1000, durationMs), video, audio)))
 }
 
@@ -163,7 +169,7 @@ test('a forged offset cannot turn a still into a live photo', () => {
   const broken = concat(still, new Uint8Array(64))
   const probe = probeLivePhotoUpload({ cover: broken, maxDurationSeconds: 5, maxUploadBytes: 30 * 1024 * 1024 })
   assert.equal(probe.ok, false, 'the server never trusts the client claim')
-  assert.equal(probe.code, 'EMPTY_FILE', 'no real clip was extracted, so the upload is refused')
+  assert.equal(probe.code, 'MOTION_PHOTO_INVALID', 'the still claims a clip that is not there, and the user is told so')
 })
 
 test('Apple still without its clip stays a normal photo with a single hint', () => {
@@ -244,4 +250,81 @@ test('an embedded clip is measured once against the upload limit', () => {
   const justBelow = probeLivePhotoUpload({ cover: file, maxDurationSeconds: 5, maxUploadBytes: file.length - 1 })
   assert.equal(justBelow.ok, false)
   assert.equal(justBelow.code, 'TOO_LARGE', 'an oversized original is still refused')
+})
+
+test('a real mp4 hierarchy yields frame size, duration and audio', () => {
+  const file = mp4(3024, 640, 360)
+  assert.deepEqual(parseMp4VideoSize(file), { width: 640, height: 360 })
+  assert.equal(parseMp4DurationMs(file), 3024)
+  assert.equal(hasAudioTrack(file), true, 'audio lives in a sibling track whose handler is also nested')
+
+  const portrait = mp4(2000, 1080, 1920)
+  assert.deepEqual(parseMp4VideoSize(portrait), { width: 1080, height: 1920 })
+})
+
+test('coded frame size is read from the sample entry when tkhd is zero', () => {
+  const avc1 = (() => {
+    const payload = new Uint8Array(64)
+    payload[24] = 0x05
+    payload[25] = 0x00 // 1280
+    payload[26] = 0x02
+    payload[27] = 0xd0 // 720
+    return box('avc1', payload)
+  })()
+  const trak = box('trak', concat(
+    box('tkhd', new Uint8Array(84)),
+    box('mdia', concat(hdlr('vide'), box('minf', box('stbl', box('stsd', concat(new Uint8Array(8), avc1)))))),
+  ))
+  const file = concat(ftyp('mp42'), box('moov', concat(mvhd(1000, 3000), trak)))
+  assert.deepEqual(parseMp4VideoSize(file), { width: 1280, height: 720 })
+})
+
+test('a 64-bit box size does not stop the chain walk', () => {
+  const large = box('mdat', new Uint8Array(32))
+  const header64 = concat(u32(1), asciiBytes('mdat'), new Uint8Array(8))
+  // Rewrite the 64-bit length field so the box parses as size=1 + u64.
+  const length = 16 + 32
+  header64.set(u32(length / 0x100000000), 8)
+  header64.set(u32(length % 0x100000000), 12)
+  const file = concat(ftyp('isom'), box('moov', concat(mvhd(1000, 2000), mp4().subarray(29))), header64, large.subarray(8))
+  assert.equal(parseMp4DurationMs(file), 2000, 'the movie header before the large box is still read')
+})
+
+test('vendor blocks after the clip do not move the extraction boundary', () => {
+  const clip = mp4(3000, 720, 1280)
+  const still = jpegWithXmp(
+    '<Container:Directory><rdf:Seq><rdf:li><Container:Item Item:Mime="video/mp4" Item:Semantic="MotionPhoto" Item:Length="'
+    + clip.length
+    + '" Item:Padding="0"/></rdf:li></rdf:Seq></Container:Directory>',
+  )
+  // Samsung handsets may append their own trailer after the MP4, so an offset
+  // measured from the end of the file no longer lands on the clip. The extra
+  // header at the front is skipped by the box chain, never concatenated.
+  const file = concat(still, clip, asciiBytes('SEFH'), new Uint8Array(1012))
+  const extracted = findEmbeddedMotionVideo(file)
+  assert.ok(extracted)
+  assert.equal(extracted!.length, clip.length)
+  assert.deepEqual(Array.from(extracted!), Array.from(clip))
+
+  const probe = probeLivePhotoUpload({ cover: file, maxDurationSeconds: 5, maxUploadBytes: 30 * 1024 * 1024 })
+  assert.equal(probe.ok, true)
+  assert.equal(probe.width, 720)
+  assert.equal(probe.height, 1280)
+})
+
+test('declared padding is measured with the clip, not as video', () => {
+  const clip = mp4(3000)
+  const padding = 512
+  const still = jpegWithXmp(
+    '<Container:Directory><rdf:Seq><rdf:li><Container:Item Item:Mime="video/mp4" Item:Semantic="MotionPhoto" Item:Length="'
+    + clip.length
+    + '" Item:Padding="'
+    + padding
+    + '"/></rdf:li></rdf:Seq></Container:Directory>',
+  )
+  const file = concat(still, clip, new Uint8Array(padding))
+  assert.equal(motionPhotoTrailerLength(file), clip.length + padding)
+  const extracted = findEmbeddedMotionVideo(file)
+  assert.ok(extracted)
+  assert.equal(extracted!.length, clip.length)
 })

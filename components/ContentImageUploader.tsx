@@ -36,6 +36,31 @@ type PointerDragState = {
 
 type PendingUploadPhase = ContentImageUploadPhase | 'failed'
 
+export type UploadEntry = 'picker' | 'clipboard' | 'editor'
+
+/**
+ * Non-sensitive facts about one upload attempt. Enough to tell "the browser
+ * never gave us the clip" apart from "our extractor or transcoder failed",
+ * without ever carrying photo content, EXIF, GPS or storage paths.
+ */
+export type UploadDiagnostic = {
+  entry: UploadEntry
+  userAgent: string
+  fileType: string
+  fileSize: number
+  kind: string
+  pairing?: string
+  imageContainer: string
+  videoContainer: string
+  trailerBytes?: number
+  motionPhotoClaimed?: boolean
+  requestId: string
+  assetId?: string
+  assetStatus?: string
+  assetStage?: string
+  errorCode?: string
+}
+
 type PendingUpload = {
   id: string
   file: File
@@ -52,6 +77,10 @@ type PendingUpload = {
   /** Real upload percentage for the live photo path (0-100). */
   progress?: number
   liveStage?: string
+  diagnostic?: UploadDiagnostic
+  /** False only for failures that retrying cannot change (wrong container,
+   * over-long clip). The user still gets the static-photo escape hatch. */
+  retryable?: boolean
 }
 
 type LocalUploadedFile = {
@@ -97,6 +126,61 @@ function liveFailureMessage(reason: unknown) {
   return '实况照片上传失败，请重试'
 }
 
+/** Upload-time rejections the server can be specific about. */
+const LIVE_PHOTO_UPLOAD_MESSAGES: Record<string, string> = {
+  MOTION_PHOTO_INVALID: '未能从这张照片中读取动态视频，可改为普通图片上传',
+  INVALID_DIMENSIONS: '实况视频格式暂不支持，可改为普通图片上传',
+  UNSUPPORTED_VIDEO: '实况视频格式暂不支持，可改为普通图片上传',
+  DURATION_UNKNOWN: '未能读取实况视频时长，可改为普通图片上传',
+  VIDEO_TOO_LONG: '实况视频超过时长上限，可改为普通图片上传',
+  TOO_LARGE: '照片体积超过上传上限，请压缩后重试',
+  FEATURE_DISABLED: '实况照片功能暂未开放，将作为普通图片上传',
+}
+
+function livePhotoErrorMessage(reason: unknown) {
+  if (reason instanceof LivePhotoClientError) {
+    return LIVE_PHOTO_UPLOAD_MESSAGES[reason.code] || reason.message
+  }
+  return liveFailureMessage(reason)
+}
+
+/** Repeating these produces the same rejection, so the retry entry point is
+ * replaced by the static fallback instead of inviting a useless loop. */
+const DETERMINISTIC_LIVE_CODES = new Set([
+  'MOTION_PHOTO_INVALID',
+  'UNSUPPORTED_VIDEO',
+  'UNSUPPORTED_IMAGE',
+  'INVALID_DIMENSIONS',
+  'DURATION_UNKNOWN',
+  'VIDEO_TOO_LONG',
+  'TOO_LARGE',
+  'EMPTY_FILE',
+])
+
+function diagnosticStage(diagnostic: UploadDiagnostic | undefined, hasError: boolean) {
+  if (!hasError) return '-'
+  if (!diagnostic?.assetId) return '上传或服务端媒体校验'
+  if (diagnostic.assetStatus === 'FAILED') return '服务端转码'
+  return '状态查询或转码'
+}
+
+function buildDiagnosticReport(item: PendingUpload) {
+  const diagnostic = item.diagnostic
+  const lines = [
+    '[私家E院 实况照片上传诊断]',
+    `时间: ${new Date().toISOString()}`,
+    `入口: ${diagnostic?.entry ?? '-'}`,
+    `浏览器: ${diagnostic?.userAgent ?? '-'}`,
+    `文件: ${diagnostic?.fileType || '(未提供 MIME)'} / ${diagnostic?.fileSize ?? item.file.size} bytes`,
+    `识别: kind=${diagnostic?.kind ?? item.kind} pairing=${diagnostic?.pairing ?? '-'} image=${diagnostic?.imageContainer ?? '-'} video=${diagnostic?.videoContainer ?? '-'} trailer=${diagnostic?.trailerBytes ?? '-'} claimed=${diagnostic?.motionPhotoClaimed ?? false}`,
+    `请求 ID: ${diagnostic?.requestId ?? '-'}`,
+    `媒体任务: ${diagnostic?.assetId ?? '-'} status=${diagnostic?.assetStatus ?? '-'} stage=${diagnostic?.assetStage ?? '-'} error=${diagnostic?.errorCode ?? '-'}`,
+    `界面提示: ${item.error ?? '-'}`,
+    `失败阶段: ${diagnosticStage(diagnostic, item.phase === 'failed')}`,
+  ]
+  return lines.join('\n')
+}
+
 export type ContentImageUploadState = Readonly<{
   pendingCount: number
   failedCount: number
@@ -132,6 +216,11 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   /** Shown only when the photo is objectively a live photo but the browser
    * handed us no clip. Plain photos never trigger it. */
   const [liveNotice, setLiveNotice] = useState('')
+  /** Diagnostics stay hidden from ordinary users; the flag is only granted by
+   * the server, and only asked for after a live photo upload fails. */
+  const [canDiagnose, setCanDiagnose] = useState(false)
+  const diagnosticsCheckedRef = useRef(false)
+  const [diagnosticCopied, setDiagnosticCopied] = useState('')
   const scrollAnchorRef = useRef<number | null>(null)
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
@@ -232,23 +321,81 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     onChangeRef.current(next)
   }
 
+  function patchDiagnostic(id: string, patch: Partial<UploadDiagnostic>) {
+    const current = pendingUploadsRef.current.find((candidate) => candidate.id === id)
+    if (!current?.diagnostic) return
+    updatePendingUpload(id, { diagnostic: { ...current.diagnostic, ...patch } })
+  }
+
+  async function ensureDiagnosticsPermission() {
+    if (diagnosticsCheckedRef.current) return
+    diagnosticsCheckedRef.current = true
+    try {
+      // The endpoint already answers `canManage`; a normal member simply never
+      // gets the button, so no extra permission surface is introduced.
+      const response = await fetch('/api/media/live-photo', { cache: 'no-store' })
+      if (!response.ok) return
+      const payload: { canManage?: boolean } = await response.json().catch(() => ({}))
+      if (payload?.canManage === true && !disposedRef.current) setCanDiagnose(true)
+    } catch {
+      // Diagnostics are optional; never surface a second error for them.
+    }
+  }
+
+  async function copyDiagnostics(item: PendingUpload) {
+    const report = buildDiagnosticReport(item)
+    try {
+      await navigator.clipboard.writeText(report)
+      setDiagnosticCopied(item.id)
+      window.setTimeout(() => setDiagnosticCopied(''), 2000)
+    } catch {
+      setError('复制失败，请手动选择诊断文本')
+    }
+  }
+
+  /** Explicit downgrade chosen by the user; the original file is reused, never
+   * a recompressed copy, so the still keeps its full quality. */
+  function uploadAsImage(item: PendingUpload) {
+    const current = pendingUploadsRef.current.find((candidate) => candidate.id === item.id)
+    if (!current) return
+    const next: PendingUpload = {
+      ...current,
+      kind: 'image',
+      pairedVideo: undefined,
+      pairing: undefined,
+      phase: 'processing',
+      error: undefined,
+      errorCode: undefined,
+      progress: undefined,
+      liveStage: undefined,
+    }
+    updatePendingUpload(item.id, next)
+    setCanDiagnose(false)
+    void uploadItem(next)
+  }
+
   async function submitLivePhotoAsset(item: PendingUpload, controller: AbortController) {
+    const requestId = `${item.id}-r${item.retryCount}`
     const { assetId } = await uploadLivePhotoMedia({
       cover: item.file,
       video: item.pairedVideo,
       // Retries must create a fresh task: the server dedupes by request key, so
       // reusing it would return the failed asset instead of re-transcoding.
-      requestId: `${item.id}-r${item.retryCount}`,
+      requestId,
       onProgress: (percent) => updatePendingUpload(item.id, { progress: percent, phase: 'uploading', liveStage: `上传中 ${percent}%` }),
       signal: controller.signal,
     })
+    patchDiagnostic(item.id, { requestId, assetId, assetStatus: 'PENDING' })
     updatePendingUpload(item.id, { phase: 'processing', progress: 100, liveStage: '媒体处理中…' })
     await waitForLivePhotoAsset(assetId, {
       signal: controller.signal,
-      onStatus: (status) => updatePendingUpload(item.id, {
-        phase: 'processing',
-        liveStage: status === 'READY' ? '处理完成' : '媒体处理中…',
-      }),
+      onStatus: (status) => {
+        patchDiagnostic(item.id, { assetStatus: status })
+        updatePendingUpload(item.id, {
+          phase: 'processing',
+          liveStage: status === 'READY' ? '处理完成' : '媒体处理中…',
+        })
+      },
     })
     return toLivePhotoMarker(assetId)
   }
@@ -288,13 +435,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     if (uploadControllersRef.current.has(item.id)) return
     const current = pendingUploadsRef.current.find((candidate) => candidate.id === item.id)
     if (!current || disposedRef.current) return
-    const pendingCount = pendingUploadsRef.current.filter((candidate) => isBusyPhase(candidate.phase)).length
-    const capacityFull = existingCount + valueRef.current.length + pendingCount >= MAX_CONTENT_IMAGES
-    if (current.phase === 'failed' && capacityFull) {
-      updatePendingUpload(item.id, { error: `已达到 ${MAX_CONTENT_IMAGES} 张图片上限，请先删除图片后再重试` })
-      setError(`已达到 ${MAX_CONTENT_IMAGES} 张图片上限，请先删除图片后再重试`)
-      return
-    }
+    // A retry reuses its own slot, so it never needs spare capacity.
     if (current.phase === 'failed' && current.retryCount >= CONTENT_IMAGE_MAX_RETRIES) {
       updatePendingUpload(item.id, { error: `重试次数已达上限（${CONTENT_IMAGE_MAX_RETRIES} 次），请删除后重新选择图片` })
       return
@@ -321,10 +462,23 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
       if (isContentImageAbortError(reason)) return
       if (reason instanceof LivePhotoClientError && reason.code === 'ABORTED') return
+      if (runItem.kind === 'live-photo') {
+        const details = reason instanceof LivePhotoClientError ? reason.details : undefined
+        patchDiagnostic(item.id, {
+          errorCode: details?.errorCode ?? (reason instanceof LivePhotoClientError ? reason.code : 'UNKNOWN'),
+          ...(details?.assetId ? { assetId: details.assetId } : {}),
+          ...(details?.status ? { assetStatus: details.status } : {}),
+          ...(details?.stage ? { assetStage: details.stage } : {}),
+        })
+        void ensureDiagnosticsPermission()
+      }
       updatePendingUpload(item.id, {
         phase: 'failed',
-        error: runItem.kind === 'live-photo' ? liveFailureMessage(reason) : failureMessage(reason),
+        error: runItem.kind === 'live-photo' ? livePhotoErrorMessage(reason) : failureMessage(reason),
         errorCode: runItem.kind === 'live-photo' ? 'UPLOAD_FAILED' : failureCode(reason),
+        retryable: runItem.kind === 'live-photo'
+          ? !(reason instanceof LivePhotoClientError && DETERMINISTIC_LIVE_CODES.has(reason.code))
+          : true,
         progress: undefined,
         liveStage: undefined,
       })
@@ -384,12 +538,12 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     }
   }
 
-  async function addFiles(files: readonly File[]) {
+  async function addFiles(files: readonly File[], entry: UploadEntry = 'picker') {
     const nextFiles = Array.from(files)
     if (!nextFiles.length) return
 
-    const pendingCount = pendingUploadsRef.current.filter((item) => isBusyPhase(item.phase)).length
-    const currentCount = existingCount + valueRef.current.length + pendingCount
+    // Every pending card, failed ones included, already holds a media slot.
+    const currentCount = existingCount + valueRef.current.length + pendingUploadsRef.current.length
     const remaining = MAX_CONTENT_IMAGES - currentCount
     if (remaining <= 0) {
       setError(`最多只能添加 ${MAX_CONTENT_IMAGES} 张图片。`)
@@ -421,8 +575,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
 
     // Detection awaited, so another selection may have landed meanwhile; the
     // slot count has to be read again before accepting this batch.
-    const freshCount = existingCount + valueRef.current.length
-      + pendingUploadsRef.current.filter((item) => isBusyPhase(item.phase)).length
+    const freshCount = existingCount + valueRef.current.length + pendingUploadsRef.current.length
     const freshRemaining = Math.max(0, MAX_CONTENT_IMAGES - freshCount)
     if (!freshRemaining) {
       setError(`最多只能添加 ${MAX_CONTENT_IMAGES} 张图片。`)
@@ -443,6 +596,19 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
         kind: item.kind === 'live-photo' ? 'live-photo' : 'image',
         ...(item.pairing ? { pairing: item.pairing } : {}),
         ...(item.pairedVideo ? { pairedVideo: item.pairedVideo } : {}),
+        diagnostic: {
+          entry,
+          userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+          fileType: file.type,
+          fileSize: file.size,
+          kind: item.kind,
+          ...(item.pairing ? { pairing: item.pairing } : {}),
+          imageContainer: item.imageContainer,
+          videoContainer: item.videoContainer,
+          ...(item.trailerBytes ? { trailerBytes: item.trailerBytes } : {}),
+          ...(item.motionPhotoClaimed ? { motionPhotoClaimed: true } : {}),
+          requestId: '',
+        },
       }
     })
     const nextPending = [...pendingUploadsRef.current, ...newItems]
@@ -516,7 +682,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
         setError('剪贴板中没有可用图片。')
         return
       }
-      void addFiles(files)
+      void addFiles(files, 'clipboard')
     } catch (reason) {
       if (reason instanceof ClipboardImageReadError && reason.code === 'UNSUPPORTED') {
         setError('当前浏览器不支持直接读取剪贴板，请按 Ctrl+V 粘贴图片。')
@@ -614,11 +780,11 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   }
 
   const busy = pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl)
-  const pendingCount = pendingUploads.filter((item) => isBusyPhase(item.phase)).length
-  const failedCount = pendingUploads.filter((item) => item.phase === 'failed').length
-  const totalCount = existingCount + value.length + pendingCount
+  // Every pending card owns a media slot, including a failed one: otherwise a
+  // run of failures lets the user add far more than the limit, and the counter
+  // (which used to exclude them) disagrees with what is on screen.
+  const totalCount = existingCount + value.length + pendingUploads.length
   const canAddMore = totalCount < MAX_CONTENT_IMAGES
-  const retryCapacityFull = totalCount >= MAX_CONTENT_IMAGES
 
   return (
     <div className="post-content-image-uploader w-full min-w-0 max-w-full space-y-2">
@@ -646,7 +812,6 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
           {clipboardReading ? '读取剪贴板…' : '从剪贴板添加'}
         </button>
       </div>
-      <p className="text-xs font-bold text-slate-500">相册中的实况照片会被自动识别，无需额外选择封面或视频。</p>
 
       {pendingUploads.length ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-live="polite">
@@ -680,7 +845,9 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
               <div className="space-y-1 p-2 text-xs font-bold">
                 <p className={item.phase === 'failed' ? 'text-red-600' : 'text-sky-700'} role="status">
                   {item.phase === 'failed'
-                    ? `上传失败（${item.retryCount}/${CONTENT_IMAGE_MAX_RETRIES} 次重试）`
+                    ? item.kind === 'live-photo'
+                      ? '实况照片处理失败'
+                      : `上传失败（${item.retryCount}/${CONTENT_IMAGE_MAX_RETRIES} 次重试）`
                     : item.liveStage || (item.phase === 'queued' ? '排队中…' : item.phase === 'compressing' ? '正在压缩…' : item.phase === 'uploading' ? '上传中…' : '处理中…')}
                 </p>
                 {item.kind === 'live-photo' && isBusyPhase(item.phase) && item.progress !== undefined ? (
@@ -689,12 +856,15 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
                   </div>
                 ) : null}
                 {item.phase === 'failed' && item.error ? <p className="break-words text-red-600">{item.error}</p> : null}
-                {item.phase === 'failed' && retryCapacityFull ? <p className="break-words text-amber-700">已达到图片数量上限，请先删除图片后再重试。</p> : null}
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {item.kind === 'live-photo' ? null : (
                     <button type="button" onClick={() => setEditingImage({ kind: 'pending', id: item.id, file: item.file })} disabled={isBusyPhase(item.phase)} className="text-brand-700 disabled:opacity-40">编辑</button>
                   )}
-                  {item.phase === 'failed' ? <button type="button" disabled={item.retryCount >= CONTENT_IMAGE_MAX_RETRIES || retryCapacityFull} onClick={() => void uploadItem(item)} className="text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">{item.retryCount >= CONTENT_IMAGE_MAX_RETRIES ? '重试次数已达上限' : retryCapacityFull ? '请先删除图片' : '重试'}</button> : null}
+                  {item.phase === 'failed' && item.retryable !== false ? <button type="button" disabled={item.retryCount >= CONTENT_IMAGE_MAX_RETRIES} onClick={() => void uploadItem(item)} className="text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">{item.retryCount >= CONTENT_IMAGE_MAX_RETRIES ? '重试次数已达上限' : '重试'}</button> : null}
+                  {/* The still image is always valid, so a failed clip can be
+                      posted as a plain photo — but only when the user says so. */}
+                  {item.phase === 'failed' && item.kind === 'live-photo' ? <button type="button" onClick={() => uploadAsImage(item)} className="text-amber-700">作为普通图片上传</button> : null}
+                  {item.phase === 'failed' && canDiagnose ? <button type="button" onClick={() => void copyDiagnostics(item)} className="text-slate-500">{diagnosticCopied === item.id ? '已复制' : '复制诊断信息'}</button> : null}
                   <button type="button" onClick={() => removePendingUpload(item.id)} className="text-red-600">删除</button>
                 </div>
               </div>
@@ -776,7 +946,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900" role="status">{liveNotice}</p>
       ) : null}
       {busy ? <p className="text-xs font-bold text-slate-500" role="status">图片处理完成后才能发布帖子。</p> : null}
-      {failedCount ? <p className="text-xs font-bold text-red-600" role="alert">有图片上传失败，请重试或删除失败图片后再发布。</p> : null}
+      {pendingUploads.some((item) => item.phase === 'failed') ? <p className="text-xs font-bold text-red-600" role="alert">有图片上传失败，请重试或删除失败图片后再发布。</p> : null}
       {editingImage ? <ImageEditor file={editingImage.file} onCancel={() => setEditingImage(null)} onComplete={(editedFile) => editingImage.kind === 'pending' ? completePendingEdit(editingImage.id, editedFile) : void completeUploadedEdit(editingImage.url!, editedFile)} /> : null}
     </div>
   )

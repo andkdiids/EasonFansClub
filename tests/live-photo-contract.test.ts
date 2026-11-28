@@ -21,7 +21,12 @@ test('transcoding runs as a bounded async task outside the post request', () => 
   assert.match(transcode, /config\.transcodeConcurrency/, 'concurrency must be capped by config')
   assert.match(transcode, /runFfmpeg\(/, 'ffmpeg must go through the controlled runner')
   assert.doesNotMatch(transcode, /exec\(|execSync\(/, 'no shell string execution allowed')
-  assert.match(transcode, /'-map_metadata', '-1'/, 'GPS metadata must be stripped')
+  assert.match(transcode, /buildTranscodeArgs\(/, 'the transcode command has one definition')
+  // The argument list moved to the media-tool module so it can be exercised
+  // directly against a real clip; it must still strip GPS and cap the long edge.
+  const ffmpeg = read('lib/live-photo-ffmpeg.ts')
+  assert.match(ffmpeg, /'-map_metadata', '-1'/, 'GPS metadata must be stripped')
+  assert.match(ffmpeg, /gte\(iw,ih\)/, 'portrait clips must be capped on their long edge too')
 })
 
 test('unapproved media stays private and is only served through the guarded route', () => {
@@ -127,4 +132,54 @@ test('a taken-down live photo cannot stay cached forever', () => {
   assert.match(delivery, /if-none-match/i, 'revalidation must be answerable with a cheap 304')
   assert.match(delivery, /private, no-store, max-age=0/)
   assert.match(delivery, /asset\.PostMedia\.some/, 'the public flag comes from the access-checked relation')
+})
+
+test('the image picker asks for images only, so Android opens the gallery', () => {
+  const upload = read('lib/content-image-upload.ts')
+  // A MIME + extension list matches no gallery Intent on Android, and the
+  // system falls back to the document picker. `image/*` is the one value that
+  // every Android and WeChat build maps to the photo picker.
+  assert.match(upload, /export const CONTENT_IMAGE_ACCEPT = 'image\/\*'/)
+  assert.doesNotMatch(upload, /CONTENT_IMAGE_ACCEPT = \[/, 'the picker must not be built from file extensions')
+  // The strict lists stay in place for server-side validation.
+  assert.match(upload, /CONTENT_IMAGE_ALLOWED_MIME_TYPES/)
+
+  for (const file of ['components/ContentImageUploader.tsx', 'components/posts/RichTextEditor.tsx']) {
+    const source = read(file)
+    assert.match(source, /accept=\{CONTENT_IMAGE_ACCEPT\}/, `${file} must use the shared picker value`)
+    assert.doesNotMatch(source, /capture=/, `${file} must not force the camera`)
+  }
+})
+
+test('a failed upload still holds its media slot', () => {
+  const uploader = read('components/ContentImageUploader.tsx')
+  assert.match(uploader, /const totalCount = existingCount \+ value\.length \+ pendingUploads\.length/)
+  assert.match(uploader, /const currentCount = existingCount \+ valueRef\.current\.length \+ pendingUploadsRef\.current\.length/)
+  // Counting only in-flight cards is what let a run of failures exceed nine.
+  assert.doesNotMatch(uploader, /isBusyPhase\(item\.phase\)\)\.length, 'the counter must not skip failed cards/)
+})
+
+test('a failed live photo offers an explicit static fallback and accurate copy', () => {
+  const uploader = read('components/ContentImageUploader.tsx')
+  assert.match(uploader, /作为普通图片上传/, 'the still image can always be posted on the user’s terms')
+  assert.match(uploader, /function uploadAsImage/)
+  assert.match(uploader, /LIVE_PHOTO_UPLOAD_MESSAGES/, 'each failure stage needs its own wording')
+  const browser = read('lib/live-photo-browser.ts')
+  assert.match(browser, /LIVE_PHOTO_FAILURE_MESSAGES/)
+  assert.match(browser, /details\?\.errorCode|errorCode/, 'the transcode code must reach the UI')
+})
+
+test('upload diagnostics are admin-gated and never carry media', () => {
+  const uploader = read('components/ContentImageUploader.tsx')
+  assert.match(uploader, /payload\?\.canManage === true/, 'the server decides who may see diagnostics')
+  assert.match(uploader, /复制诊断信息/)
+  assert.doesNotMatch(uploader, /toDataURL|arrayBuffer\(\)\.then\([^)]*base64/i, 'never copy file content')
+  assert.doesNotMatch(uploader, /sourceCoverKey|sourceVideoKey/, 'no internal storage keys in diagnostics')
+})
+
+test('the composer no longer explains the internals', () => {
+  const uploader = read('components/ContentImageUploader.tsx')
+  assert.doesNotMatch(uploader, /相册中的实况照片会被自动识别/)
+  // The one hint that stays is shown only when a clip was objectively missing.
+  assert.match(uploader, /missingVideoNotice/)
 })
