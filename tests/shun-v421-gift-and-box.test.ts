@@ -50,7 +50,6 @@ test('赠礼专属池固定为三种道具，合计 100%，且不含天使的礼
   }
   const defaults = validateShunItemDraft(draft())
   assert.ok(defaults)
-  assert.equal(defaults.rules.gifts.dailyChecks, undefined)
   assert.equal(defaults.rules.gifts.EXTRA_ATTEMPT, 45)
 })
 

@@ -7339,7 +7339,6 @@ enum ShunItemEventType {
   GIFT_RECEIVED
   USED
   GIFT_SENT
-  /// V4.2.1 赠送者回礼：与主线/社区掉落可区分的独立获取来源。
   GIFT_REWARD
   RESERVED
   RELEASED
@@ -7450,7 +7449,6 @@ model ShunItemGift {
   receiverId String
   sentEntryId String @unique
   receivedEntryId String @unique
-  /// V4.2.1：赠送者随机回礼流水。旧规则赠礼为 NULL，历史数据不重写。
   rewardEntryId String? @unique
   createdAt DateTime @default(now())
 
@@ -7511,9 +7509,7 @@ model ShunItemGiftIntent {
   senderId String
   requestKey String @db.VarChar(191)
   receiverId String
-  /// 收礼者随机道具结果（结算前持久化，重试不重抽）。
   code ShunItemCode
-  /// V4.2.1：赠送者随机回礼结果（结算前持久化）。旧规则意图为 NULL。
   senderCode ShunItemCode?
   configVersion Int
   status ShunItemGiftIntentStatus @default(PENDING)

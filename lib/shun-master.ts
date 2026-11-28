@@ -1144,7 +1144,7 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
       if (prior?.sentGift) {
         const { id, receiverId, receivedEntry } = prior.sentGift
         const name = receivedEntry.config.definitions.find(({ code }) => code === receivedEntry.code)?.name
-        return { legacy: { id, code: receivedEntry.code, name, receiver: await shunPerson(tx, receiverId) } }
+        return { legacy: { id, code: receivedEntry.code, name, rewardCode: null, rewardName: null, receiver: await shunPerson(tx, receiverId) } }
       }
 
       const active = await tx.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })

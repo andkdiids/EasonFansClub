@@ -303,6 +303,28 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     assert.equal(fields.filter((field) => field === relation).length, 1)
     comparableBlocks.set(model, fields.filter((field) => field !== relation))
   }
+  // V4.2.1 approved additive footprint: dual gift reward. Nothing pre-existing
+  // is edited — one enum value, one nullable intent column, one nullable gift
+  // column plus its relation, and one history index. Registered explicitly so
+  // any other unapproved schema change is still rejected below.
+  comparableBlocks.set('ShunItemEventType', comparableBlocks.get('ShunItemEventType')!
+    .filter((value) => value !== 'GIFT_REWARD'))
+  assert.ok(newBlocks.get('ShunItemEventType')?.includes('GIFT_REWARD'), 'V4.2.1 gift reward event registered')
+  comparableBlocks.set('ShunItemGiftIntent', comparableBlocks.get('ShunItemGiftIntent')!
+    .filter((field) => field !== 'senderCode ShunItemCode?'))
+  comparableBlocks.set('ShunItemGift', comparableBlocks.get('ShunItemGift')!.filter((field) =>
+    field !== 'rewardEntryId String? @unique'
+    && field !== 'rewardEntry ShunItemEntry? @relation("ShunItemGiftReward", fields: [rewardEntryId], references: [id])'))
+  comparableBlocks.set('ShunItemEntry', comparableBlocks.get('ShunItemEntry')!.filter((field) =>
+    field !== 'rewardedGift ShunItemGift? @relation("ShunItemGiftReward")'
+    && field !== '@@index([userId, type, createdAt])'))
+  for (const [name, required] of [
+    ['ShunItemGiftIntent', 'senderCode ShunItemCode?'],
+    ['ShunItemGift', 'rewardEntryId String? @unique'],
+    ['ShunItemEntry', '@@index([userId, type, createdAt])'],
+  ] as const) {
+    assert.ok(newBlocks.get(name)?.includes(required), `V4.2.1 additive field registered: ${name}.${required}`)
+  }
   for (const model of ['ShunItemGiftIntent', 'ShunItemGiftIntentStatus']) {
     assert.ok(comparableBlocks.delete(model), `required gift intent schema block retained: ${model}`)
   }
