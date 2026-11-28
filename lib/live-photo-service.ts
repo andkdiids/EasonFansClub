@@ -4,6 +4,7 @@ import type { LivePhotoConfig } from '@/lib/live-photo-config'
 import { getLivePhotoConfig } from '@/lib/live-photo-config-store'
 import { isLivePhotoMarker, livePhotoIdFromMarker } from '@/lib/live-photo-markers'
 import { probeLivePhotoUpload, type LivePhotoProbeResult } from '@/lib/live-photo-probe'
+import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { deleteLivePhotoObjects, uploadPrivateLivePhotoObject } from '@/lib/live-photo-storage'
 import { activeLivePhotoAssetIds, enqueueLivePhotoTranscode } from '@/lib/live-photo-transcode'
@@ -51,8 +52,8 @@ export function livePhotoAssetView(asset: LivePhotoAsset) {
     size: asset.size,
     errorCode: asset.errorCode,
     message: asset.status === 'FAILED' ? '媒体处理失败，请重新上传' : null,
-    coverUrl: `/api/media/live-photo/${asset.id}/cover`,
-    videoUrl: `/api/media/live-photo/${asset.id}/video`,
+    coverUrl: toPublicMediaUrl(`/api/media/live-photo/${asset.id}/cover`) ?? `/api/media/live-photo/${asset.id}/cover`,
+    videoUrl: toPublicMediaUrl(`/api/media/live-photo/${asset.id}/video`) ?? `/api/media/live-photo/${asset.id}/video`,
     createdAt: asset.createdAt,
   }
 }

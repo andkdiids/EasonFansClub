@@ -87,8 +87,10 @@
 ## 旧版 App 兼容
 
 - 旧版本不识别的新字段会被忽略；`url` 仍是静态封面地址。
+- 当配置了 `NEXT_PUBLIC_APP_URL` 时，服务端返回的 `url` / `coverUrl` / `videoUrl` 为**绝对地址**（例如 `https://ecfc.fans/api/media/live-photo/{assetId}/cover`），旧版客户端可直接渲染，无需自行拼接域名。
 - 旧版图片上传与帖子解析路径未变更。
 - 不依赖 App 端升级；未来接入时只需按上述接口替换原生相册读取与上传步骤。
+- 旧版客户端不发 `videoUrl` 请求时不会下载任何动态资源，只展示静态封面。
 
 ##  iOS / Android 接入建议
 
