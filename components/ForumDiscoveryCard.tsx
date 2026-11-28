@@ -10,7 +10,7 @@ import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
 import { activityDateLabel } from '@/lib/activity'
 import { LivePhotoSurface } from '@/components/live-photo/LivePhotoSurface'
 
-function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost; priority: boolean }>) {
+function DiscoveryCover({ post, priority, onOpen }: Readonly<{ post: ForumDiscoveryPost; priority: boolean; onOpen: () => void }>) {
   const [fit, setFit] = useState<'cover' | 'contain'>(getForumDiscoveryCoverFit(post.cover?.width, post.cover?.height))
   const [failed, setFailed] = useState(false)
   const cover = post.cover
@@ -35,6 +35,7 @@ function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost;
           loading={priority ? 'eager' : 'lazy'}
           fetchPriority={priority ? 'high' : 'auto'}
           imageClassName={`forum-discovery-cover-image is-${fit}`}
+          onOpen={onOpen}
           onError={() => setFailed(true)}
         />
       </div>
@@ -66,7 +67,7 @@ export function ForumDiscoveryCard({ post, priority = false, returnTo = null, on
   return (
     <article className="forum-discovery-card">
       <Link href={postDetailHref(post.id, returnTo)} className="forum-discovery-card-link" onClick={(event) => { event.preventDefault(); onOpen(post.id) }}>
-        <DiscoveryCover post={post} priority={priority} />
+        <DiscoveryCover post={post} priority={priority} onOpen={() => onOpen(post.id)} />
         <div className="forum-discovery-card-body">
           <div className="forum-discovery-card-badges" aria-label="帖子标签">
             {post.isPinned ? <span>置顶</span> : null}

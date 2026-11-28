@@ -258,3 +258,13 @@ test('diagnostics cover successful uploads and name the real failure class', () 
   assert.match(uploader, /appleIdentifier: true/)
   assert.doesNotMatch(uploader, /appleIdentifier: item\.appleIdentifier\b/)
 })
+
+test('the feed cover still opens the post when it is a live photo', () => {
+  const card = read('components/ForumDiscoveryCard.tsx')
+  assert.match(card, /onOpen=\{\(\) => onOpen\(post\.id\)\}/, 'the cover must forward the card open action')
+  assert.match(card, /onOpen=\{onOpen\}/)
+  const surface = read('components/live-photo/LivePhotoSurface.tsx')
+  // The image button sits inside the card link, so its own handler has to stop
+  // the native navigation before calling the caller's open action.
+  assert.match(surface, /event\.preventDefault\(\)\s*\n\s*event\.stopPropagation\(\)/)
+})

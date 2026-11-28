@@ -198,6 +198,9 @@ export function LivePhotoSurface({
         className={buttonClassName}
         aria-label={alt}
         onClick={(event) => {
+          // Without preventDefault the surrounding card link would still do a
+          // full-page navigation after the handler was stopped.
+          event.preventDefault()
           event.stopPropagation()
           if (suppressClickRef.current) { suppressClickRef.current = false; return }
           onOpen?.()
