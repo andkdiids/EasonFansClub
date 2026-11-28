@@ -1089,6 +1089,18 @@ NODE
   for attempt in $(seq 1 30); do
     if read_pm2_snapshot "${app_name}" && pm2_is_current_release "${app_name}" "${release_sha}"; then
       echo "PM2_RELEASE_SHA_MATCH app=${app_name} sha=${release_sha}"
+      # systemd starts PM2 with `pm2 resurrect`, which only restores the dump
+      # written by `pm2 save`. Persist here, at the single choke point every
+      # deploy path funnels through: the full database phase reloads one app
+      # directly, while app-only deploys go through reload_release_processes.
+      # Without it the dump keeps its last manual snapshot and a server reboot
+      # restores stale env, silently dropping feature flags added by this
+      # deploy (root cause of the 2026-11-28 SHUN_ITEMS_ENABLED incident).
+      if pm2 save >/dev/null 2>&1; then
+        echo "PM2_PROCESS_LIST_SAVED app=${app_name}"
+      else
+        echo "WARN_PM2_SAVE_FAILED resurrect snapshot may be stale" >&2
+      fi
       return 0
     fi
     sleep 1
@@ -1103,16 +1115,6 @@ reload_release_processes() {
   while IFS= read -r app_name; do
     reload_pm2 "${app_name}" "${release_sha}" || return 1
   done < <(deploy_release_pm2_names "${PM2_APP_NAME}")
-  # systemd starts PM2 with `pm2 resurrect`, which restores the dump written by
-  # `pm2 save`. Without an explicit save here the dump keeps its last manual
-  # snapshot, so a server reboot restores stale env and silently drops feature
-  # flags added by this deploy (root cause of the 2026-11-28 SHUN_ITEMS_ENABLED
-  # incident). Refresh the snapshot after every successful reload.
-  if pm2 save >/dev/null 2>&1; then
-    echo "PM2_PROCESS_LIST_SAVED"
-  else
-    echo "WARN_PM2_SAVE_FAILED resurrect snapshot may be stale" >&2
-  fi
 }
 
 print_health_diagnostics() {

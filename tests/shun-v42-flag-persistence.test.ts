@@ -66,13 +66,25 @@ test('部署重写 PM2 环境时保留 ecosystem 中的道具开关', () => {
 
 // systemd 以 `pm2 resurrect` 启动 PM2，只会恢复 `pm2 save` 写出的 dump。
 // 部署只 reload 不 save 时，dump 停留在上一次人工快照，重启后新开关丢失。
+// full 数据库档位直接 reload 单个应用、app-only 档位走批量 reload，
+// 因此快照必须在两者共用的 reload_pm2 汇聚点刷新。
 test('部署成功后刷新 pm2 resurrect 快照', () => {
   const script = readFileSync('scripts/deploy-production-git.sh', 'utf8')
-  const body = script.match(/reload_release_processes\(\) \{[\s\S]*?\n\}/)?.[0]
-  assert.ok(body, '必须存在 reload_release_processes 函数')
+  // 函数体内含内联 NODE heredoc（其闭合花括号在第 0 列），正则截取会被截断，
+  // 因此按下一个顶层定义的位置切片。
+  const start = script.indexOf('reload_pm2() {')
+  const end = script.indexOf('reload_release_processes() {')
+  assert.ok(start >= 0 && end > start, '必须存在 reload_pm2 与 reload_release_processes 函数')
+  const reload = script.slice(start, end)
   assert.match(
-    body,
+    reload,
     /pm2 save/,
-    '全部应用 reload 成功后必须执行 pm2 save，否则服务器重启会恢复陈旧环境',
+    'reload_pm2 成功后必须执行 pm2 save，否则 full 档位部署后重启会恢复陈旧环境',
   )
+  assert.ok(
+    reload.indexOf('PM2_RELEASE_SHA_MATCH') < reload.indexOf('pm2 save'),
+    'pm2 save 必须发生在健康校验通过之后',
+  )
+  const batch = script.slice(end, end + 600)
+  assert.match(batch, /reload_pm2/, '批量 reload 必须复用同一汇聚点')
 })
