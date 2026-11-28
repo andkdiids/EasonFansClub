@@ -48,16 +48,19 @@ export type ForumDiscoveryCover = {
   url: string
   width: number | null
   height: number | null
+  mediaType?: 'IMAGE' | 'VIDEO' | 'LIVE_PHOTO'
+  videoUrl?: string | null
 }
 
 export type ForumDiscoveryMedia = {
   id: string
-  type: 'IMAGE' | 'VIDEO'
+  type: 'IMAGE' | 'VIDEO' | 'LIVE_PHOTO'
   url: string
   thumbnail: string | null
   width: number | null
   height: number | null
   sortOrder: number
+  videoUrl?: string | null
 }
 
 export type ForumDiscoverySticker = {

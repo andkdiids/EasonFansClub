@@ -134,7 +134,9 @@ test('活动帖子封面优先使用 Activity.cover，推荐和最新置顶共�
   const posts = read('app/api/posts/route.ts')
   const manager = read('app/admin/activities/ActivityAdminManager.tsx')
   const badgeRoute = read('app/api/admin/activities/badges/route.ts')
-  assert.match(forum, /activityCover \|\| contentImages\[0\]/)
+  // Activity covers still win; live photo markers resolve to their guarded
+  // cover before this comparison so the ordering is unchanged.
+  assert.match(forum, /activityCover \|\| \(contentImages\[0\] \? contentImageSrc\(contentImages\[0\]\) : null\)/)
   assert.match(forum, /coverUrl: true/)
   assert.match(forum, /await expireTopicActivityPins\(new Date\(\)\)/)
   assert.match(forum, /activePinWhere:[\s\S]*\{ isPinned: true \}, \{ activityPinned: true \}/)

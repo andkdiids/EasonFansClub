@@ -10,6 +10,7 @@ import { DELETE as deleteTodayEvent } from '@/app/api/admin/today/[eventId]/rout
 import { contributionTypeLabel, ContributionAlreadyProcessedError, approveConcertContribution, rejectConcertContribution } from '@/lib/music-contributions'
 import { getStudioTool } from '@/lib/studio/tools'
 import { getTodayEventDateKey } from '@/lib/today'
+import { livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 import { getForumBoardDisplayName, mergeForumBoardOptions } from '@/lib/boards'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { postContentPlainText } from '@/lib/share-metadata'
@@ -203,7 +204,13 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
           User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
           ReviewedBy: { select: { id: true, uid: true, nickname: true } },
           Board: { select: { name: true, slug: true } },
-          PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
+          PostMedia: {
+            orderBy: { sortOrder: 'asc' },
+            select: {
+              id: true, url: true, thumbnail: true, livePhotoId: true,
+              LivePhoto: { select: { durationMs: true, hasAudio: true, status: true } },
+            },
+          },
         },
       }),
       prisma.board.findMany({
@@ -228,7 +235,21 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
       media: row.PostMedia.flatMap((media, index) => {
         const src = publicImageUrl(media.url)
         if (!src) return []
-        return [{ id: media.id, src, previewSrc: publicImageUrl(media.thumbnail) || undefined, alt: `帖子图片 ${index + 1}` }]
+        const liveId = livePhotoIdFromUrl(media.url)
+        return [{
+          id: media.id,
+          src,
+          previewSrc: publicImageUrl(media.thumbnail) || undefined,
+          alt: `帖子图片 ${index + 1}`,
+          ...(liveId ? {
+            livePhoto: {
+              id: liveId,
+              videoUrl: `/api/media/live-photo/${liveId}/video`,
+              durationMs: media.LivePhoto?.durationMs ?? null,
+              hasAudio: media.LivePhoto?.hasAudio ?? false,
+            },
+          } : {}),
+        }]
       }),
       postDetails: {
         boardId: row.boardId,

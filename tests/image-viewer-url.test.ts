@@ -95,7 +95,9 @@ test('帖子/回复/鱼形流的图片全部把已解析 src 交给同一查看�
   assert.match(carousel, /src: item\.url,/)
   assert.match(carousel, /src=\{item\.url\}/)
   const replies = read('components/PostRepliesSection.tsx')
-  assert.match(replies, /<ImageViewer[^>]*src=\{url\}/)
+  // Live photo markers resolve to their guarded cover first; the viewer still
+  // receives one already-resolved src and never re-builds it.
+  assert.match(replies, /<ImageViewer[^>]*src=\{contentImageSrc\(url\)\}/)
   const fishGrid = read('components/ForumFishModePostRow.tsx')
   assert.match(fishGrid, /src: item\.url,/)
   const fishPreview = read('components/ForumFishModePreview.tsx')

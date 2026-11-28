@@ -4,6 +4,7 @@ import { PostContentType, type Prisma } from '@prisma/client'
 import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory, userSnapshotName } from '@/lib/admin-audit'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
+import { livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 import { buildPostReviewUpdate, canTransitionPostModerationStatus, isPostModerationStatus, POST_REVIEW_PAGE_SIZE, type PostModerationStatus, type PostReviewableStatus } from '@/lib/post-moderation'
 import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds, type PostModerationHistoryRow } from '@/lib/post-moderation-history'
 import { postContentPlainText } from '@/lib/share-metadata'
@@ -41,7 +42,7 @@ const reviewSelect = {
   User: { select: { uid: true, nickname: true, role: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
   ReviewedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
   Board: { select: { name: true, slug: true } },
-  PostMedia: { where: { type: 'IMAGE' as const }, orderBy: { sortOrder: 'asc' as const }, select: { id: true, type: true, url: true, thumbnail: true } },
+  PostMedia: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, type: true, url: true, thumbnail: true } },
 } as const
 
 type ReviewPostRow = Prisma.PostGetPayload<{ select: typeof reviewSelect }>
@@ -284,7 +285,12 @@ function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[])
       ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, name: userSnapshotName(post.ReviewedBy) }
       : null,
     PostModerationHistory: history.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
-    PostMedia: post.PostMedia.map((media) => ({ ...media, url: publicImageUrl(media.url), thumbnail: publicImageUrl(media.thumbnail) })),
+    PostMedia: post.PostMedia.map((media) => ({
+      ...media,
+      url: publicImageUrl(media.url) || media.url,
+      thumbnail: publicImageUrl(media.thumbnail),
+      videoUrl: livePhotoIdFromUrl(media.url) ? `/api/media/live-photo/${livePhotoIdFromUrl(media.url)}/video` : null,
+    })),
   }
 }
 

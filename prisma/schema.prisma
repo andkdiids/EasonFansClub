@@ -4362,19 +4362,66 @@ model ProfilePostViewHistory {
 }
 
 model PostMedia {
-  id        String    @id @default(cuid())
-  type      MediaType
-  url       String
-  thumbnail String?
-  width     Int?
-  height    Int?
-  size      Int?
-  sortOrder Int       @default(0)
-  createdAt DateTime  @default(now())
-  postId    String
-  Post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  id          String          @id @default(cuid())
+  type        MediaType
+  url         String
+  thumbnail   String?
+  width       Int?
+  height      Int?
+  size        Int?
+  sortOrder   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  postId      String
+  livePhotoId String?
+  Post        Post            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  LivePhoto   LivePhotoAsset? @relation(fields: [livePhotoId], references: [id], onDelete: SetNull)
 
   @@index([postId, sortOrder])
+  @@index([livePhotoId])
+}
+
+/// Web/H5 实况照片的统一媒体资产。旧版 App 只读取 PostMedia.url 静态封面，
+/// 新版通过 PostMedia.LivePhoto 与受控视频端点播放动态画面。
+model LivePhotoAsset {
+  id             String              @id @default(cuid())
+  ownerId        String
+  requestKey     String              @unique
+  sourceCoverKey String
+  sourceVideoKey String
+  coverKey       String?
+  thumbnailKey   String?
+  videoKey       String?
+  status         LivePhotoAssetStatus @default(PENDING)
+  stage          String?
+  errorCode      String?
+  errorMessage   String?             @db.Text
+  pairing        String              @default("MANUAL")
+  width          Int?
+  height         Int?
+  durationMs     Int?
+  videoCodec     String?
+  audioCodec     String?
+  hasAudio       Boolean             @default(false)
+  size           Int?
+  coverSize      Int?
+  widthSource    Int?
+  heightSource   Int?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  processedAt    DateTime?
+  Owner          User                @relation("LivePhotoAssetOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  PostMedia      PostMedia[]
+
+  @@index([ownerId, createdAt])
+  @@index([status, updatedAt])
+}
+
+enum LivePhotoAssetStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  CANCELLED
 }
 
 model PostTag {
@@ -5271,6 +5318,7 @@ model User {
   PharmacyDuplicateInventories                           PharmacyDuplicateInventory[]
   PharmacyRecycleLogs                                    PharmacyRecycleLog[]
   Post                                                   Post[]
+  LivePhotoAssets                                        LivePhotoAsset[]                    @relation("LivePhotoAssetOwner")
   PostDraft                                              PostDraft?
   UserPostGroup                                          UserPostGroup[]
   PostFavorite                                           PostFavorite[]
@@ -5884,6 +5932,7 @@ enum UndercoverFinishReason {
 enum MediaType {
   IMAGE
   VIDEO
+  LIVE_PHOTO
 }
 
 enum MessageType {

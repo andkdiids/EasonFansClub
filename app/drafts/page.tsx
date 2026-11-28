@@ -7,6 +7,7 @@ import { getForumBoardDisplayName } from '@/lib/boards'
 import { parseContentImageUrls } from '@/lib/content-images'
 import { formatDate } from '@/lib/format'
 import { publicImageUrl } from '@/lib/images'
+import { livePhotoIdFromMarker } from '@/lib/live-photo-markers'
 import { prisma } from '@/lib/prisma'
 import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 
@@ -33,7 +34,12 @@ export default async function DraftsPage() {
     ? await prisma.board.findUnique({ where: { id: row.boardId }, select: { name: true, slug: true, isActive: true } })
     : null
   const imageUrls = row ? parseContentImageUrls(row.imageUrls) : []
-  const firstImage = imageUrls.map(publicImageUrl).find((value): value is string => Boolean(value)) || null
+  // A live photo marker is not a URL: legacy rendering would show the raw
+  // marker text, so the draft card points at the guarded cover instead.
+  const firstImage = imageUrls.map((value) => {
+    const livePhotoId = livePhotoIdFromMarker(value)
+    return livePhotoId ? `/api/media/live-photo/${livePhotoId}/cover` : publicImageUrl(value)
+  }).find((value): value is string => Boolean(value)) || null
   const draft: DraftBoxItem | null = row ? {
     id: row.id,
     title: row.title,

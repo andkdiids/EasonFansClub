@@ -380,22 +380,29 @@ function ReviewCard({ item, busy, focused, selectedBoardId, onBoardChange, onApp
   if (!mediaItems.length && item.cover?.trim()) {
     mediaItems.push({ id: `${item.sourceType}:${item.sourceId}:cover`, src: item.cover.trim(), alt: `${item.title}图片` })
   }
+  const galleryItems = mediaItems.map((media) => ({ ...media, videoUrl: media.livePhoto?.videoUrl ?? null }))
   const primaryMedia = mediaItems[0]
   const showMediaColumn = Boolean(primaryMedia) || item.sourceType !== 'POST'
   const boardSelection = selectedBoardId || item.postDetails?.boardId || ''
   const boardChanged = Boolean(item.postDetails && boardSelection !== item.postDetails.boardId)
   return <article data-review-source={item.sourceType} data-review-target={item.sourceId} className={`grid gap-4 border border-sky-100 bg-white/95 p-4 shadow-sm sm:p-5 ${showMediaColumn ? 'lg:grid-cols-[96px_minmax(0,1fr)_auto]' : 'lg:grid-cols-[minmax(0,1fr)_auto]'} lg:items-start ${focused ? 'ring-2 ring-amber-300 ring-offset-2' : ''}`}>
-    {primaryMedia ? <div className="flex h-24 w-24 items-center justify-center overflow-hidden border border-sky-100 bg-sky-50/50">
+    {primaryMedia ? <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden border border-sky-100 bg-sky-50/50">
       <div className="h-full w-full" aria-label={`${reviewSourceLabel(item.sourceType)}图片，共 ${mediaItems.length} 张`}>
         <ImageViewer
           src={primaryMedia.src}
           previewSrc={primaryMedia.previewSrc}
           alt={primaryMedia.alt}
-          gallery={mediaItems}
+          videoUrl={primaryMedia.livePhoto?.videoUrl ?? null}
+          gallery={galleryItems}
           imageClassName="h-full w-full object-cover"
           buttonClassName="block h-full w-full cursor-zoom-in overflow-hidden text-left"
         />
       </div>
+      {primaryMedia.livePhoto ? (
+        <span className="pointer-events-none absolute left-1 top-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-black leading-none text-white">
+          LIVE{primaryMedia.livePhoto.durationMs ? ` · ${(primaryMedia.livePhoto.durationMs / 1000).toFixed(1)}s` : ''}
+        </span>
+      ) : null}
     </div> : item.sourceType === 'POST' ? null : <div className="flex h-24 w-24 items-center justify-center overflow-hidden border border-sky-100 bg-sky-50/50">
       <span className="px-2 text-center text-xs font-black text-sky-700">{item.sourceType === 'SALON' ? '沙龙' : '审核项'}</span>
     </div>}
@@ -403,6 +410,12 @@ function ReviewCard({ item, busy, focused, selectedBoardId, onBoardChange, onApp
       <div className="flex flex-wrap items-center gap-2"><span className="bg-sky-50 px-2 py-1 text-[10px] font-black text-brand-700">{reviewSourceLabel(item.sourceType)}</span>{item.sourceType === 'SALON' ? <span className="bg-violet-50 px-2 py-1 text-[10px] font-black text-violet-700">类型：{item.reviewKind === 'EDIT' ? '编辑' : '投稿'}</span> : null}<span className={`px-2 py-1 text-[10px] font-black ${item.status === 'PENDING' ? 'bg-amber-50 text-amber-800' : item.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>{statusLabel(item.status)}</span>{item.sourceType === 'POST' && item.publicationStatus ? <span className="bg-violet-50 px-2 py-1 text-[10px] font-black text-violet-800">{getPostPublicationLabel({ moderationStatus: item.status, publicationStatus: item.publicationStatus })}</span> : null}<h3 className="min-w-0 break-words text-lg font-black text-brand-950">{item.title}</h3></div>
       {item.sourceType === 'POST' && item.scheduledPublishAt ? <p className="mt-2 text-xs font-black text-violet-700">计划发布时间：{formatScheduledPostTime(item.scheduledPublishAt)}（北京时间）</p> : null}
       <p className="mt-2 text-xs font-bold text-slate-500">作者：{item.author.name}{item.author.uid !== null ? `（UID ${item.author.uid}）` : ''} · 提交于 {formatDate(item.createdAt)}</p>
+      {mediaItems.some((media) => media.livePhoto) ? (
+        <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-black text-amber-800">
+          <span className="bg-amber-50 px-2 py-1">含实况照片 {mediaItems.filter((media) => media.livePhoto).length} 个，需一并审核动态画面与声音</span>
+          {mediaItems.some((media) => media.livePhoto?.hasAudio) ? <span className="bg-amber-100 px-2 py-1">含现场声音</span> : null}
+        </p>
+      ) : null}
       {item.postDetails ? <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-black text-slate-600">
         <span>投稿分区：<span className="text-brand-700">{item.postDetails.boardName}</span></span>
         {item.actions.approve ? <label className="flex items-center gap-1.5">发布分区：

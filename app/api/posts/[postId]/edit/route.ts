@@ -5,6 +5,7 @@ import { requireUser } from '@/lib/security'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { validateRichPostContent } from '@/lib/rich-text'
+import { livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -26,9 +27,9 @@ export async function GET(_request: Request, { params }: Params) {
       moderationStatus: true,
       status: true,
       PostMedia: {
-        where: { type: 'IMAGE' },
+        where: { type: { in: ['IMAGE', 'LIVE_PHOTO'] } },
         orderBy: { sortOrder: 'asc' },
-        select: { id: true, url: true, sortOrder: true },
+        select: { id: true, url: true, sortOrder: true, type: true },
       },
     },
   })
@@ -61,6 +62,8 @@ export async function GET(_request: Request, { params }: Params) {
         url: publicImageUrl(media.url) || media.url,
         sortOrder: media.sortOrder,
         broken: isSupabaseStorageUrl(media.url),
+        mediaType: media.type,
+        videoUrl: livePhotoIdFromUrl(media.url) ? `/api/media/live-photo/${livePhotoIdFromUrl(media.url)}/video` : null,
       })),
     },
   })

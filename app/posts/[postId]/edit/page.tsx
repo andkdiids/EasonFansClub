@@ -7,6 +7,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { mergeForumBoardOptions, normalizeForumBoards } from '@/lib/boards'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
+import { toLivePhotoMarker } from '@/lib/live-photo-markers'
 import { normalizePostReturnTo, postDetailHref, postEditHref } from '@/lib/post-navigation'
 import { prisma } from '@/lib/prisma'
 import { findPublicPostReferences, findPublicUserMentions, hydrateRichTextReferences } from '@/lib/rich-text-references'
@@ -33,9 +34,11 @@ export default async function EditPostPage({ params, searchParams }: Readonly<{ 
       boardId: true,
       Board: { select: { id: true, name: true, slug: true } },
       PostMedia: {
-        where: { type: 'IMAGE' },
+        // Live photos share the same media slots; filtering them out here would
+        // drop them from `keepMediaIds` and delete them on the next edit.
+        where: { type: { in: ['IMAGE', 'LIVE_PHOTO'] } },
         orderBy: { sortOrder: 'asc' },
-        select: { id: true, url: true },
+        select: { id: true, url: true, type: true, livePhotoId: true },
       },
       PostTopic: { select: { Topic: { select: { id: true, name: true } } } },
     },
@@ -63,8 +66,11 @@ export default async function EditPostPage({ params, searchParams }: Readonly<{ 
 
   const initialMedia: ExistingMedia[] = post.PostMedia.map((media) => ({
     id: media.id,
-    url: publicImageUrl(media.url) || media.url,
+    url: media.type === 'LIVE_PHOTO' && media.livePhotoId
+      ? toLivePhotoMarker(media.livePhotoId)
+      : publicImageUrl(media.url) || media.url,
     broken: isSupabaseStorageUrl(media.url),
+    livePhotoId: media.type === 'LIVE_PHOTO' ? media.livePhotoId : null,
   }))
   const boardRows = await prisma.board.findMany({
     where: { OR: [{ isActive: true }, { id: post.boardId }] },

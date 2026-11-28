@@ -3,10 +3,11 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { isConfiguredForumBoardId, mergeForumBoardSummaries, normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
-import { splitContentImages } from '@/lib/content-images'
+import { contentImageSrc, splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { publicImageUrl } from '@/lib/images'
+import { livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 import {
   parseForumDiscoveryLimit,
   parseForumDiscoveryMode,
@@ -158,13 +159,15 @@ function isGifUrl(value: string | null | undefined) {
 
 function serializePost(row: DiscoveryRow) {
   const contentImages = splitContentImages(row.content).images
-  const imageMedia = row.PostMedia.find((item) => item.type === 'IMAGE')
+  const imageMedia = row.PostMedia.find((item) => item.type === 'IMAGE' || item.type === 'LIVE_PHOTO')
   const activityCover = row.TopicActivity?.type === 'TOPIC_ACTIVITY' && row.TopicActivity.coverUrl ? publicImageUrl(row.TopicActivity.coverUrl) || row.TopicActivity.coverUrl : null
-  const coverSource = activityCover || contentImages[0] || imageMedia?.thumbnail || imageMedia?.url || row.sticker?.url || null
+  const coverSource = activityCover || (contentImages[0] ? contentImageSrc(contentImages[0]) : null) || imageMedia?.thumbnail || imageMedia?.url || row.sticker?.url || null
   const cover = coverSource ? {
     url: publicImageVariantUrl(coverSource, 'card') || coverSource,
     width: contentImages[0] ? null : imageMedia?.width || null,
     height: contentImages[0] ? null : imageMedia?.height || null,
+    mediaType: imageMedia?.type ?? 'IMAGE',
+    videoUrl: livePhotoIdFromUrl(imageMedia?.url) ? `/api/media/live-photo/${livePhotoIdFromUrl(imageMedia?.url)}/video` : null,
   } : null
   const media = row.PostMedia.map((item) => ({
     id: item.id,
@@ -174,6 +177,7 @@ function serializePost(row: DiscoveryRow) {
     width: item.width,
     height: item.height,
     sortOrder: item.sortOrder,
+    videoUrl: livePhotoIdFromUrl(item.url) ? `/api/media/live-photo/${livePhotoIdFromUrl(item.url)}/video` : null,
   }))
   const sticker = row.sticker ? {
     url: publicImageUrl(row.sticker.url) || row.sticker.url,

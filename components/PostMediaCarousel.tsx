@@ -12,6 +12,8 @@ export type PostMediaCarouselItem = {
   id: string
   url: string
   broken?: boolean
+  mediaType?: string
+  videoUrl?: string | null
 }
 
 type DragState = {
@@ -47,7 +49,7 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
   const activeIndexRef = useRef(0)
   const viewerOpenRef = useRef(false)
   const viewerItemIdRef = useRef<string | null>(null)
-  const itemsKey = items.map((item) => `${item.id}:${item.url}:${item.broken ? 'broken' : 'ok'}`).join('|')
+  const itemsKey = items.map((item) => `${item.id}:${item.url}:${item.videoUrl || ''}:${item.broken ? 'broken' : 'ok'}`).join('|')
   const viewerGallery = items
     .filter((item) => !item.broken && !failedImageIds.has(item.id))
     .map((item, index) => ({
@@ -55,6 +57,7 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
       src: item.url,
       previewSrc: publicImageVariantUrl(item.url, index === currentIndex ? 'large' : 'card') || item.url,
       alt: `帖子图片 ${index + 1}`,
+      videoUrl: item.videoUrl,
     }))
 
   const clearHideControlsTimer = useCallback(() => {
@@ -293,6 +296,7 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
                     src={item.url}
                     previewSrc={previewSrc}
                     alt={`帖子图片 ${index + 1}`}
+                    videoUrl={item.videoUrl}
                     gallery={viewerGallery}
                     initialIndex={viewerGallery.findIndex((viewerItem) => viewerItem.id === item.id)}
                     autoPlay={viewerGallery.length > 1}

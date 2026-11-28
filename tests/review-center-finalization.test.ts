@@ -52,7 +52,7 @@ test('审核图片继续使用统一 Lightbox，多图和移动端点击预览�
   const center = read('app/admin/review/ReviewCenter.tsx')
 
   assert.match(center, /<ImageViewer/u)
-  assert.match(center, /gallery=\{mediaItems\}/u)
+  assert.match(center, /gallery=\{galleryItems\}/u)
   assert.match(center, /cursor-zoom-in/u)
   assert.match(center, /mediaItems = \(item\.media \|\| \[\]\)\.filter/u)
 })

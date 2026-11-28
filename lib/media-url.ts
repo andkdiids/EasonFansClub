@@ -32,6 +32,27 @@ export function buildPublicMediaUrl(key: string) {
   return `${getMediaPublicBaseUrl()}/${normalizedKey.split('/').map(encodeURIComponent).join('/')}`
 }
 
+/** Live photo covers/videos are served by our own guarded API, not the CDN. */
+export const LIVE_PHOTO_API_PREFIX = '/api/media/live-photo/'
+
+/**
+ * Old mobile clients only know how to render absolute media URLs. Keep the
+ * stored value relative but hand them an absolute one when the public app
+ * origin is configured. The variable is `NEXT_PUBLIC_*` on purpose so server
+ * and client render the exact same string.
+ */
+function absoluteAppUrl(path: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, '')
+  if (!base) return path
+  try {
+    const parsed = new URL(base)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return path
+    return `${parsed.origin}${path}`
+  } catch {
+    return path
+  }
+}
+
 function parseMediaPublicBaseUrl() {
   try {
     const parsed = new URL(getMediaPublicBaseUrl())
@@ -101,6 +122,9 @@ export function isPublicMediaProxyUrl(value?: string | null) {
 export function toPublicMediaUrl(value?: string | null) {
   const url = trimValue(value)
   if (!url) return null
+
+  // Guarded live photo endpoints stay same-origin; never route them via the CDN.
+  if (url.startsWith(LIVE_PHOTO_API_PREFIX)) return absoluteAppUrl(url)
 
   const cosProxyPath = cosProxyPathFromUrl(url)
   if (cosProxyPath) {
