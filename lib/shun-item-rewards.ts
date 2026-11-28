@@ -13,6 +13,16 @@ import { lockShunItemUsers, postShunItemMovement } from './shun-item-inventory'
 import { shunTransaction } from './shun-master'
 
 const BATCH = 25
+/** 社区互动当日有效判定总数计数器（复用 ShunItemDailyCounter，不新增字段）。 */
+export const SHUN_COMMUNITY_TOTAL_COUNTER = 'COMMUNITY_TOTAL'
+export const SHUN_COMMUNITY_GUARANTEE_MARK = 'GUARANTEE'
+
+type RewardRules = NonNullable<ReturnType<typeof validateShunItemDraft>>['rules']
+
+/** 每日社区互动有效判定总额度，随配置动态计算（当前为 1+1+5+3+10=20）。 */
+export function communityCheckBudget(rules: RewardRules): number {
+  return Object.values(rules.drops).reduce((total, drop) => total + drop.dailyChecks, 0)
+}
 const taskKinds: Readonly<Record<string, keyof typeof SHUN_COMMUNITY_DROP_RULES>> = {
   DAILY_CHECKIN: 'CHECK_IN',
   DAILY_PRESCRIPTION: 'PRESCRIPTION',
@@ -73,6 +83,32 @@ async function enqueueCommittedFacts(configVersion: number, from: Date, commentM
       day: shunDay(share.occurredAt), kind: 'SHARE', occurrenceKey: snapshot?.postId ?? null, configVersion, ...rolls() })
   }
   if (entries.length) await prisma.shunItemRewardEvent.createMany({ data: entries, skipDuplicates: true })
+}
+
+/**
+ * 累加当日社区互动有效判定总数并返回累加后的值。
+ *
+ * 首次写入时以各行为已有的真实计数之和作为起点：新版上线当天用户已用掉的
+ * 判定机会不会被清零，保底进度因此可以从真实记录继续。
+ */
+async function bumpCommunityCheckTotal(
+  tx: Prisma.TransactionClient, userId: string, day: string, rules: RewardRules,
+): Promise<number> {
+  const counter = { userId_day_counter: { userId, day, counter: SHUN_COMMUNITY_TOTAL_COUNTER } }
+  const row = await tx.shunItemDailyCounter.findUnique({ where: counter })
+  if (row) {
+    const next = await tx.shunItemDailyCounter.update({ where: counter, data: { count: { increment: 1 } } })
+    return next.count
+  }
+  const perKind = await tx.shunItemDailyCounter.findMany({
+    where: { userId, day, counter: { in: Object.keys(rules.drops) } }, select: { count: true },
+  })
+  // 调用点已在上面为本条事件累加过对应类型的计数，这里不再 +1。
+  const base = perKind.reduce((sum, item) => sum + item.count, 0)
+  const created = await tx.shunItemDailyCounter.create({
+    data: { userId, day, counter: SHUN_COMMUNITY_TOTAL_COUNTER, count: base },
+  })
+  return created.count
 }
 
 async function processRewardEvent(sourceType: string, sourceId: string, userId: string, enabledFrom: Date) {
@@ -146,17 +182,75 @@ async function processRewardEvent(sourceType: string, sourceId: string, userId: 
         await tx.shunItemDailyCounter.upsert({
           where: counter, create: { userId, day, counter: event.kind, count: 1 }, update: { count: { increment: 1 } },
         })
-        if (event.dropRoll < drop.chance) {
-          // requestKey 带上行为来源，历史记录才能显示「社区互动 · 具体行为」。
-          // 每个用户每天仍只可能拿到一次社区掉落（behaviorGranted 门禁），
-          // 因此 (userId, type, requestKey) 的唯一约束语义不变。
-          await grant('COMMUNITY_DROP', `${day}:${event.kind}`, event.itemRoll)
+        // 隐藏保底：当日全部有效判定用尽仍无掉落时，最后一次必定发一个。
+        // 阈值来自配置（各行为 dailyChecks 之和），不硬编码。
+        const budget = communityCheckBudget(rules)
+        const used = await bumpCommunityCheckTotal(tx, userId, day, rules)
+        const hit = event.dropRoll < drop.chance
+        const guarantee = !hit && budget > 0 && used >= budget
+        if (hit || guarantee) {
+          // 保底与概率掉落共用同一七种道具池与同一次已落库的 itemRoll，
+          // 不重新抽取，也不提高珍藏/隐藏概率；仅在 requestKey 上留内部标记。
+          await grant('COMMUNITY_DROP', guarantee
+            ? `${day}:${event.kind}:${SHUN_COMMUNITY_GUARANTEE_MARK}`
+            : `${day}:${event.kind}`, event.itemRoll)
           await tx.shunItemDaily.update({ where, data: { behaviorGranted: true } })
         }
       }
     }
     await tx.shunItemRewardEvent.update({ where: whereEvent, data: { processedAt: new Date() } })
   })
+}
+
+/**
+ * 保底兜底：当天已用完全部有效判定但仍未获得社区互动道具的用户，补发一次保底。
+ *
+ * 只处理北京时间当天，永不追溯历史日期；幂等由
+ * (userId, COMMUNITY_DROP, `${day}:${kind}:GUARANTEE`) 的唯一约束保证，
+ * 重复执行不会多发。来源行为取该用户当天最后一条已处理事件，
+ * 因此用户端看到的仍是「社区互动 · 具体行为」，不暴露保底。
+ */
+export async function reconcileShunCommunityGuarantee(now = new Date()) {
+  if (!shunItemsFeatureEnabled()) return
+  const active = await prisma.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })
+  const draft = validateShunItemDraft(active)
+  if (!active || !draft?.enabled) return
+  const { rules } = draft
+  const budget = communityCheckBudget(rules)
+  if (!rules.community || !(rules.dailyMax >= 2 || !rules.dailyMain) || budget <= 0) return
+  const day = shunDay(now)
+  const counters = await prisma.shunItemDailyCounter.groupBy({
+    by: ['userId'], where: { day, counter: { in: Object.keys(rules.drops) } }, _sum: { count: true },
+  })
+  const reached = counters.filter((row) => (row._sum.count ?? 0) >= budget).map((row) => row.userId)
+  if (!reached.length) return
+  const granted = await prisma.shunItemEntry.findMany({
+    where: { userId: { in: reached }, day, type: 'COMMUNITY_DROP' }, select: { userId: true },
+  })
+  const done = new Set(granted.map((row) => row.userId))
+  const pool = draft.definitions.filter((item) => item.enabled).map(({ code, weight }) => [code, weight] as const)
+  for (const userId of reached) {
+    if (done.has(userId)) continue
+    const last = await prisma.shunItemRewardEvent.findFirst({
+      where: { userId, day, processedAt: { not: null } }, orderBy: [{ occurredAt: 'desc' }], select: { kind: true },
+    })
+    if (!last) continue
+    try {
+      await shunTransaction(async (tx) => {
+        await lockShunItemUsers(tx, [userId])
+        const daily = await tx.shunItemDaily.upsert({ where: { userId_day: { userId, day } }, create: { userId, day }, update: {} })
+        if (daily.behaviorGranted) return
+        const code = drawShunItem(pool)
+        await postShunItemMovement(tx, {
+          userId, code, type: 'COMMUNITY_DROP', day, configVersion: active.version,
+          requestKey: `${day}:${last.kind}:${SHUN_COMMUNITY_GUARANTEE_MARK}`,
+        })
+        await tx.shunItemDaily.update({ where: { userId_day: { userId, day } }, data: { behaviorGranted: true } })
+      })
+    } catch (error) {
+      console.error('[shun-item.guarantee.reconcile-failed]', { name: error instanceof Error ? error.name : 'UNKNOWN' })
+    }
+  }
 }
 
 let sweeping = false
@@ -191,6 +285,10 @@ export async function runShunItemRewardSweep() {
         })
         console.error('[shun-item.worker.event-failed]', { sourceType: event.sourceType, sourceId: event.sourceId, name: error instanceof Error ? error.name : 'UNKNOWN' })
       }
+    }
+    // 保底兜底放在事件处理之后，且自身失败不得影响主扫描。
+    try { await reconcileShunCommunityGuarantee() } catch (error) {
+      console.error('[shun-item.guarantee.reconcile-skipped]', { name: error instanceof Error ? error.name : 'UNKNOWN' })
     }
   } finally {
     sweeping = false

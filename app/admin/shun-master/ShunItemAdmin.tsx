@@ -17,6 +17,7 @@ type Report = {
   giftStatus?: { status: string; count: number }[]
   giftLedger?: { type: string; count: number; amount: number }[]
   giftRecords?: unknown[]
+  communityGuarantee?: { budget: number; granted: number }
 }
 
 const giftTypeLabels: Record<string, string> = {
@@ -106,6 +107,9 @@ export function ShunItemAdmin() {
       </p>}
       {!!report.giftStatus?.length && <p>
         赠礼意图状态：{report.giftStatus.map((row) => `${row.status} ${row.count}`).join(' · ')}
+      </p>}
+      {report.communityGuarantee && <p>
+        社区互动保底（内部指标，用户端不可见）：每日额度 {report.communityGuarantee.budget} 次 · 本期保底发放 {report.communityGuarantee.granted} 次
       </p>}
       {([
         ['库存', report.stock], ['道具流水', report.entries], ['好友赠送', report.gifts],
