@@ -153,13 +153,29 @@ test('V4.2 isolated MySQL inventory, retry idempotency and randomized friend gif
     ])
     assert.equal(one.receiver?.uid, receiver.uid)
     assert.deepEqual(replay, one)
+    // V4.2.1 双向赠礼：赠送者与收礼者各自独立获得一件赠礼专属池道具。
+    assert.ok(one.rewardCode, '赠送者必须获得随机回礼')
+    assert.notEqual(one.rewardCode, 'FRIEND_GIFT', '赠礼回礼不得再是天使的礼物')
+    const rewardEntries = await prisma.shunItemEntry.findMany({ where: { userId: sender.id, type: 'GIFT_REWARD' } })
+    assert.equal(rewardEntries.length, 1)
+    assert.equal(rewardEntries[0].code, one.rewardCode)
+    assert.equal(rewardEntries[0].availableDelta, 1)
+    assert.equal(await prisma.shunItemGift.findFirstOrThrow({
+      where: { senderId: sender.id, receiverId: receiver.id },
+    }).then((gift) => gift.rewardEntryId), rewardEntries[0].id)
+    // 每日收礼上限已从 2 收紧到 1：首位好友收下后当天不再接受任何好友赠礼。
     const remainingGiftCalls = await Promise.allSettled(Array.from({ length: 3 }, () =>
       sendShunItemGift(sender.id, randomUUID(), () => now)))
-    assert.equal(remainingGiftCalls.filter((result) => result.status === 'fulfilled').length, 1)
-    assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id, receiverId: receiver.id } }), 2)
+    assert.equal(remainingGiftCalls.filter((result) => result.status === 'fulfilled').length, 0)
+    assert.equal(await prisma.shunItemGift.count({ where: { senderId: sender.id, receiverId: receiver.id } }), 1)
     assert.equal(await prisma.shunItemDaily.findUnique({
       where: { userId_day: { userId: receiver.id, day } },
-    }).then((row) => row?.giftsReceived), 2)
+    }).then((row) => row?.giftsReceived), 1)
+    // 赠送者净变化为 0：消耗 1 个天使的礼物、获得 1 个回礼。
+    const senderGiftStock = await prisma.shunItemInventory.findUniqueOrThrow({
+      where: { userId_code: { userId: sender.id, code: 'FRIEND_GIFT' } },
+    })
+    assert.equal(senderGiftStock.available, 2)
     assert.equal(await prisma.shunItemInventory.count({ where: { userId: { in: [blocked.id, unrelated.id] } } }), 0)
 
     const extraRequest = randomUUID()

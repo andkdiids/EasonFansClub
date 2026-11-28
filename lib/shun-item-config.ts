@@ -2,7 +2,7 @@ import { SHUN_COMMUNITY_DROP_RULES, SHUN_GIFT_WEIGHTS, SHUN_ITEM_CATALOG, type S
 
 const descriptions: Record<ShunItemCode, string> = {
   EXTRA_ATTEMPT: '增加一次今天的主动顺取机会。',
-  FRIEND_GIFT: '将随机为一位通讯录好友送上一份礼物。',
+  FRIEND_GIFT: '随机送给一位通讯录好友一份礼物，你也将收到一份随机回礼。',
   EXTRA_SUSPECT: '下一次成功顺取的抓捕名单多一位候选人。',
   REVENGE: '抓捕成功后，对真实顺取者反击一次。',
   TARGET_FRIEND: '指定一位通讯录好友进行顺取。',
@@ -10,13 +10,22 @@ const descriptions: Record<ShunItemCode, string> = {
   RETRY_CAPTURE: '重试一次失败的抓捕，原额追回。',
 }
 
+/**
+ * V4.2.1：每位用户每日最多收到 1 次好友赠礼。
+ *
+ * 旧版本配置里写的是 2。校验仍然接受 0..2（否则线上旧配置会整体校验失败，
+ * 百宝箱与奖励链路会一起停摆），但读出的规则一律归一化到新上限，
+ * 避免「代码已上线、配置还没增量更新」之间出现旧上限仍然生效的窗口。
+ */
+export const SHUN_GIFT_DAILY_RECEIVE_LIMIT = 1
+
 export const defaultShunItemRules = {
   dailyMain: true,
   weekly: { 3: true, 5: true, 7: true },
   community: true,
   drops: SHUN_COMMUNITY_DROP_RULES,
   dailyMax: 2,
-  giftsReceived: 2,
+  giftsReceived: SHUN_GIFT_DAILY_RECEIVE_LIMIT,
   extraAttempts: 2,
   commentMinChars: 10,
   gifts: SHUN_GIFT_WEIGHTS,
@@ -87,7 +96,12 @@ export function validateShunItemDraft(input: unknown): ShunItemDraft | null {
     || giftCodes.reduce((total, code) => total + Number(gifts[code]), 0) !== 100) return null
   if (definitions.some((item) => item.code === 'FRIEND_GIFT' && item.enabled) && giftCodes.some((code) =>
     Number(gifts[code]) > 0 && !definitions.some((item) => item.code === code && item.enabled && ['普通', '稀有'].includes(item.rarity)))) return null
-  return { enabled: draft.enabled, definitions, rules: rules as ItemRules }
+  return {
+    enabled: draft.enabled,
+    definitions,
+    // 归一化每日收礼上限：旧配置写 2 也按 1 生效（见 SHUN_GIFT_DAILY_RECEIVE_LIMIT）。
+    rules: { ...(rules as ItemRules), giftsReceived: Math.min(rules.giftsReceived as number, SHUN_GIFT_DAILY_RECEIVE_LIMIT) },
+  }
 }
 
 export function shunItemsFeatureEnabled() {

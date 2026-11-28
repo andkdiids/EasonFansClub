@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { defaultShunItemDefinitions, defaultShunItemRules, shunItemsFeatureEnabled, validateShunItemDraft } from '@/lib/shun-item-config'
@@ -14,14 +15,46 @@ const json = (data: unknown, status = 200) => NextResponse.json(data, {
 export async function GET(request: Request) {
   const guard = await requireAdmin('site_config_manage')
   if (!guard.user) return guard.response
-  const userId = new URL(request.url).searchParams.get('userId')?.trim()
+  const params = new URL(request.url).searchParams
+  const userId = params.get('userId')?.trim()
   if (userId && !/^[a-z0-9]{1,40}$/.test(userId)) return json({ message: '用户 ID 无效。' }, 400)
+  const day = params.get('day')?.trim() || ''
+  if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return json({ message: '日期无效。' }, 400)
+  const code = params.get('code')?.trim() || ''
+  if (code && !defaultShunItemDefinitions.some((item) => item.code === code)) return json({ message: '道具无效。' }, 400)
+  const versionRaw = params.get('version')
+  const version = versionRaw === null ? null : Number(versionRaw)
+  if (version !== null && (!Number.isInteger(version) || version < 0)) return json({ message: '配置版本无效。' }, 400)
+
   const participants = userId ? { OR: [{ senderId: userId }, { receiverId: userId }] } : {}
-  const [active, stock, entries, gifts, effects, audit, abuse, discrepancy] = await Promise.all([
+  const dayStart = day ? new Date(`${day}T00:00:00+08:00`) : null
+  const dayRange = dayStart ? { gte: dayStart, lt: new Date(dayStart.getTime() + 86_400_000) } : null
+  // 赠礼查询：参与方 / 道具 / 日期 三个条件共用一层 AND，避免 OR 互相覆盖。
+  const giftAnd: Prisma.ShunItemGiftWhereInput[] = []
+  if (userId) giftAnd.push({ OR: [{ senderId: userId }, { receiverId: userId }] })
+  if (code) giftAnd.push({ OR: [
+    { sentEntry: { code: code as never } },
+    { receivedEntry: { code: code as never } },
+    { rewardEntry: { code: code as never } },
+  ] })
+  if (dayRange) giftAnd.push({ createdAt: dayRange })
+  const entryWhere: Prisma.ShunItemEntryWhereInput = {
+    ...(userId ? { userId } : {}),
+    ...(dayRange ? { createdAt: dayRange } : {}),
+    ...(version === null ? {} : { configVersion: version }),
+    ...(code ? { code: code as never } : {}),
+  }
+  const [active, stock, entries, gifts, giftRecords, effects, audit, abuse, discrepancy, statusCounts, entryStats] = await Promise.all([
     prisma.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } }),
     userId ? prisma.shunItemInventory.findMany({ where: { userId } }) : [],
-    prisma.shunItemEntry.findMany({ where: { userId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }),
+    prisma.shunItemEntry.findMany({ where: entryWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }),
     prisma.shunItemGift.findMany({ where: participants, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }),
+    prisma.shunItemGift.findMany({
+      where: giftAnd.length ? { AND: giftAnd } : {},
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+      include: { sentEntry: true, receivedEntry: true, rewardEntry: true, intent: { select: { status: true, configVersion: true, senderCode: true } } },
+    }),
     prisma.shunItemRoundEffect.groupBy({
       by: ['code'], where: userId ? { entry: { userId } } : {},
       _sum: { amount: true, compensation: true }, _count: { _all: true },
@@ -38,12 +71,30 @@ export async function GET(request: Request) {
       const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true } })
       return user ? reconcileShunItemInventory(tx, userId) : null
     }) : null,
+    prisma.shunItemGiftIntent.groupBy({ by: ['status'], _count: { _all: true } }),
+    prisma.shunItemEntry.groupBy({
+      by: ['type'],
+      where: { ...entryWhere, type: { in: ['GIFT_SENT', 'GIFT_RECEIVED', 'GIFT_REWARD'] } },
+      _count: { _all: true }, _sum: { availableDelta: true },
+    }),
   ])
+  const rules = active ? validateShunItemDraft(active)?.rules ?? defaultShunItemRules : defaultShunItemRules
   return json({
     featureEnabled: shunItemsFeatureEnabled(), version: active?.version ?? 0,
     draft: active ? { enabled: active.enabled, definitions: active.definitions, rules: active.rules }
       : { enabled: false, definitions: defaultShunItemDefinitions, rules: defaultShunItemRules },
     stock, entries, gifts, effects, audit, abuse, discrepancy,
+    // V4.2.1 赠礼规则与双向赠礼统计（回礼 / 收礼分开计数）。
+    giftRules: { receiveDailyLimit: rules.giftsReceived, pool: rules.gifts },
+    giftStatus: statusCounts.map((row) => ({ status: row.status, count: row._count._all })),
+    giftLedger: entryStats.map((row) => ({ type: row.type, count: row._count._all, amount: row._sum.availableDelta ?? 0 })),
+    giftRecords: giftRecords.map((gift) => ({
+      id: gift.id, senderId: gift.senderId, receiverId: gift.receiverId, createdAt: gift.createdAt,
+      status: gift.intent?.status ?? 'LEGACY', configVersion: gift.intent?.configVersion ?? null,
+      sentCode: gift.sentEntry.code, receivedCode: gift.receivedEntry.code,
+      rewardCode: gift.rewardEntry?.code ?? gift.intent?.senderCode ?? null,
+      legacy: !gift.rewardEntryId,
+    })),
   })
 }
 

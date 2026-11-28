@@ -980,9 +980,13 @@ export async function shunItemBox(userId: string) {
     await lockShunItemUsers(tx, [userId])
     const active = await tx.shunItemConfigVersion.findFirst({
       orderBy: { version: 'desc' },
-      include: { definitions: { select: { code: true, name: true, description: true, icon: true, rarity: true, enabled: true } } },
+      // weight 是配置校验的必填项：漏选会让 validateShunItemDraft 返回 null，
+      // 进而把整个百宝箱判成 disabled，因此必须一起取回。
+      include: { definitions: { select: { code: true, name: true, description: true, icon: true, rarity: true, enabled: true, weight: true } } },
     })
     if (!active?.enabled) return { enabled: false }
+    const draft = validateShunItemDraft(active)
+    if (!draft?.enabled) return { enabled: false }
     await currentShunPending(tx, userId, shunDay(new Date()))
     const inventory = await tx.shunItemInventory.findMany({ where: { userId }, select: { code: true, available: true, pending: true } })
     const history = await tx.shunItemEntry.findMany({
@@ -995,8 +999,134 @@ export async function shunItemBox(userId: string) {
       const balance = inventory.find((row) => row.code === definition.code)
       return { ...definition, available: balance?.available ?? 0, pending: balance?.pending ?? 0 }
     })
-    return { enabled: true, items, history, total: inventory.reduce((sum, row) => sum + row.available + row.pending, 0) }
+    const { rules } = draft
+    // 获取方式说明必须来自服务端当前生效配置，后台调整后前端说明自动一致。
+    const giftEnabled = active.definitions.some((item) => item.code === 'FRIEND_GIFT' && item.enabled)
+    const giftPool = (Object.keys(SHUN_GIFT_WEIGHTS) as Array<keyof typeof SHUN_GIFT_WEIGHTS>).map((code) => ({
+      code,
+      name: active.definitions.find((item) => item.code === code)?.name ?? SHUN_ITEM_CATALOG[code].name,
+      weight: rules.gifts[code],
+    }))
+    return {
+      enabled: true, items, history,
+      total: inventory.reduce((sum, row) => sum + row.available + row.pending, 0),
+      guide: {
+        dailyMain: rules.dailyMain,
+        weekly: { 3: rules.weekly[3], 5: rules.weekly[5], 7: rules.weekly[7] },
+        community: rules.community,
+        dailyMax: rules.dailyMax,
+        drops: rules.drops,
+        giftsReceived: rules.giftsReceived,
+        extraAttempts: rules.extraAttempts,
+        commentMinChars: rules.commentMinChars,
+        giftEnabled,
+        giftPool: giftEnabled ? giftPool : [],
+      },
+    }
   })
+}
+
+export type ShunItemHistoryFilter = 'all' | 'acquired' | 'used' | 'gift'
+
+const SHUN_HISTORY_TYPES: Record<Exclude<ShunItemHistoryFilter, 'all'>, string[]> = {
+  acquired: ['DAILY_MAIN', 'COMMUNITY_DROP', 'WEEKLY_REWARD', 'GIFT_RECEIVED', 'GIFT_REWARD'],
+  used: ['USED', 'RESERVED', 'RELEASED'],
+  gift: ['GIFT_SENT', 'GIFT_RECEIVED', 'GIFT_REWARD'],
+}
+
+const SHUN_DROP_SOURCE_LABELS: Record<string, string> = {
+  CHECK_IN: '每日挂号', PRESCRIPTION: '领取处方', COMMENT: '有效评论', SHARE: '分享帖子', LIKE: '点赞帖子',
+}
+
+function historyCursor(entry: { id: string; createdAt: Date }) {
+  return `${entry.createdAt.getTime()}_${entry.id}`
+}
+
+function parseHistoryCursor(cursor?: string): { at: Date; id: string } | null {
+  if (!cursor) return null
+  const at = cursor.indexOf('_')
+  if (at <= 0) return null
+  const time = Number(cursor.slice(0, at))
+  const id = cursor.slice(at + 1)
+  if (!Number.isInteger(time) || time <= 0 || !/^[a-z0-9]{1,40}$/.test(id)) return null
+  return { at: new Date(time), id }
+}
+
+/**
+ * V4.2.1 历史记录：按用户 + 分类倒序分页，并把赠礼两端的实际道具关联出来。
+ *
+ * 之前的百宝箱只把最近 50 条 ShunItemEntry 平铺出来，既没有赠礼对手/送出道具/
+ * 回礼，也无法筛选与翻页，用户关闭弹窗后就看不出这次赠礼到底送给了谁。
+ * 记录本身一直是持久化的，缺的是查询与展示。
+ */
+export async function shunItemHistory(userId: string, filter: ShunItemHistoryFilter = 'all', cursor?: string, limit = 20) {
+  if (!shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+  const active = await prisma.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })
+  const draft = validateShunItemDraft(active)
+  if (!active || !draft?.enabled) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+  const take = Math.min(Math.max(Number.isFinite(limit) ? Math.trunc(limit) : 20, 1), 50)
+  const before = parseHistoryCursor(cursor)
+  const types = filter === 'all' ? null : SHUN_HISTORY_TYPES[filter]
+  const rows = await prisma.shunItemEntry.findMany({
+    where: {
+      userId,
+      ...(types ? { type: { in: types as never[] } } : {}),
+      ...(before ? { OR: [{ createdAt: { lt: before.at } }, { createdAt: before.at, id: { lt: before.id } }] } : {}),
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: take + 1,
+  })
+  const page = rows.slice(0, take)
+  const ids = page.map((row) => row.id)
+  const gifts = ids.length ? await prisma.shunItemGift.findMany({
+    where: { OR: [{ sentEntryId: { in: ids } }, { receivedEntryId: { in: ids } }, { rewardEntryId: { in: ids } }] },
+    include: { sentEntry: true, receivedEntry: true, rewardEntry: true },
+  }) : []
+  const people = new Map<string, Awaited<ReturnType<typeof shunPerson>>>()
+  for (const id of new Set(gifts.flatMap((gift) => [gift.senderId, gift.receiverId]))) {
+    people.set(id, await shunPerson(prisma, id))
+  }
+  const names = new Map(active.definitions.map((definition) => [definition.code as string, definition.name]))
+  const nameOf = (code: string) => names.get(code)
+    ?? SHUN_ITEM_CATALOG[code as keyof typeof SHUN_ITEM_CATALOG]?.name ?? code
+  const records = page.map((entry) => {
+    const gift = gifts.find((row) => row.sentEntryId === entry.id
+      || row.receivedEntryId === entry.id || row.rewardEntryId === entry.id)
+    const sent = entry.type === 'GIFT_SENT'
+    const received = entry.type === 'GIFT_RECEIVED'
+    const counterpartId = gift ? (sent || entry.type === 'GIFT_REWARD' ? gift.receiverId : gift.senderId) : null
+    // 社区互动展示具体行为来源；旧记录（requestKey 只有日期）没有后缀时退回统称。
+    const suffix = entry.requestKey.includes(':') ? entry.requestKey.split(':').pop() : null
+    const sourceLabel = entry.type === 'COMMUNITY_DROP'
+      ? (suffix ? SHUN_DROP_SOURCE_LABELS[suffix] ?? null : null)
+      : entry.type === 'WEEKLY_REWARD' ? (suffix ? `连续 ${suffix} 天` : null)
+        : null
+    return {
+      id: entry.id,
+      type: entry.type,
+      code: entry.code,
+      name: nameOf(entry.code),
+      sourceLabel,
+      amount: entry.availableDelta,
+      pendingDelta: entry.pendingDelta,
+      createdAt: entry.createdAt.toISOString(),
+      gift: gift ? {
+        direction: received ? 'received' : 'sent',
+        counterpart: counterpartId ? people.get(counterpartId) ?? null : null,
+        sentCode: gift.sentEntry.code, sentName: nameOf(gift.sentEntry.code),
+        receivedCode: gift.receivedEntry.code, receivedName: nameOf(gift.receivedEntry.code),
+        rewardCode: gift.rewardEntry?.code ?? null,
+        rewardName: gift.rewardEntry ? nameOf(gift.rewardEntry.code) : null,
+        legacy: !gift.rewardEntryId,
+      } : null,
+    }
+  })
+  return {
+    filter,
+    records,
+    hasMore: rows.length > take,
+    nextCursor: rows.length > take && page.length ? historyCursor(page[page.length - 1]) : null,
+  }
 }
 
 export async function sendShunItemGift(senderId: string, requestId: string, clock = () => new Date()) {
@@ -1014,7 +1144,7 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
       if (prior?.sentGift) {
         const { id, receiverId, receivedEntry } = prior.sentGift
         const name = receivedEntry.config.definitions.find(({ code }) => code === receivedEntry.code)?.name
-        return { legacy: { id, code: receivedEntry.code, name, receiver: await shunPerson(tx, receiverId) } }
+        return { legacy: { id, code: receivedEntry.code, name, rewardCode: null, rewardName: null, receiver: await shunPerson(tx, receiverId) } }
       }
 
       const active = await tx.shunItemConfigVersion.findFirst({ orderBy: { version: 'desc' }, include: { definitions: true } })
@@ -1058,9 +1188,12 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
 
       const pool = (Object.keys(SHUN_GIFT_WEIGHTS) as Array<keyof typeof SHUN_GIFT_WEIGHTS>)
         .map((code) => [code, rules.gifts[code]] as const)
+      // V4.2.1：收礼道具与赠送者回礼各自独立抽取，并在正式结算前持久化。
+      // 同一 requestKey 重试只会读到这两个已落库的结果，绝不重新抽取。
       const code = drawShunItem(pool)
+      const senderCode = drawShunItem(pool)
       await tx.shunItemGiftIntent.create({ data: {
-        senderId, requestKey, receiverId, code, configVersion: active.version, createdAt: clock(),
+        senderId, requestKey, receiverId, code, senderCode, configVersion: active.version, createdAt: clock(),
       } })
       return null
     })
@@ -1073,7 +1206,9 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
         config: { include: { definitions: true } },
       } })
       if (intent.status === 'SETTLED') return { result: intent.result as unknown as {
-        id: string; code: typeof intent.code; name: string; receiver: Awaited<ReturnType<typeof shunPerson>>
+        id: string; code: typeof intent.code; name: string
+        rewardCode: typeof intent.code | null; rewardName: string | null
+        receiver: Awaited<ReturnType<typeof shunPerson>>
       } }
       if (intent.status === 'TERMINATED') return null
 
@@ -1113,8 +1248,19 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
       const { entry: received } = await postShunItemMovement(tx, {
         userId: receiverId, code, type: 'GIFT_RECEIVED', requestKey: sent.id, day, configVersion,
       })
+      // V4.2.1 双向赠礼：赠送者回礼与收礼道具在同一个事务内写入，
+      // 使用独立的 GIFT_REWARD 获取来源，不占用每日主线/社区行为上限。
+      const rewardCode = intent.senderCode
+      const rewardName = rewardCode
+        ? intent.config.definitions.find((item) => item.code === rewardCode)?.name ?? SHUN_ITEM_CATALOG[rewardCode].name
+        : null
+      const reward = rewardCode
+        ? (await postShunItemMovement(tx, {
+          userId: senderId, code: rewardCode, type: 'GIFT_REWARD', requestKey, day, configVersion,
+        })).entry
+        : null
       const gift = await tx.shunItemGift.create({
-        data: { senderId, receiverId, sentEntryId: sent.id, receivedEntryId: received.id },
+        data: { senderId, receiverId, sentEntryId: sent.id, receivedEntryId: received.id, rewardEntryId: reward?.id },
       })
       await tx.shunItemDaily.upsert({
         where: { userId_day: { userId: receiverId, day } },
@@ -1125,7 +1271,12 @@ export async function sendShunItemGift(senderId: string, requestId: string, cloc
       await notify(tx, gift.id, receiverId, '天使的礼物',
         `你的好友 ${senderPerson?.nickname ?? 'EF'} 为你送来了一份天使的礼物，你获得了道具『${name}』！`,
         'item-gift', '/shun-master?items=1')
-      const result = { id: gift.id, code, name, receiver }
+      if (reward && rewardName) {
+        await notify(tx, reward.id, senderId, '天使的礼物',
+          `你送给 ${receiver?.nickname ?? 'EF'} 的礼物已送达，你也收到了一份回礼道具『${rewardName}』！`,
+          'item-gift', '/shun-master?items=1')
+      }
+      const result = { id: gift.id, code, name, rewardCode: rewardCode ?? null, rewardName, receiver }
       await tx.shunItemGiftIntent.update({ where: key, data: {
         status: 'SETTLED', finishedAt: now, giftId: gift.id, result,
       } })

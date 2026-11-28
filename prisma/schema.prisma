@@ -7339,6 +7339,7 @@ enum ShunItemEventType {
   GIFT_RECEIVED
   USED
   GIFT_SENT
+  GIFT_REWARD
   RESERVED
   RELEASED
 }
@@ -7401,10 +7402,12 @@ model ShunItemEntry {
   weeklyGrant ShunItemWeeklyGrant?
   sentGift ShunItemGift? @relation("ShunItemGiftSent")
   receivedGift ShunItemGift? @relation("ShunItemGiftReceived")
+  rewardedGift ShunItemGift? @relation("ShunItemGiftReward")
   roundEffect ShunItemRoundEffect?
 
   @@unique([userId, type, requestKey])
   @@index([userId, createdAt, id])
+  @@index([userId, type, createdAt])
   @@index([day, type])
 }
 
@@ -7446,10 +7449,12 @@ model ShunItemGift {
   receiverId String
   sentEntryId String @unique
   receivedEntryId String @unique
+  rewardEntryId String? @unique
   createdAt DateTime @default(now())
 
   sentEntry ShunItemEntry @relation("ShunItemGiftSent", fields: [sentEntryId], references: [id])
   receivedEntry ShunItemEntry @relation("ShunItemGiftReceived", fields: [receivedEntryId], references: [id])
+  rewardEntry ShunItemEntry? @relation("ShunItemGiftReward", fields: [rewardEntryId], references: [id])
 
   intent ShunItemGiftIntent?
 
@@ -7505,6 +7510,7 @@ model ShunItemGiftIntent {
   requestKey String @db.VarChar(191)
   receiverId String
   code ShunItemCode
+  senderCode ShunItemCode?
   configVersion Int
   status ShunItemGiftIntentStatus @default(PENDING)
   createdAt DateTime @default(now())

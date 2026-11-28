@@ -55,6 +55,8 @@ test('random gifting cannot accept a selected friend while directed takes still 
   assert.match(route, /shunAttempt\(guard\.user\.id, body\.requestId, undefined, body\.friendId\)/)
   const box = await readFile('app/shun-master/ShunItemBox.tsx', 'utf8')
   assert.match(box, /onUse\('gift'\)/)
-  assert.match(box, /寻找一位幸运的 EF\.\.\./)
-  assert.match(box, /幸运已经送达！/)
+  // V4.2.1 改为双向赠礼结果面板：送出与回礼同时展示。
+  assert.match(box, /正在送出这份惊喜/)
+  assert.match(box, /礼物已送达！/)
+  assert.match(box, /你也收到了/)
 })

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
-import { shunTargetFriends, recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, applyShunExtraAttempt } from '@/lib/shun-master'
+import { shunTargetFriends, recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, shunItemHistory, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, applyShunExtraAttempt } from '@/lib/shun-master'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -36,6 +36,22 @@ export async function GET(request: Request, { params }: Context) {
       return limited ?? json(await shunTargetFriends(guard.user.id))
     }
     if (action === 'items') return json(await shunItemBox(guard.user.id))
+    if (action === 'item-history') {
+      const query = new URL(request.url).searchParams
+      const filter = query.get('filter') || 'all'
+      if (filter !== 'all' && filter !== 'acquired' && filter !== 'used' && filter !== 'gift') {
+        return json({ message: '筛选条件无效。' }, 400)
+      }
+      const limitRaw = query.get('limit')
+      const limit = limitRaw === null ? 20 : Number(limitRaw)
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) return json({ message: '分页参数无效。' }, 400)
+      const cursor = query.get('cursor')
+      if (cursor && !/^\d{1,16}_[a-z0-9]{1,40}$/.test(cursor)) return json({ message: '分页参数无效。' }, 400)
+      const limited = await enforceApiRateLimit(request, guard.user.id, {
+        endpoint: 'shun-master:item-history', user: { limit: 40, windowSeconds: 60 }, ip: { limit: 240, windowSeconds: 60 },
+      })
+      return limited ?? json(await shunItemHistory(guard.user.id, filter, cursor || undefined, limit))
+    }
     if (action === 'records') {
       const query = new URL(request.url).searchParams
       const side = query.get('side')
