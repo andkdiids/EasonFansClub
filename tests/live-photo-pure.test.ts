@@ -149,16 +149,69 @@ test('config is clamped and marker helpers round-trip', () => {
 test('live photo covers stay same-origin and become absolute for legacy clients', async () => {
   const { toPublicMediaUrl: publicImageUrl } = await import('../lib/media-url.ts')
   const cover = '/api/media/live-photo/asset_12345678/cover'
-  const previous = process.env.NEXT_PUBLIC_APP_URL
+  const previousAppUrl = process.env.NEXT_PUBLIC_APP_URL
+  const previousFallback = process.env.APP_URL
   try {
     delete process.env.NEXT_PUBLIC_APP_URL
+    delete process.env.APP_URL
     assert.equal(publicImageUrl(cover), cover, 'unconfigured origin keeps the guarded same-origin path')
+
     process.env.NEXT_PUBLIC_APP_URL = 'https://ecfc.fans/'
     assert.equal(publicImageUrl(cover), 'https://ecfc.fans/api/media/live-photo/asset_12345678/cover', 'legacy clients need an absolute URL')
+
+    // `APP_URL` is the share-metadata knob; honouring it here keeps a deployment
+    // that only sets the server-side variable from handing out relative URLs.
+    delete process.env.NEXT_PUBLIC_APP_URL
+    process.env.APP_URL = 'https://www.ecfc.fans'
+    assert.equal(publicImageUrl(cover), 'https://www.ecfc.fans/api/media/live-photo/asset_12345678/cover', 'APP_URL is an accepted base')
+
+    // A localhost base is a developer machine; it stays usable outside production.
+    process.env.APP_URL = 'http://localhost:3000'
+    assert.equal(publicImageUrl(cover), 'http://localhost:3000/api/media/live-photo/asset_12345678/cover', 'localhost base still works for local runs')
+
     // The CDN gateway must never be used for guarded media.
     assert.doesNotMatch(String(publicImageUrl(cover)), /media\.ecfc\.fans/, 'guarded media must not be rewritten to the CDN')
   } finally {
-    if (previous === undefined) delete process.env.NEXT_PUBLIC_APP_URL
-    else process.env.NEXT_PUBLIC_APP_URL = previous
+    if (previousAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL
+    else process.env.NEXT_PUBLIC_APP_URL = previousAppUrl
+    if (previousFallback === undefined) delete process.env.APP_URL
+    else process.env.APP_URL = previousFallback
+  }
+})
+
+test('production never downgrades a guarded cover to a relative URL', async () => {
+  const { toPublicMediaUrl: publicImageUrl } = await import('../lib/media-url.ts')
+  const cover = '/api/media/live-photo/asset_12345678/cover'
+  const env = process.env as Record<string, string | undefined>
+  const previousEnv = env.NODE_ENV
+  const previousAppUrl = process.env.NEXT_PUBLIC_APP_URL
+  const previousFallback = process.env.APP_URL
+  try {
+    delete process.env.NEXT_PUBLIC_APP_URL
+    delete process.env.APP_URL
+    env.NODE_ENV = 'production'
+    assert.equal(
+      publicImageUrl(cover),
+      'https://ecfc.fans/api/media/live-photo/asset_12345678/cover',
+      'a missing env var must still yield an absolute cover for legacy clients',
+    )
+
+    process.env.NEXT_PUBLIC_APP_URL = 'https://ecfc.fans'
+    assert.equal(publicImageUrl(cover), 'https://ecfc.fans/api/media/live-photo/asset_12345678/cover', 'explicit config wins')
+
+    process.env.NEXT_PUBLIC_APP_URL = 'http://127.0.0.1:3000'
+    delete process.env.APP_URL
+    assert.equal(
+      publicImageUrl(cover),
+      'https://ecfc.fans/api/media/live-photo/asset_12345678/cover',
+      'a localhost base is rejected in production and falls back to the canonical origin',
+    )
+  } finally {
+    if (previousEnv === undefined) delete env.NODE_ENV
+    else env.NODE_ENV = previousEnv
+    if (previousAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL
+    else process.env.NEXT_PUBLIC_APP_URL = previousAppUrl
+    if (previousFallback === undefined) delete process.env.APP_URL
+    else process.env.APP_URL = previousFallback
   }
 })

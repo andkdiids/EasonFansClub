@@ -75,3 +75,21 @@ test('moderation centre receives playback metadata, not only the cover', () => {
   const centre = read('app/admin/review/ReviewCenter.tsx')
   assert.match(centre, /livePhoto|videoUrl/, 'review UI must be able to play the clip')
 })
+
+test('guarded delivery refuses with a non-cacheable response', async () => {
+  const { deliverLivePhoto } = await import('../lib/live-photo-delivery.ts')
+  const response = await deliverLivePhoto(
+    new Request('https://ecfc.fans/api/media/live-photo/ab/cover'),
+    'ab',
+    'cover',
+  )
+  assert.equal(response.status, 400)
+  // These two read paths are opened in middleware and therefore lose its
+  // default no-store wrapper; a cached refusal would outlive the approval that
+  // is supposed to make the very same URL readable.
+  assert.equal(response.headers.get('cache-control'), 'private, no-store, max-age=0')
+
+  const delivery = read('lib/live-photo-delivery.ts')
+  assert.match(delivery, /const refusal = /, 'every refusal path must share the no-store wrapper')
+  assert.doesNotMatch(delivery, /NextResponse\.json\(\{ code: '[A-Z_]+', message: '[^']*' \}, \{ status: \d+ \}\)/, 'no refusal may bypass the wrapper')
+})
