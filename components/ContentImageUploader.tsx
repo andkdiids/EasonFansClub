@@ -387,7 +387,12 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     setPendingUploads(next)
     // Keep the finished record so an admin can still explain a photo that was
     // accepted as a plain still instead of a live photo.
-    completedUploadsRef.current.set(url, { ...item, diagnostic: { ...item.diagnostic, mediaValue: item.kind === 'live-photo' ? 'live-marker' : 'image-url' } })
+    completedUploadsRef.current.set(url, {
+      ...item,
+      diagnostic: item.diagnostic
+        ? { ...item.diagnostic, mediaValue: item.kind === 'live-photo' ? 'live-marker' : 'image-url' }
+        : undefined,
+    })
     const previous = localUploadedFilesRef.current.get(url)
     if (previous && previous.previewUrl !== item.previewUrl) URL.revokeObjectURL(previous.previewUrl)
     localUploadedFilesRef.current.set(url, { file: item.file, previewUrl: item.previewUrl })

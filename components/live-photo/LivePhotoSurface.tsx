@@ -69,7 +69,6 @@ export function LivePhotoPlayback({
       {playing ? (
         <div className={`live-photo-video-layer${variant === 'viewer' ? ' is-viewer' : ''}`} onClick={(event) => event.stopPropagation()}>
           {/* The video element is created only after an explicit user action. */}
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <video
             src={videoUrl}
             autoPlay
