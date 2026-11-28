@@ -4,6 +4,7 @@ import type { LivePhotoConfig } from '@/lib/live-photo-config'
 import { getLivePhotoConfig } from '@/lib/live-photo-config-store'
 import { isLivePhotoMarker, livePhotoIdFromMarker } from '@/lib/live-photo-markers'
 import { probeLivePhotoUpload, type LivePhotoProbeResult } from '@/lib/live-photo-probe'
+import { probeVideoWithFfmpeg } from '@/lib/live-photo-ffmpeg'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { deleteLivePhotoObjects, uploadPrivateLivePhotoObject } from '@/lib/live-photo-storage'
@@ -83,17 +84,59 @@ export async function createLivePhotoAsset(params: {
     return livePhotoAssetView(existing)
   }
 
-  const probe: LivePhotoProbeResult = probeLivePhotoUpload({
+  let probe: LivePhotoProbeResult = probeLivePhotoUpload({
     cover: params.cover,
     video: params.video,
     manualPairing: params.manualPairing,
     maxDurationSeconds: config.maxDurationSeconds,
     maxUploadBytes: config.maxUploadBytes,
   })
+  const videoBytes = probe.embeddedVideo ? Buffer.from(probe.embeddedVideo) : params.video
   if (!probe.ok) {
+    // The box parser reads headers; it is not a decoder. When it cannot read
+    // the numbers but the clip itself exists, let ffmpeg decode one frame.
+    // HEVC clips, unusual `moov` placement and vendor-padded motion photos are
+    // all valid media that a header-only check would wrongly reject.
+    const recoverable = probe.code === 'INVALID_DIMENSIONS'
+      || probe.code === 'DURATION_UNKNOWN'
+      || probe.code === 'UNSUPPORTED_VIDEO'
+    if (recoverable && videoBytes?.byteLength) {
+      const decoded = await probeVideoWithFfmpeg(
+        Buffer.from(videoBytes),
+        probe.videoContainer === 'mov' ? 'mov' : 'mp4',
+      )
+      if (decoded) {
+        const durationMs = decoded.durationMs || probe.durationMs
+        if (durationMs > config.maxDurationSeconds * 1000) {
+          throw new LivePhotoServiceError('VIDEO_TOO_LONG', `视频时长超过 ${config.maxDurationSeconds} 秒，无法直接上传`)
+        }
+        probe = {
+          ...probe,
+          ok: true,
+          code: undefined,
+          message: undefined,
+          width: decoded.width,
+          height: decoded.height,
+          durationMs,
+          hasAudio: decoded.hasAudio,
+        }
+      }
+    }
+  }
+  if (!probe.ok) {
+    // A rejected upload used to leave no trace at all, so a real-device failure
+    // could not be diagnosed afterwards. Container facts only: no bytes, no
+    // EXIF, no file name, no storage paths.
+    console.warn('[live-photo.upload.rejected]', {
+      code: probe.code,
+      imageContainer: probe.imageContainer,
+      videoContainer: probe.videoContainer,
+      pairing: probe.pairing,
+      coverBytes: params.cover.byteLength,
+      videoBytes: videoBytes?.byteLength ?? 0,
+    })
     throw new LivePhotoServiceError(probe.code || 'INVALID_REQUEST', probe.message || '媒体文件校验失败')
   }
-  const videoBytes = probe.embeddedVideo ? Buffer.from(probe.embeddedVideo) : params.video
   if (!videoBytes) throw new LivePhotoServiceError('EMPTY_FILE', '配对视频不能为空')
 
   const id = randomUUID().replace(/-/g, '')

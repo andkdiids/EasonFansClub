@@ -15,13 +15,14 @@ type AssetRow = {
 }
 
 export function LivePhotoAdminPanel({
-  initialConfig, initialPublicConfig, stats, assets,
+  initialConfig, initialPublicConfig, stats, assets, mediaTools,
 }: Readonly<{
   initialConfig: LivePhotoConfig
   initialPublicConfig: ReturnType<typeof import('@/lib/live-photo-config').publicLivePhotoConfig>
   stats: { total: number; ready: number; failed: number; processing: number; successRate: number; videoBytes: number; coverBytes: number; orphanCandidates: number
     failures: { code: string; count: number }[] }
   assets: AssetRow[]
+  mediaTools?: { available: boolean; version: string | null; probeBinaryRequired: false; decoders: string[] }
 }>) {
   const [config, setConfig] = useState(initialConfig)
   const [message, setMessage] = useState('')
@@ -100,6 +101,11 @@ export function LivePhotoAdminPanel({
         <span>公开配置上限：{initialPublicConfig.maxDurationSeconds} 秒 / {(initialPublicConfig.maxUploadBytes / 1024 / 1024).toFixed(0)} MB</span>
         <span className="sm:col-span-3">
           转码失败原因：{stats.failures.length ? stats.failures.map((failure) => `${failure.code} ×${failure.count}`).join(' · ') : '暂无失败记录'}
+        </span>
+        <span className="sm:col-span-3 text-slate-600">
+          {mediaTools
+            ? `媒体工具：${mediaTools.available ? `ffmpeg ${mediaTools.version ?? ''}` : 'ffmpeg 不可用（实况转码会被拒绝）'}；不依赖 ffprobe（内置 MP4 解析 + 解码探测）`
+            : '媒体工具：未检测'}
         </span>
       </section>
 

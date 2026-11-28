@@ -58,8 +58,10 @@ test('前后端图片上传字段、multipart 边界和逐图状态保持一致'
   assert.match(uploader, /getUploadState/)
   assert.match(uploader, /CONTENT_IMAGE_MAX_RETRIES/)
   assert.match(uploader, /uploadControllersRef\.current\.has\(item\.id\)/)
-  assert.match(uploader, /retryCapacityFull/)
-  assert.match(uploader, /已达到图片数量上限，请先删除图片后再重试/)
+  // A retry reuses the card it already owns, so the 9-image cap must never
+  // block it; the cap is enforced when new files are added instead.
+  assert.doesNotMatch(uploader, /retryCapacityFull/)
+  assert.match(uploader, /const totalCount = existingCount \+ value\.length \+ pendingUploads\.length/)
   assert.match(uploader, /上传成功/)
   assert.match(uploader, /正在压缩/)
   assert.match(uploader, /重试/)

@@ -6,14 +6,41 @@ import {
   type SelectionSummary,
 } from './live-photo-probe'
 
+export type LivePhotoErrorDetails = {
+  assetId?: string
+  status?: string
+  stage?: string
+  errorCode?: string
+}
+
 export class LivePhotoClientError extends Error {
   code: string
+  details?: LivePhotoErrorDetails
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, details?: LivePhotoErrorDetails) {
     super(message)
     this.name = 'LivePhotoClientError'
     this.code = code
+    this.details = details
   }
+}
+
+/**
+ * Transcode failures used to surface as one generic sentence. The codes come
+ * from the server job, so the user can be told whether retrying can help and
+ * whether the still image can still be posted.
+ */
+export const LIVE_PHOTO_FAILURE_MESSAGES: Record<string, string> = {
+  LIVE_PHOTO_INVALID_MEDIA: '实况视频无法解码，可重试或作为普通图片上传',
+  LIVE_PHOTO_TRANSCODE_FAILED: '实况视频处理失败，可重试或作为普通图片上传',
+  LIVE_PHOTO_TRANSCODE_TIMEOUT: '实况视频处理超时，可重试或作为普通图片上传',
+  LIVE_PHOTO_TRANSCODE_EMPTY: '实况视频处理失败，可重试或作为普通图片上传',
+  LIVE_PHOTO_TOO_LARGE: '实况视频处理后超出体积上限，可重试或作为普通图片上传',
+  LIVE_PHOTO_FFMPEG_UNAVAILABLE: '服务器暂时无法处理实况视频，请稍后再试',
+}
+
+export function livePhotoFailureText(code?: string) {
+  return (code && LIVE_PHOTO_FAILURE_MESSAGES[code]) || '实况照片处理失败，可重试或作为普通图片上传'
 }
 
 export type LivePhotoUploadResult = { assetId: string; status: string }
@@ -81,7 +108,13 @@ export async function waitForLivePhotoAsset(
     params.onStatus?.(status)
     if (status === 'READY') return payload.asset
     if (status === 'FAILED' || status === 'CANCELLED') {
-      throw new LivePhotoClientError('TRANSCODE_FAILED', '实况照片处理失败，请重新上传')
+      const errorCode = typeof payload.asset?.errorCode === 'string' ? payload.asset.errorCode : undefined
+      throw new LivePhotoClientError('TRANSCODE_FAILED', livePhotoFailureText(errorCode), {
+        assetId,
+        status,
+        stage: typeof payload.asset?.stage === 'string' ? payload.asset.stage : undefined,
+        errorCode,
+      })
     }
     await new Promise((resolve) => setTimeout(resolve, 1200))
   }

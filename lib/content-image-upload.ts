@@ -40,10 +40,21 @@ export const CONTENT_IMAGE_ALLOWED_EXTENSIONS = [
   'heif',
 ] as const
 
-export const CONTENT_IMAGE_ACCEPT = [
-  ...CONTENT_IMAGE_ALLOWED_MIME_TYPES,
-  ...CONTENT_IMAGE_ALLOWED_EXTENSIONS.map((extension) => `.${extension}`),
-].join(',')
+/**
+ * `image/*` only, on purpose.
+ *
+ * Android resolves `accept` into an Intent. A long list of MIME types plus
+ * extensions (`image/heic`, `.heif`, `.avif`, …) matches no gallery activity,
+ * so the system falls back to the document picker — the "只能从档案中选择"
+ * symptom. `image/*` is the one value every Android and WeChat build maps to
+ * the photo picker.
+ *
+ * Nothing is lost by dropping the explicit types: a Motion Photo is a JPEG
+ * with an appended clip, so the still image is all this picker has to return,
+ * and the upload endpoint still validates the real bytes against
+ * `CONTENT_IMAGE_ALLOWED_MIME_TYPES`.
+ */
+export const CONTENT_IMAGE_ACCEPT = 'image/*'
 
 export type ContentImageMimeType = typeof CONTENT_IMAGE_ALLOWED_MIME_TYPES[number]
 export type ContentImageExtension = typeof CONTENT_IMAGE_ALLOWED_EXTENSIONS[number]
