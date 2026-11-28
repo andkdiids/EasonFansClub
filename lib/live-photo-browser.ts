@@ -1,3 +1,11 @@
+import {
+  classifySelection,
+  detectVideoContainer,
+  summarizeSelection,
+  type ClassifiedSelection,
+  type SelectionSummary,
+} from './live-photo-probe'
+
 export class LivePhotoClientError extends Error {
   code: string
 
@@ -12,18 +20,24 @@ export type LivePhotoUploadResult = { assetId: string; status: string }
 
 /** XHR is used deliberately: fetch has no reliable upload progress in browsers. */
 export function uploadLivePhotoMedia(params: {
-  cover: File
-  video?: File | null
+  cover: File | Blob
+  video?: File | Blob | null
   requestId: string
   onProgress?: (percent: number) => void
   signal?: AbortSignal
 }) {
   return new Promise<LivePhotoUploadResult>((resolve, reject) => {
     const form = new FormData()
-    form.append('cover', params.cover)
-    if (params.video) form.append('video', params.video)
+    const coverName = params.cover instanceof File ? params.cover.name : 'cover.jpg'
+    form.append('cover', params.cover, coverName)
+    if (params.video) {
+      const videoName = params.video instanceof File ? params.video.name : 'paired.mov'
+      form.append('video', params.video, videoName)
+    }
     form.append('requestId', params.requestId)
-    form.append('manual', params.video ? '1' : '0')
+    // Native motion photos carry their own embedded clip; the server extracts
+    // and verifies it, so this is never a user-made pairing.
+    form.append('manual', '0')
 
     const xhr = new XMLHttpRequest()
     xhr.open('POST', '/api/media/live-photo', true)
@@ -72,4 +86,48 @@ export async function waitForLivePhotoAsset(
     await new Promise((resolve) => setTimeout(resolve, 1200))
   }
   throw new LivePhotoClientError('TIMEOUT', '媒体处理超时，请在实况照片管理中查看结果')
+}
+
+const DETECTION_HEAD_BYTES = 512 * 1024
+const DETECTION_TAIL_BYTES = 1024 * 1024
+
+async function readHead(file: File) {
+  return new Uint8Array(await file.slice(0, Math.min(file.size, DETECTION_HEAD_BYTES)).arrayBuffer())
+}
+
+async function readTail(file: File) {
+  if (file.size <= DETECTION_HEAD_BYTES) return undefined
+  const start = Math.max(DETECTION_HEAD_BYTES, file.size - DETECTION_TAIL_BYTES)
+  return new Uint8Array(await file.slice(start).arrayBuffer())
+}
+
+export type DetectedMedia = ClassifiedSelection & {
+  file: File
+  /** MOV/MP4 that belongs to this still (Apple pairing across one selection). */
+  pairedVideo?: File
+}
+
+/**
+ * Inspect the files exactly as the picker returned them, before the existing
+ * image compressor touches them. Nothing here guesses from names: motion
+ * photos are recognised from their XMP offset, Apple pairs from the shared
+ * content identifier.
+ */
+export async function detectSelectedMedia(files: readonly File[]): Promise<{ items: DetectedMedia[]; summary: SelectionSummary }> {
+  const heads = await Promise.all(files.map(readHead))
+  const tails = await Promise.all(heads.map((head, index) => (
+    detectVideoContainer(head) === 'unknown' ? undefined : readTail(files[index])
+  )))
+  const classified = classifySelection(heads.map((head, index) => ({
+    head,
+    tail: tails[index],
+    size: files[index].size,
+    mime: files[index].type,
+  })))
+  const items = classified.map((item, index) => ({
+    ...item,
+    file: files[index],
+    pairedVideo: item.pairedVideoIndex === undefined ? undefined : files[item.pairedVideoIndex],
+  }))
+  return { items, summary: summarizeSelection(classified) }
 }

@@ -32,7 +32,8 @@ test('unapproved media stays private and is only served through the guarded rout
   assert.match(storage, /ACL: 'private'/, 'objects must be uploaded as private')
   const delivery = read('lib/live-photo-delivery.ts')
   assert.match(delivery, /canViewLivePhotoAsset\(/, 'delivery must check ownership and review state')
-  assert.match(delivery, /Cache-Control': isPublic \? 'public/, 'unapproved media must not be publicly cached')
+  assert.match(delivery, /const cacheControl = isPublic/, 'cache policy must branch on visibility')
+  assert.match(delivery, /'private, no-store, max-age=0'/, 'unapproved media must not be publicly cached')
 })
 
 test('admin configuration exposes the reversible live photo switches with audit', () => {
@@ -92,4 +93,38 @@ test('guarded delivery refuses with a non-cacheable response', async () => {
   const delivery = read('lib/live-photo-delivery.ts')
   assert.match(delivery, /const refusal = /, 'every refusal path must share the no-store wrapper')
   assert.doesNotMatch(delivery, /NextResponse\.json\(\{ code: '[A-Z_]+', message: '[^']*' \}, \{ status: \d+ \}\)/, 'no refusal may bypass the wrapper')
+})
+
+test('the shared image picker detects native live photos instead of a manual entry', () => {
+  const uploader = read('components/ContentImageUploader.tsx')
+  // The product decision changed: users pick a photo once, never a cover + clip.
+  assert.doesNotMatch(uploader, /添加实况照片/, 'the separate live photo entry must be gone')
+  assert.doesNotMatch(uploader, /配对动态视频/, 'no manual pairing field may remain')
+  assert.doesNotMatch(uploader, /layer-modal/, 'the misplaced dialog must not come back')
+
+  const addFiles = uploader.slice(uploader.indexOf('async function addFiles'))
+  const detectAt = addFiles.indexOf('await detectSelectedMedia(')
+  const uploadAt = addFiles.indexOf('await uploadItem(item)')
+  assert.ok(detectAt >= 0, 'classification must run inside the shared picker')
+  assert.ok(uploadAt > detectAt, 'classification must finish before any upload/compression starts')
+  assert.match(uploader, /kind === 'live-photo'/, 'a live photo is one media slot, not two')
+})
+
+test('native upload and pairing APIs stay available for the apps', () => {
+  const route = read('app/api/media/live-photo/route.ts')
+  assert.match(route, /manual/, 'the server keeps accepting a paired cover + video from native clients')
+  const browser = read('lib/live-photo-browser.ts')
+  assert.match(browser, /uploadLivePhotoMedia/, 'the shared uploader stays reusable by the apps')
+  assert.match(browser, /detectSelectedMedia/, 'detection is shared, not inlined in a component')
+})
+
+test('a taken-down live photo cannot stay cached forever', () => {
+  const delivery = read('lib/live-photo-delivery.ts')
+  // `immutable` made a takedown unreachable for anyone who already opened the
+  // media; the public branch must stay revalidatable, the private one uncached.
+  assert.doesNotMatch(delivery, /immutable/, 'public media must remain revalidatable after a takedown')
+  assert.match(delivery, /max-age=86400/, 'a browser must re-check within a day')
+  assert.match(delivery, /if-none-match/i, 'revalidation must be answerable with a cheap 304')
+  assert.match(delivery, /private, no-store, max-age=0/)
+  assert.match(delivery, /asset\.PostMedia\.some/, 'the public flag comes from the access-checked relation')
 })
