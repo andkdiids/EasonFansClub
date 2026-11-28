@@ -663,7 +663,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
                   type="button"
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={() => convertLiveToStatic(url)}
-                  className="absolute left-1 top-1 rounded-full bg-amber-700/90 px-2 py-1 text-xs text-white"
+                  className="absolute bottom-8 left-1 rounded-full bg-amber-700/90 px-2 py-1 text-xs text-white"
                 >关闭实况</button>
               ) : null}
               {local ? <button
@@ -696,7 +696,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
               <button type="button" onClick={closeLivePicker} className="rounded px-2 py-1 text-sm text-slate-600">关闭</button>
             </div>
             <p className="text-xs leading-relaxed text-slate-600">
-              分别选择静态封面与配对视频；也可只选择一张包含动态资源的照片。视频最长 5 秒，上传后自动处理，超限会明确提示。
+              分别选择静态封面与配对视频；也可只选择一张包含动态资源的照片。视频时长与体积按站点设置（默认 5 秒），上传后自动处理，超限会明确提示。
             </p>
             <label className="block text-sm font-bold text-slate-700">
               静态封面 / 动态照片

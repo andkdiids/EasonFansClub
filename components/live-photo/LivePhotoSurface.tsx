@@ -21,7 +21,6 @@ export function useLivePhotoPlayback(videoUrl?: string | null) {
     tokenRef.current += 1
     activePlayback = { token: tokenRef.current, stop }
     setPlaying(true)
-    setMuted(true)
   }, [stop, videoUrl])
 
   const toggle = useCallback(() => {
@@ -118,6 +117,8 @@ export function LivePhotoSurface({
   const timerRef = useRef<number | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
   const longPressRef = useRef(false)
+  // Click fires after pointerup, so a finished long press must swallow it once.
+  const suppressClickRef = useRef(false)
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -160,6 +161,7 @@ export function LivePhotoSurface({
     if (longPressRef.current) {
       playback.stop()
       longPressRef.current = false
+      suppressClickRef.current = true
     }
   }
 
@@ -170,7 +172,9 @@ export function LivePhotoSurface({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onContextMenu={(event) => { if (videoUrl) event.preventDefault() }}
+      // Only the long-press playback gesture suppresses the native menu; a plain
+      // long press on an ordinary image keeps the browser menu.
+      onContextMenu={(event) => { if (longPressRef.current) event.preventDefault() }}
     >
       <button
         type="button"
@@ -178,7 +182,8 @@ export function LivePhotoSurface({
         aria-label={alt}
         onClick={(event) => {
           event.stopPropagation()
-          if (!longPressRef.current) onOpen?.()
+          if (suppressClickRef.current) { suppressClickRef.current = false; return }
+          onOpen?.()
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
