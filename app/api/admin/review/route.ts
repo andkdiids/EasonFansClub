@@ -204,7 +204,13 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
           User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
           ReviewedBy: { select: { id: true, uid: true, nickname: true } },
           Board: { select: { name: true, slug: true } },
-          PostMedia: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
+          PostMedia: {
+            orderBy: { sortOrder: 'asc' },
+            select: {
+              id: true, url: true, thumbnail: true, livePhotoId: true,
+              LivePhoto: { select: { durationMs: true, hasAudio: true, status: true } },
+            },
+          },
         },
       }),
       prisma.board.findMany({
@@ -229,12 +235,20 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
       media: row.PostMedia.flatMap((media, index) => {
         const src = publicImageUrl(media.url)
         if (!src) return []
+        const liveId = livePhotoIdFromUrl(media.url)
         return [{
           id: media.id,
           src,
           previewSrc: publicImageUrl(media.thumbnail) || undefined,
           alt: `帖子图片 ${index + 1}`,
-          ...(livePhotoIdFromUrl(media.url) ? { livePhoto: { id: livePhotoIdFromUrl(media.url)!, videoUrl: `/api/media/live-photo/${livePhotoIdFromUrl(media.url)}/video` } } : {}),
+          ...(liveId ? {
+            livePhoto: {
+              id: liveId,
+              videoUrl: `/api/media/live-photo/${liveId}/video`,
+              durationMs: media.LivePhoto?.durationMs ?? null,
+              hasAudio: media.LivePhoto?.hasAudio ?? false,
+            },
+          } : {}),
         }]
       }),
       postDetails: {
