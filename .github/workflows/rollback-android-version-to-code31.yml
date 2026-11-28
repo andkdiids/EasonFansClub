@@ -73,9 +73,7 @@ jobs:
             --output "${rollback_apk}" "https://media.ecfc.fans/media/${CODE31_ROLLBACK_OBJECT_KEY}"
           [[ "$(stat -c '%s' "${rollback_apk}")" == "${code31_size}" ]] || { echo 'CODE31_ROLLBACK_SOURCE_SIZE_MISMATCH'; exit 1; }
           [[ "$(sha256sum "${rollback_apk}" | awk '{print toupper($1)}')" == "${code31_sha}" ]] || { echo 'CODE31_ROLLBACK_SOURCE_SHA256_MISMATCH'; exit 1; }
-          "${apksigner}" verify "${rollback_apk}" >/dev/null || { echo 'CODE31_ROLLBACK_SOURCE_SIGNATURE_INVALID'; exit 1; }
-          signer="$("${apksigner}" verify --print-certs "${rollback_apk}" | awk -F': ' '/certificate SHA-256 digest/ {gsub(/:/, "", $2); print toupper($2); exit}')"
-          [[ "${signer}" == '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B' ]] || { echo 'CODE31_ROLLBACK_SOURCE_SIGNER_MISMATCH'; exit 1; }
+          node scripts/verify-android-apk-signature.mjs "${apksigner}" "${rollback_apk}" '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
           badging="$("${aapt}" dump badging "${rollback_apk}" | head -n 3)"
           [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='31' versionName='1.0.0-beta.21'"* ]] || { echo 'CODE31_ROLLBACK_SOURCE_PACKAGE_VERSION_MISMATCH'; exit 1; }
           [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo 'CODE31_ROLLBACK_SOURCE_SDK_METADATA_MISMATCH'; exit 1; }
