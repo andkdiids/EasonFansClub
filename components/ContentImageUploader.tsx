@@ -305,6 +305,8 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     const controller = new AbortController()
     uploadControllersRef.current.set(item.id, controller)
     try {
+      // Plain images keep the existing form.set('file', file) multipart contract;
+      // only detected live photos take the separate media route.
       const url = runItem.kind === 'live-photo'
         ? await submitLivePhotoAsset(runItem, controller)
         : (await uploadContentImage(item.file, (phase) => {
@@ -429,17 +431,20 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
 
     const limited = accepted.slice(0, freshRemaining)
     const truncated = accepted.length > limited.length
-    const newItems = limited.map(({ item }): PendingUpload => ({
-      id: createUploadId(),
-      file: item.file,
-      // Local preview is created before any compression/network work starts.
-      previewUrl: URL.createObjectURL(item.file),
-      phase: 'queued',
-      retryCount: 0,
-      kind: item.kind === 'live-photo' ? 'live-photo' : 'image',
-      ...(item.pairing ? { pairing: item.pairing } : {}),
-      ...(item.pairedVideo ? { pairedVideo: item.pairedVideo } : {}),
-    }))
+    const newItems = limited.map(({ item }): PendingUpload => {
+      const file = item.file
+      return {
+        id: createUploadId(),
+        file,
+        // Local preview is created before any compression/network work starts.
+        previewUrl: URL.createObjectURL(file),
+        phase: 'queued',
+        retryCount: 0,
+        kind: item.kind === 'live-photo' ? 'live-photo' : 'image',
+        ...(item.pairing ? { pairing: item.pairing } : {}),
+        ...(item.pairedVideo ? { pairedVideo: item.pairedVideo } : {}),
+      }
+    })
     const nextPending = [...pendingUploadsRef.current, ...newItems]
     pendingUploadsRef.current = nextPending
     setPendingUploads(nextPending)
@@ -455,10 +460,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     })()
   }
 
-  useImperativeHandle(ref, () => ({
-    addFiles: (files: File[]) => void addFiles(files),
-    getUploadState,
-  }))
+  useImperativeHandle(ref, () => ({ addFiles, getUploadState }))
 
   function rememberScrollAnchor() {
     if (typeof window === 'undefined') return
