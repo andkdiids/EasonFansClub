@@ -1,0 +1,22 @@
+{
+  "versionName": "1.0.0-beta.31",
+  "versionCode": 44,
+  "mobileCommit": "d55cdcc0066d948cdbfdaca0f22d56667aeddf7a",
+  "sha256": "651AA9A127D2A496CA520D1D56E09157CC265347EBADF2082B97E833C8156E44",
+  "size": 185219330,
+  "sourceFile": "ECFC-1.0.0-beta.31-release-beta31-d55cdcc-run46156981424.apk",
+  "releaseNotes": [
+    "原生帖子审核支持滑动卡片与按钮操作",
+    "多图待审帖子可浏览原图并展开全文",
+    "审核冲突会重新读取状态，并防止重复提交",
+    "修复帖子一级评论和楼中楼的图片显示",
+    "修复表情包并支持评论多图大图浏览",
+    "Beta.31 内测版本"
+  ],
+  "rollback": {
+    "versionCode": 43,
+    "objectKey": "android/releases/ECFC-1.0.0-beta.30-internal-code43-21652c2c4cded3ed76a37bee68eedf64bcdeb405-run46125563773-attempt1.apk",
+    "sha256": "5200D84FCFA5F1A9FCB1FCFBD656C0670A74E8D39F83EE1180DDF872240D7168",
+    "size": 185202946
+  }
+}
