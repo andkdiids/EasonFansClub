@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { LivePhotoAsset, Prisma } from '@prisma/client'
-import { getLivePhotoConfig, type LivePhotoConfig } from '@/lib/live-photo-config'
+import type { LivePhotoConfig } from '@/lib/live-photo-config'
+import { getLivePhotoConfig } from '@/lib/live-photo-config-store'
 import { isLivePhotoMarker, livePhotoIdFromMarker } from '@/lib/live-photo-markers'
 import { probeLivePhotoUpload, type LivePhotoProbeResult } from '@/lib/live-photo-probe'
 import { prisma } from '@/lib/prisma'
@@ -89,7 +90,7 @@ export async function createLivePhotoAsset(params: {
   if (!probe.ok) {
     throw new LivePhotoServiceError(probe.code || 'INVALID_REQUEST', probe.message || '媒体文件校验失败')
   }
-  const videoBytes = probe.embeddedVideo ?? params.video
+  const videoBytes = probe.embeddedVideo ? Buffer.from(probe.embeddedVideo) : params.video
   if (!videoBytes) throw new LivePhotoServiceError('EMPTY_FILE', '配对视频不能为空')
 
   const id = randomUUID().replace(/-/g, '')
@@ -178,7 +179,7 @@ export async function canViewLivePhotoAsset(assetId: string, userId: string | nu
 export async function isLivePhotoPublic(assetId: string) {
   const count = await prisma.postMedia.count({
     where: {
-      livePhotoId: assetId,
+      url: { contains: `/api/media/live-photo/${assetId}/` },
       Post: { isDeleted: false, moderationStatus: 'APPROVED', publicationStatus: 'PUBLISHED' },
     },
   })
@@ -192,7 +193,9 @@ async function draftReferencesAsset(assetId: string, ownerId: string) {
 
 export async function deleteLivePhotoAsset(assetId: string, userId: string, isAdmin = false) {
   const asset = await getOwnedAsset(assetId, userId, isAdmin)
-  const references = await prisma.postMedia.count({ where: { livePhotoId: assetId, Post: { isDeleted: false } } })
+  const references = await prisma.postMedia.count({
+    where: { url: { contains: `/api/media/live-photo/${assetId}/` }, Post: { isDeleted: false } },
+  })
   if (references || await draftReferencesAsset(assetId, asset.ownerId)) {
     throw new LivePhotoServiceError('STILL_REFERENCED', '媒体已被帖子或草稿引用，不能删除', 409)
   }

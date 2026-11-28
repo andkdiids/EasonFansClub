@@ -20,13 +20,13 @@ test('审核中心单图缩略图使用站内 ImageViewer 打开大图', () => {
 test('帖子审核只保留顶部正方形缩略图，正文摘要下不再重复渲染媒体', () => {
   assert.equal((reviewCenter.match(/<ImageViewer/g) || []).length, 1)
   assert.match(reviewCenter, /const primaryMedia = mediaItems\[0\]/)
-  assert.match(reviewCenter, /gallery=\{mediaItems\}/)
-  assert.doesNotMatch(reviewCenter, /mediaItems\.map\(/)
+  assert.match(reviewCenter, /gallery=\{galleryItems\}/)
+  assert.doesNotMatch(reviewCenter, /galleryItems\.map\(/)
   assert.doesNotMatch(reviewCenter, /h-28 w-40 rounded-xl object-cover/)
 })
 
 test('帖子顶部缩略图打开多图画廊并从第一张开始预览', () => {
-  assert.match(reviewCenter, /gallery=\{mediaItems\}/)
+  assert.match(reviewCenter, /gallery=\{galleryItems\}/)
   assert.doesNotMatch(reviewCenter, /initialIndex=\{index\}/)
   assert.match(viewer, /const nextIndex = clampIndex\(initialIndex, viewerItems\.length\)/)
   assert.match(viewer, /setCurrentIndex\(nextIndex\)/)
@@ -93,7 +93,7 @@ test('审核卡片顶部缩略图和预览画廊共用审核对象媒体数据',
   assert.match(reviewCenter, /function ReviewCard/)
   assert.match(reviewCenter, /item\.summary/)
   assert.match(reviewCenter, /const mediaItems = \(item\.media \|\| \[\]\)\.filter/)
-  assert.match(reviewCenter, /gallery=\{mediaItems\}/)
+  assert.match(reviewCenter, /gallery=\{galleryItems\}/)
 })
 
 test('所有当前审核类型的内容封面都接入统一审核图片媒体数据', () => {
@@ -111,7 +111,7 @@ test('统一审核中心仍提供通过与拒绝操作，帖子标记不在旧�
 })
 
 test('只读取图片媒体并复用统一公开 URL 与管理员权限校验', () => {
-  assert.match(reviewCenterRoute, /PostMedia: \{ where: \{ type: 'IMAGE'/)
+  assert.match(reviewCenterRoute, /PostMedia: \{ orderBy: \{ sortOrder: 'asc' \}/)
   assert.match(reviewCenterRoute, /publicImageUrl\(media\.url\)/)
   assert.match(reviewCenterRoute, /hasAdminPermission/)
   assert.match(reviewSource, /type: 'POST',[\s\S]*permission: 'post_manage'/)

@@ -10,7 +10,7 @@ import { hasAdminPermission, isSuperAdmin, isPrivilegedPostAuthor } from '@/lib/
 import { deletePost } from '@/lib/post-deletion'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
-import { isLivePhotoMarker, livePhotoIdFromMarker } from '@/lib/live-photo-markers'
+import { isLivePhotoMarker, livePhotoIdFromMarker, livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 import { resolveLivePhotoMedia, cleanupAssetsForDeletedPost } from '@/lib/live-photo-service'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
@@ -135,9 +135,9 @@ const postDetailSelect = {
     },
   },
   PostMedia: {
-    where: { type: 'IMAGE' as const },
+    where: { type: { in: ['IMAGE', 'LIVE_PHOTO'] as ('IMAGE' | 'LIVE_PHOTO')[] } },
     orderBy: { sortOrder: 'asc' as const },
-    select: { id: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true },
+    select: { id: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true, type: true },
   },
 } satisfies Prisma.PostSelect
 
@@ -395,7 +395,7 @@ export async function GET(request: Request, { params }: Params) {
         url: publicImageUrl(media.url) || media.url,
         thumbnail: publicImageUrl(media.thumbnail),
         mediaType: media.type,
-        videoUrl: media.livePhotoId ? `/api/media/live-photo/${media.livePhotoId}/video` : null,
+        videoUrl: livePhotoIdFromUrl(media.url) ? `/api/media/live-photo/${livePhotoIdFromUrl(media.url)}/video` : null,
       })),
       replies: Reply.map(({ User: replyAuthor, ...reply }) => ({
         ...reply,

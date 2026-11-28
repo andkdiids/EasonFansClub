@@ -7,6 +7,7 @@ import { splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { publicImageUrl } from '@/lib/images'
+import { livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 import {
   parseForumDiscoveryLimit,
   parseForumDiscoveryMode,
@@ -166,7 +167,7 @@ function serializePost(row: DiscoveryRow) {
     width: contentImages[0] ? null : imageMedia?.width || null,
     height: contentImages[0] ? null : imageMedia?.height || null,
     mediaType: imageMedia?.type ?? 'IMAGE',
-    videoUrl: imageMedia?.livePhotoId ? `/api/media/live-photo/${imageMedia.livePhotoId}/video` : null,
+    videoUrl: livePhotoIdFromUrl(imageMedia?.url) ? `/api/media/live-photo/${livePhotoIdFromUrl(imageMedia?.url)}/video` : null,
   } : null
   const media = row.PostMedia.map((item) => ({
     id: item.id,
@@ -176,7 +177,7 @@ function serializePost(row: DiscoveryRow) {
     width: item.width,
     height: item.height,
     sortOrder: item.sortOrder,
-    videoUrl: item.livePhotoId ? `/api/media/live-photo/${item.livePhotoId}/video` : null,
+    videoUrl: livePhotoIdFromUrl(item.url) ? `/api/media/live-photo/${livePhotoIdFromUrl(item.url)}/video` : null,
   }))
   const sticker = row.sticker ? {
     url: publicImageUrl(row.sticker.url) || row.sticker.url,
@@ -276,7 +277,7 @@ const discoverySelect = {
   PostFavorite: { select: { id: true } },
   PostMedia: {
     orderBy: { sortOrder: 'asc' as const },
-    select: { id: true, type: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true, livePhotoId: true },
+    select: { id: true, type: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true },
   },
   sticker: { select: { url: true, type: true } },
   TopicActivity: { select: { id: true, type: true, title: true, startsAt: true, endsAt: true, participationRule: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true, coverUrl: true, status: true, pinToPlaza: true } },

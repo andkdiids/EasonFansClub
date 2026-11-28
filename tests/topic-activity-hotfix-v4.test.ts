@@ -344,6 +344,21 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     assert.deepEqual(comparableBlocks.get(name), approvedShunItems.get(name), `Shun V4.2 schema block retained: ${name}`)
     comparableBlocks.delete(name)
   }
+  // Live Photo Web additive footprint: one media table, one status enum, one
+  // media enum value and nullable PostMedia/User relations. The asset id is
+  // also encoded in the controlled URL so legacy databases can still read.
+  for (const name of ['LivePhotoAsset', 'LivePhotoAssetStatus']) {
+    assert.ok(newBlocks.has(name), `live photo schema block present: ${name}`)
+    assert.ok(comparableBlocks.delete(name), `live photo schema block registered: ${name}`)
+  }
+  comparableBlocks.set('MediaType', comparableBlocks.get('MediaType')!.filter((value) => value !== 'LIVE_PHOTO'))
+  assert.ok(newBlocks.get('MediaType')?.includes('LIVE_PHOTO'))
+  comparableBlocks.set('PostMedia', comparableBlocks.get('PostMedia')!.filter((field) =>
+    field !== 'livePhotoId String?'
+    && field !== 'LivePhoto LivePhotoAsset? @relation(fields: [livePhotoId], references: [id], onDelete: SetNull)'
+    && field !== '@@index([livePhotoId])'))
+  comparableBlocks.set('User', comparableBlocks.get('User')!.filter((field) =>
+    field !== 'LivePhotoAssets LivePhotoAsset[] @relation("LivePhotoAssetOwner")'))
   assert.deepEqual([...comparableBlocks], [...currentMainBlocks], 'all unapproved schema content remains unchanged')
   const pushMigration = read('prisma/migrations/20261126040000_add_mobile_push_tokens/migration.sql')
   assert.match(pushMigration, /CREATE TABLE `MobilePushToken`/)

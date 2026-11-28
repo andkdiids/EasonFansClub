@@ -35,7 +35,7 @@ function u32(value: number) {
 }
 
 function ftyp(brand: string) {
-  return box('ftyp', concat(Array.from(brand).map((char) => char.charCodeAt(0)), u32(0), u32(512)))
+  return box('ftyp', concat(new Uint8Array(Array.from(brand).map((char) => char.charCodeAt(0))), u32(0), u32(512)))
 }
 
 function mvhd(timescale: number, duration: number) {
