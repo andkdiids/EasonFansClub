@@ -785,7 +785,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git archive --format=zip --output="$RUNNER_TEMP/internal-beta-source.zip" "$GITHUB_SHA" scripts package.json pnpm-lock.yaml pnpm-workspace.yaml
+          git archive --format=zip --output="$RUNNER_TEMP/internal-beta-source.zip" "$GITHUB_SHA" scripts ':(exclude)scripts/database-migration/.generated' package.json pnpm-lock.yaml pnpm-workspace.yaml
           printf 'sha256=%s\n' "$(sha256sum "$RUNNER_TEMP/internal-beta-source.zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
