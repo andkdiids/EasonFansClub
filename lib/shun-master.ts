@@ -509,7 +509,7 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       if (requestedCodes && shunItemsFeatureEnabled()) {
         const persisted = (await tx.shunItemRoundEffect.findMany({
           where: { roundId: previous.id, code: { in: [...SHUN_ATTACK_CODES] } }, select: { code: true },
-        })).map((effect) => effect.code).sort((a, b) => SHUN_ATTACK_CODES.indexOf(a) - SHUN_ATTACK_CODES.indexOf(b))
+        })).map((effect) => effect.code as ShunAttackCode).sort((a, b) => SHUN_ATTACK_CODES.indexOf(a) - SHUN_ATTACK_CODES.indexOf(b))
         const canonical = [...requestedCodes].sort((a, b) => SHUN_ATTACK_CODES.indexOf(a) - SHUN_ATTACK_CODES.indexOf(b))
         if (persisted.length !== canonical.length || canonical.some((code, index) => persisted[index] !== code)) {
           throw new ShunError('REQUEST_CONFLICT', '同一请求使用了不同的道具组合，请重试。')
@@ -563,9 +563,9 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       ...(actor.email && actor.emailVerifiedAt ? [{ email: actor.email, emailVerifiedAt: { not: null } }] : []),
       ...(actor.phone && actor.phoneVerifiedAt ? [{ phone: actor.phone, phoneVerifiedAt: { not: null } }] : []),
     ]
-    const relatedAccounts = linked.length
+    const relatedAccounts = new Set(linked.length
       ? (await tx.user.findMany({ where: { OR: linked }, select: { id: true } })).map(({ id }) => id)
-      : []
+      : [])
     const targetExclusions = new Set([...excluded, ...relatedAccounts])
     // The population and its activity tiers were read before the transaction;
     // only the per-actor exclusions and the victim verification stay serialised.
@@ -582,7 +582,7 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '没有符合条件的顺取目标', source: 'WEB', operatorType: 'USER',
         metadata: { funded, capped: [...hitsByUser].filter(([, count]) => count >= config.victimCap).length,
-          blocked: blocks.length, linked: relatedAccounts.length, previouslyMatched: played.length } } })
+          blocked: blocks.length, linked: relatedAccounts.size, previouslyMatched: played.length } } })
       return null
     }
     // Friend-first pool: a subset of the very same eligible set, so balance,

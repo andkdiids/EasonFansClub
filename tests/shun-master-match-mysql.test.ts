@@ -331,8 +331,9 @@ test('player-facing surfaces never expose the match source', {
   // `optedOut` is a player-visible participation state, not a match-source detail.
   // `openHours` (V6) is the published daily window — its own copy needs it, and
   // it contains no match-source, probability or audience detail.
+  // V4.2.4 publishes the quota split itself, never how targets were matched.
   assert.deepEqual(Object.keys(status).sort(), ['attempts', 'balance', 'enabled', 'goldenMinutes', 'openHours', 'optedOut',
-    'received', 'remaining', 'serverNow', 'victimCap'])
+    'received', 'remaining', 'serverNow', 'targetFriendVictimCap', 'totalVictimCap', 'victimCap'])
   assert.deepEqual(Object.keys(status.openHours).sort(),
     ['closeTime', 'label', 'nextOpenAt', 'open', 'openHoursEnabled', 'openTime'])
   assert.equal(JSON.stringify(status).includes('friendChance'), false, '状态接口不得携带好友命中概率')
