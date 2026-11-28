@@ -31,6 +31,7 @@ on:
           - beta27
           - beta28
           - beta29
+          - beta30
       apk_object_key:
         description: Immutable versioned Android release object key created by the guarded COS staging workflow
         required: true
@@ -83,7 +84,7 @@ jobs:
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 || "${RELEASE_CANDIDATE}" == rc9 || "${RELEASE_CANDIDATE}" == rc10 || "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 || "${RELEASE_CANDIDATE}" == rc14 || "${RELEASE_CANDIDATE}" == beta22 || "${RELEASE_CANDIDATE}" == beta23 || "${RELEASE_CANDIDATE}" == beta24 || "${RELEASE_CANDIDATE}" == beta26 || "${RELEASE_CANDIDATE}" == beta27 || "${RELEASE_CANDIDATE}" == beta28 || "${RELEASE_CANDIDATE}" == beta29 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
+          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 || "${RELEASE_CANDIDATE}" == rc9 || "${RELEASE_CANDIDATE}" == rc10 || "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 || "${RELEASE_CANDIDATE}" == rc14 || "${RELEASE_CANDIDATE}" == beta22 || "${RELEASE_CANDIDATE}" == beta23 || "${RELEASE_CANDIDATE}" == beta24 || "${RELEASE_CANDIDATE}" == beta26 || "${RELEASE_CANDIDATE}" == beta27 || "${RELEASE_CANDIDATE}" == beta28 || "${RELEASE_CANDIDATE}" == beta29 || "${RELEASE_CANDIDATE}" == beta30 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
           if [[ "${RELEASE_CANDIDATE}" == beta29 ]]; then
             internal_commit="$(jq -r '.mobileCommit' scripts/android-internal-beta.json)"
             internal_sha="$(jq -r '.sha256' scripts/android-internal-beta.json)"
@@ -92,6 +93,14 @@ jobs:
             [[ "${EXPECTED_SHA256}" == "${internal_sha}" ]] || { echo 'BETA29_PIN_SHA256_MISMATCH'; exit 1; }
             [[ "${EXPECTED_SIZE}" == "${internal_size}" ]] || { echo 'BETA29_PIN_SIZE_MISMATCH'; exit 1; }
             key_regex="^android/releases/ECFC-1\.0\.0-beta\.29-internal-code42-${internal_commit}-run[0-9]+-attempt[1-9][0-9]*\.apk$"
+          elif [[ "${RELEASE_CANDIDATE}" == beta30 ]]; then
+            internal_commit="$(jq -r '.mobileCommit' scripts/android-internal-beta.json)"
+            internal_sha="$(jq -r '.sha256' scripts/android-internal-beta.json)"
+            internal_size="$(jq -r '.size' scripts/android-internal-beta.json)"
+            [[ "${internal_commit}" =~ ^[0-9a-f]{40}$ ]] || { echo 'BETA30_PIN_COMMIT_INVALID'; exit 1; }
+            [[ "${EXPECTED_SHA256}" == "${internal_sha}" ]] || { echo 'BETA30_PIN_SHA256_MISMATCH'; exit 1; }
+            [[ "${EXPECTED_SIZE}" == "${internal_size}" ]] || { echo 'BETA30_PIN_SIZE_MISMATCH'; exit 1; }
+            key_regex="^android/releases/ECFC-1\.0\.0-beta\.30-internal-code43-${internal_commit}-run[0-9]+-attempt[1-9][0-9]*\.apk$"
           elif [[ "${RELEASE_CANDIDATE}" == beta28 ]]; then
             internal_commit="$(jq -r '.mobileCommit' scripts/android-internal-beta.json)"
             internal_sha="$(jq -r '.sha256' scripts/android-internal-beta.json)"
@@ -157,6 +166,8 @@ jobs:
             [[ "${APK_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.26-internal-code39-${internal_commit}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'BETA26_OBJECT_KEY_MISMATCH'; exit 1; }
           elif [[ "${RELEASE_CANDIDATE}" == beta29 ]]; then
             [[ "${APK_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.29-internal-code42-${internal_commit}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'BETA29_OBJECT_KEY_MISMATCH'; exit 1; }
+          elif [[ "${RELEASE_CANDIDATE}" == beta30 ]]; then
+            [[ "${APK_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.30-internal-code43-${internal_commit}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'BETA30_OBJECT_KEY_MISMATCH'; exit 1; }
           elif [[ "${RELEASE_CANDIDATE}" == beta28 ]]; then
             [[ "${APK_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.28-internal-code41-${internal_commit}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'BETA28_OBJECT_KEY_MISMATCH'; exit 1; }
           elif [[ "${RELEASE_CANDIDATE}" == beta27 ]]; then
@@ -805,6 +816,64 @@ jobs:
           printf 'CODE41_ROLLBACK_OBJECT_KEY=%s\n' "${code41_key}" >> "${GITHUB_OUTPUT}"
           echo 'CODE41_ROLLBACK_SOURCE_VERIFIED=YES'
 
+      - name: Validate BETA30 signer and the immutable code42 rollback source
+        if: inputs.release_candidate == 'beta30' && inputs.verify_only != true
+        id: beta30-baseline
+        env:
+          EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
+          EXPECTED_SIZE: ${{ inputs.apk_size }}
+        run: |
+          set -euo pipefail
+          internal_sha="$(jq -r '.sha256' scripts/android-internal-beta.json)"
+          internal_size="$(jq -r '.size' scripts/android-internal-beta.json)"
+          [[ "${EXPECTED_SHA256}" == "${internal_sha}" ]] || { echo 'BETA30_PIN_SHA256_MISMATCH'; exit 1; }
+          [[ "${EXPECTED_SIZE}" == "${internal_size}" ]] || { echo 'BETA30_PIN_SIZE_MISMATCH'; exit 1; }
+          code42_key="$(jq -r '.rollback.objectKey' scripts/android-internal-beta.json)"
+          code42_sha="$(jq -r '.rollback.sha256' scripts/android-internal-beta.json)"
+          code42_size="$(jq -r '.rollback.size' scripts/android-internal-beta.json)"
+          [[ "${code42_key}" =~ ^android/releases/ECFC-1\.0\.0-beta\.29-internal-code42-[0-9a-f]{40}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'CODE42_ROLLBACK_SOURCE_INVALID'; exit 1; }
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          [[ -n "${sdk_root}" && -d "${sdk_root}/build-tools" ]] || { echo 'ANDROID_BUILD_TOOLS_NOT_AVAILABLE'; exit 1; }
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" && -x "${aapt}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+          verify_apk() {
+            local apk_path="$1" expected_code="$2" expected_sha="$3" expected_size="$4" label="$5" expected_name="$6"
+            [[ -f "${apk_path}" ]] || { echo "${label}_APK_MISSING"; exit 1; }
+            [[ "$(sha256sum "${apk_path}" | awk '{print toupper($1)}')" == "${expected_sha}" ]] || { echo "${label}_SHA256_MISMATCH"; exit 1; }
+            [[ "$(stat -c '%s' "${apk_path}")" == "${expected_size}" ]] || { echo "${label}_SIZE_MISMATCH"; exit 1; }
+            node scripts/verify-android-apk-signature.mjs "${apksigner}" "${apk_path}" '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+            badging="$("${aapt}" dump badging "${apk_path}")"
+            [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='${expected_code}' versionName='${expected_name}'"* ]] || { echo "${label}_PACKAGE_VERSION_MISMATCH"; exit 1; }
+            [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo "${label}_SDK_METADATA_MISMATCH"; exit 1; }
+            for abi in arm64-v8a armeabi-v7a; do [[ "${badging}" == *"'${abi}'"* ]] || { echo "${label}_ABI_MISSING"; exit 1; }; done
+          }
+          beta30_apk="${RUNNER_TEMP}/ecfc-beta21-beta30.apk"
+          verify_apk "${beta30_apk}" 43 "${EXPECTED_SHA256}" "${EXPECTED_SIZE}" BETA30 1.0.0-beta.30
+          api_json="${RUNNER_TEMP}/ecfc-version-api-before.json"
+          curl --fail --silent --show-error --location --max-time 30 \
+            'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          if ! jq -e --arg sha "${code42_sha}" --argjson size "${code42_size}" '
+            .platform == "android" and .versionName == "1.0.0-beta.29" and .versionCode == 42
+            and .minimumVersionCode == 19 and .forceUpdate == false
+            and (.apkSha256 | ascii_upcase) == $sha and .size == $size
+            and .downloadUrl == "https://ecfc.fans/api/app/download/android"
+          ' "${api_json}" >/dev/null; then
+            echo 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE42'
+            exit 1
+          fi
+          code42_source="${RUNNER_TEMP}/ecfc-beta29-code42-rollback-source.apk"
+          source_url="$(jq -r '.downloadUrl' "${api_json}")"
+          expected_rollback_url="https://media.ecfc.fans/media/${code42_key}"
+          actual_source_url="$(curl --fail --silent --show-error --location --max-time 2400 \
+            --write-out '%{url_effective}' --output "${code42_source}" "${source_url}")"
+          [[ "${actual_source_url}" == "${expected_rollback_url}" ]] || { echo 'CODE42_ROLLBACK_SOURCE_URL_MISMATCH'; exit 1; }
+          verify_apk "${code42_source}" 42 "${code42_sha}" "${code42_size}" CODE42_ROLLBACK_SOURCE 1.0.0-beta.29
+          [[ "$(realpath "${code42_source}")" != "$(realpath "${beta30_apk}")" ]] || { echo 'ROLLBACK_SOURCE_ALIASES_CANDIDATE'; exit 1; }
+          cp "${api_json}" "${RUNNER_TEMP}/android-version-api-before.json"
+          printf 'CODE42_ROLLBACK_OBJECT_KEY=%s\n' "${code42_key}" >> "${GITHUB_OUTPUT}"
+          echo 'CODE42_ROLLBACK_SOURCE_VERIFIED=YES'
+
       - name: Validate BETA28 signer and the immutable code40 rollback source
         if: inputs.release_candidate == 'beta28' && inputs.verify_only != true
         id: beta28-baseline
@@ -917,6 +986,15 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Preserve Beta30 release baseline snapshot
+        if: inputs.release_candidate == 'beta30' && inputs.verify_only != true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta30-release-baseline
+          path: ${{ runner.temp }}/android-version-api-before.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Preserve Beta28 release baseline snapshot
         if: inputs.release_candidate == 'beta28' && inputs.verify_only != true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -1022,6 +1100,7 @@ jobs:
           CODE39_ROLLBACK_OBJECT_KEY: ${{ steps.beta27-baseline.outputs.CODE39_ROLLBACK_OBJECT_KEY }}
           CODE40_ROLLBACK_OBJECT_KEY: ${{ steps.beta28-baseline.outputs.CODE40_ROLLBACK_OBJECT_KEY }}
           CODE41_ROLLBACK_OBJECT_KEY: ${{ steps.beta29-baseline.outputs.CODE41_ROLLBACK_OBJECT_KEY }}
+          CODE42_ROLLBACK_OBJECT_KEY: ${{ steps.beta30-baseline.outputs.CODE42_ROLLBACK_OBJECT_KEY }}
         run: |
           set -euo pipefail
           version_name=1.0.0-beta.21
@@ -1059,6 +1138,13 @@ jobs:
               notes="$(jq -c .releaseNotes scripts/android-internal-beta.json)"
               code41_key="$(jq -r '.rollback.objectKey' scripts/android-internal-beta.json)"
               [[ "${CODE41_ROLLBACK_OBJECT_KEY}" == "${code41_key}" ]] || { echo CODE41_ROLLBACK_SOURCE_NOT_VERIFIED; exit 1; }
+              ;;
+            beta30)
+              version_name=1.0.0-beta.30
+              version_code=43
+              notes="$(jq -c .releaseNotes scripts/android-internal-beta.json)"
+              code42_key="$(jq -r '.rollback.objectKey' scripts/android-internal-beta.json)"
+              [[ "${CODE42_ROLLBACK_OBJECT_KEY}" == "${code42_key}" ]] || { echo CODE42_ROLLBACK_SOURCE_NOT_VERIFIED; exit 1; }
               ;;
             beta28)
               version_name=1.0.0-beta.28
@@ -1134,7 +1220,7 @@ jobs:
           esac
           expected_current_b64=''
           expected_current_b64=''
-          if [[ "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 || "${RELEASE_CANDIDATE}" == rc14 || "${RELEASE_CANDIDATE}" == beta22 || "${RELEASE_CANDIDATE}" == beta23 || "${RELEASE_CANDIDATE}" == beta24 || "${RELEASE_CANDIDATE}" == beta26 || "${RELEASE_CANDIDATE}" == beta27 || "${RELEASE_CANDIDATE}" == beta28 || "${RELEASE_CANDIDATE}" == beta29 ]]; then
+          if [[ "${RELEASE_CANDIDATE}" == rc11 || "${RELEASE_CANDIDATE}" == rc12 || "${RELEASE_CANDIDATE}" == rc13 || "${RELEASE_CANDIDATE}" == rc14 || "${RELEASE_CANDIDATE}" == beta22 || "${RELEASE_CANDIDATE}" == beta23 || "${RELEASE_CANDIDATE}" == beta24 || "${RELEASE_CANDIDATE}" == beta26 || "${RELEASE_CANDIDATE}" == beta27 || "${RELEASE_CANDIDATE}" == beta28 || "${RELEASE_CANDIDATE}" == beta29 || "${RELEASE_CANDIDATE}" == beta30 ]]; then
             baseline_file="${RUNNER_TEMP}/android-version-api-before.json"
             [[ -s "${baseline_file}" ]] || { echo 'VERSION_API_BASELINE_MISSING'; exit 1; }
             current_file="${RUNNER_TEMP}/android-version-api-final-gate.json"
@@ -1199,8 +1285,14 @@ jobs:
             [[ "${beta29_pin_b64}" =~ ^[A-Za-z0-9+/]+=*$ ]] || { echo BETA29_PIN_ENCODING_INVALID; exit 1; }
           fi
           remote_host="${SERVER_USER}@${SERVER_HOST}"
-          printf -v remote_command 'flock -n %q env APP_DIR=%q EXPECTED_PRODUCTION_SHA=%q ANDROID_RELEASE_METADATA_B64=%q ANDROID_EXPECTED_CURRENT_B64=%q ANDROID_RC13_ARTIFACT_PIN_B64=%q ANDROID_RC14_ARTIFACT_PIN_B64=%q ANDROID_BETA22_ARTIFACT_PIN_B64=%q ANDROID_BETA23_ARTIFACT_PIN_B64=%q ANDROID_BETA24_ARTIFACT_PIN_B64=%q ANDROID_BETA26_ARTIFACT_PIN_B64=%q ANDROID_BETA27_ARTIFACT_PIN_B64=%q ANDROID_BETA28_ARTIFACT_PIN_B64=%q ANDROID_BETA29_ARTIFACT_PIN_B64=%q node --input-type=module -' \
-            '/home/apps/easonfansclub/.deploy.lock' '/home/apps/easonfansclub' "${EXPECTED_PRODUCTION_SHA}" "${config_b64}" "${expected_current_b64}" "${rc13_pin_b64}" "${rc14_pin_b64}" "${beta22_pin_b64}" "${beta23_pin_b64}" "${beta24_pin_b64}" "${beta26_pin_b64}" "${beta27_pin_b64}" "${beta28_pin_b64}" "${beta29_pin_b64}"
+          beta30_pin_b64=''
+          if [[ "${RELEASE_CANDIDATE}" == beta30 ]]; then
+            beta30_pin_b64="$(jq -c . scripts/android-internal-beta.json | base64 -w0)"
+            [[ "${beta30_pin_b64}" =~ ^[A-Za-z0-9+/]+=*$ ]] || { echo BETA30_PIN_ENCODING_INVALID; exit 1; }
+          fi
+          remote_host="${SERVER_USER}@${SERVER_HOST}"
+          printf -v remote_command 'flock -n %q env APP_DIR=%q EXPECTED_PRODUCTION_SHA=%q ANDROID_RELEASE_METADATA_B64=%q ANDROID_EXPECTED_CURRENT_B64=%q ANDROID_RC13_ARTIFACT_PIN_B64=%q ANDROID_RC14_ARTIFACT_PIN_B64=%q ANDROID_BETA22_ARTIFACT_PIN_B64=%q ANDROID_BETA23_ARTIFACT_PIN_B64=%q ANDROID_BETA24_ARTIFACT_PIN_B64=%q ANDROID_BETA26_ARTIFACT_PIN_B64=%q ANDROID_BETA27_ARTIFACT_PIN_B64=%q ANDROID_BETA28_ARTIFACT_PIN_B64=%q ANDROID_BETA29_ARTIFACT_PIN_B64=%q ANDROID_BETA30_ARTIFACT_PIN_B64=%q node --input-type=module -' \
+            '/home/apps/easonfansclub/.deploy.lock' '/home/apps/easonfansclub' "${EXPECTED_PRODUCTION_SHA}" "${config_b64}" "${expected_current_b64}" "${rc13_pin_b64}" "${rc14_pin_b64}" "${beta22_pin_b64}" "${beta23_pin_b64}" "${beta24_pin_b64}" "${beta26_pin_b64}" "${beta27_pin_b64}" "${beta28_pin_b64}" "${beta29_pin_b64}" "${beta30_pin_b64}"
           ssh_options=(
             -T -p "${SERVER_PORT}" -i "${RUNNER_TEMP}/easonfansclub_deploy_key"
             -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey
@@ -1251,6 +1343,7 @@ jobs:
             beta27) expected_version_code=40 ;;
             beta28) expected_version_code=41 ;;
             beta29) expected_version_code=42 ;;
+            beta30) expected_version_code=43 ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
           remote_host="${SERVER_USER}@${SERVER_HOST}"
@@ -1315,7 +1408,7 @@ jobs:
               const version = await fetch('http://127.0.0.1:3000/api/app/version?platform=android', { signal: AbortSignal.timeout(3000) });
               const versionBody = await version.json();
               if (health.ok && healthBody.release === expectedSha && version.ok
-                && versionBody.versionName === (expectedCode === '42' ? '1.0.0-beta.29' : expectedCode === '41' ? '1.0.0-beta.28' : expectedCode === '40' ? '1.0.0-beta.27' : expectedCode === '39' ? '1.0.0-beta.26' : expectedCode === '37' ? '1.0.0-beta.24' : expectedCode === '36' ? '1.0.0-beta.23' : expectedCode === '35' ? '1.0.0-beta.22' : '1.0.0-beta.21')
+                && versionBody.versionName === (expectedCode === '43' ? '1.0.0-beta.30' : expectedCode === '42' ? '1.0.0-beta.29' : expectedCode === '41' ? '1.0.0-beta.28' : expectedCode === '40' ? '1.0.0-beta.27' : expectedCode === '39' ? '1.0.0-beta.26' : expectedCode === '37' ? '1.0.0-beta.24' : expectedCode === '36' ? '1.0.0-beta.23' : expectedCode === '35' ? '1.0.0-beta.22' : '1.0.0-beta.21')
                 && String(versionBody.versionCode) === expectedCode
                 && Number(versionBody.minimumVersionCode) === 19
                 && versionBody.forceUpdate === false
@@ -1605,6 +1698,51 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-beta29-release-after
+          path: ${{ runner.temp }}/android-version-api-after-release.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Verify the live BETA30 Version API and complete download
+        if: inputs.release_candidate == 'beta30'
+        env:
+          APK_OBJECT_KEY: ${{ inputs.apk_object_key }}
+          EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
+          EXPECTED_SIZE: ${{ inputs.apk_size }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          api_json="${RUNNER_TEMP}/android-version-api-after-release.json"
+          curl --fail --silent --show-error --max-time 30 'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          jq -e --arg sha "${EXPECTED_SHA256}" --argjson size "${EXPECTED_SIZE}" --slurpfile pin scripts/android-internal-beta.json '
+            .platform == "android" and .versionName == "1.0.0-beta.30" and .versionCode == 43
+            and .minimumVersionCode == 19 and .forceUpdate == false
+            and (.apkSha256 | ascii_upcase) == $sha and .size == $size
+            and .downloadUrl == "https://ecfc.fans/api/app/download/android"
+            and .releaseNotes == $pin[0].releaseNotes and (.publishedAt | type == "string")
+          ' "${api_json}" >/dev/null || { echo 'PRODUCTION_VERSION_API_BETA30_MISMATCH'; exit 1; }
+          live="${RUNNER_TEMP}/ecfc-beta30-live.apk"
+          actual_url="$(curl --fail --silent --show-error --location --max-time 2400 --write-out '%{url_effective}' --output "${live}" 'https://ecfc.fans/api/app/download/android')"
+          [[ "${actual_url}" == "https://media.ecfc.fans/media/${APK_OBJECT_KEY}" ]] || { echo 'LIVE_BETA30_OBJECT_MISMATCH'; exit 1; }
+          [[ "$(stat -c '%s' "${live}")" == "${EXPECTED_SIZE}" ]] || { echo 'LIVE_BETA30_SIZE_MISMATCH'; exit 1; }
+          [[ "$(sha256sum "${live}" | awk '{print toupper($1)}')" == "${EXPECTED_SHA256}" ]] || { echo 'LIVE_BETA30_SHA256_MISMATCH'; exit 1; }
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" && -x "${aapt}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+          node scripts/verify-android-apk-signature.mjs "${apksigner}" "${live}" '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          badging="$("${aapt}" dump badging "${live}")"
+          [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='43' versionName='1.0.0-beta.30'"* ]] || { echo 'LIVE_BETA30_PACKAGE_VERSION_MISMATCH'; exit 1; }
+          [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo 'LIVE_BETA30_SDK_MISMATCH'; exit 1; }
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do [[ "${badging}" == *"'${abi}'"* ]] || { echo 'LIVE_BETA30_ABI_MISSING'; exit 1; }; done
+          health="$(curl --fail --silent --show-error --max-time 30 'https://ecfc.fans/api/health/live')"
+          [[ "$(jq -r '.release' <<< "${health}")" == "${EXPECTED_PRODUCTION_SHA}" ]] || { echo 'PRODUCTION_HEALTH_MISMATCH'; exit 1; }
+          echo 'LIVE_BETA30_DOWNLOAD=VERIFIED'
+
+      - name: Preserve BETA30 post-release snapshot
+        if: inputs.release_candidate == 'beta30'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta30-release-after
           path: ${{ runner.temp }}/android-version-api-after-release.json
           if-no-files-found: error
           retention-days: 90
