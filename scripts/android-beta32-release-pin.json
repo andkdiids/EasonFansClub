@@ -1,0 +1,22 @@
+{
+  "versionName": "1.0.0-beta.32",
+  "versionCode": 45,
+  "mobileCommit": "80b82cfe10b57ecb45e485d5503d9c87831a12b5",
+  "sha256": "0AF527F1DC6A442EBFC387A4000485F5B0E52DACC2C54420B1083B808F3C820E",
+  "size": 185239810,
+  "sourceFile": "ECFC-1.0.0-beta.32-release-beta32-80b82cf-run46173813264.apk",
+  "releaseNotes": [
+    "帖子审核卡片自适应屏幕，横图、竖图和文字帖充分利用可用空间",
+    "审核按钮上移，滑动和点击共用审核操作",
+    "通过审核立即显示下一篇，后台提交可跟踪和恢复失败",
+    "拒绝原因使用原生圆角弹窗，失败后保留输入",
+    "有帖子审核权限的管理员可从活跃症进入审核中心",
+    "Beta.32 内测版本"
+  ],
+  "rollback": {
+    "versionCode": 44,
+    "objectKey": "android/releases/ECFC-1.0.0-beta.31-internal-code44-d55cdcc0066d948cdbfdaca0f22d56667aeddf7a-run46164445768-attempt1.apk",
+    "sha256": "651AA9A127D2A496CA520D1D56E09157CC265347EBADF2082B97E833C8156E44",
+    "size": 185219330
+  }
+}
