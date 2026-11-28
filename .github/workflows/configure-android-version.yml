@@ -1500,7 +1500,7 @@ jobs:
               const version = await fetch('http://127.0.0.1:3000/api/app/version?platform=android', { signal: AbortSignal.timeout(3000) });
               const versionBody = await version.json();
               if (health.ok && healthBody.release === expectedSha && version.ok
-                && versionBody.versionName === (expectedCode === '43' ? '1.0.0-beta.30' : expectedCode === '42' ? '1.0.0-beta.29' : expectedCode === '41' ? '1.0.0-beta.28' : expectedCode === '40' ? '1.0.0-beta.27' : expectedCode === '39' ? '1.0.0-beta.26' : expectedCode === '37' ? '1.0.0-beta.24' : expectedCode === '36' ? '1.0.0-beta.23' : expectedCode === '35' ? '1.0.0-beta.22' : '1.0.0-beta.21')
+                && versionBody.versionName === (expectedCode === '44' ? '1.0.0-beta.31' : expectedCode === '43' ? '1.0.0-beta.30' : expectedCode === '42' ? '1.0.0-beta.29' : expectedCode === '41' ? '1.0.0-beta.28' : expectedCode === '40' ? '1.0.0-beta.27' : expectedCode === '39' ? '1.0.0-beta.26' : expectedCode === '37' ? '1.0.0-beta.24' : expectedCode === '36' ? '1.0.0-beta.23' : expectedCode === '35' ? '1.0.0-beta.22' : '1.0.0-beta.21')
                 && String(versionBody.versionCode) === expectedCode
                 && Number(versionBody.minimumVersionCode) === 19
                 && versionBody.forceUpdate === false
