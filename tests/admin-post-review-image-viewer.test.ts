@@ -111,7 +111,7 @@ test('统一审核中心仍提供通过与拒绝操作，帖子标记不在旧�
 })
 
 test('只读取图片媒体并复用统一公开 URL 与管理员权限校验', () => {
-  assert.match(reviewCenterRoute, /PostMedia: \{ orderBy: \{ sortOrder: 'asc' \}/)
+  assert.match(reviewCenterRoute, /PostMedia: \{\s*orderBy: \{ sortOrder: 'asc' \}/)
   assert.match(reviewCenterRoute, /publicImageUrl\(media\.url\)/)
   assert.match(reviewCenterRoute, /hasAdminPermission/)
   assert.match(reviewSource, /type: 'POST',[\s\S]*permission: 'post_manage'/)

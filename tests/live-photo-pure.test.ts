@@ -145,3 +145,20 @@ test('config is clamped and marker helpers round-trip', () => {
   assert.equal(livePhotoIdFromMarker(marker), 'asset_12345678')
   assert.equal(livePhotoIdFromMarker('[[live-photo:bad id]]'), null)
 })
+
+test('live photo covers stay same-origin and become absolute for legacy clients', async () => {
+  const { toPublicMediaUrl: publicImageUrl } = await import('../lib/media-url.ts')
+  const cover = '/api/media/live-photo/asset_12345678/cover'
+  const previous = process.env.NEXT_PUBLIC_APP_URL
+  try {
+    delete process.env.NEXT_PUBLIC_APP_URL
+    assert.equal(publicImageUrl(cover), cover, 'unconfigured origin keeps the guarded same-origin path')
+    process.env.NEXT_PUBLIC_APP_URL = 'https://ecfc.fans/'
+    assert.equal(publicImageUrl(cover), 'https://ecfc.fans/api/media/live-photo/asset_12345678/cover', 'legacy clients need an absolute URL')
+    // The CDN gateway must never be used for guarded media.
+    assert.doesNotMatch(String(publicImageUrl(cover)), /media\.ecfc\.fans/, 'guarded media must not be rewritten to the CDN')
+  } finally {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_APP_URL
+    else process.env.NEXT_PUBLIC_APP_URL = previous
+  }
+})
