@@ -1,22 +1,22 @@
 {
-  "versionName": "1.0.0-beta.29",
-  "versionCode": 42,
-  "mobileCommit": "172b28ca77dad06bcc3078517c14fa7bce440575",
-  "sha256": "71D83FBACB035C425CE365343D97455131E2E4742476B1E450E93DF6E76F0117",
-  "size": 184995062,
-  "sourceFile": "ECFC-1.0.0-beta.29-release-beta29-20261127-010558.apk",
+  "versionName": "1.0.0-beta.30",
+  "versionCode": 43,
+  "mobileCommit": "21652c2c4cded3ed76a37bee68eedf64bcdeb405",
+  "sha256": "5200D84FCFA5F1A9FCB1FCFBD656C0670A74E8D39F83EE1180DDF872240D7168",
+  "size": 185202946,
+  "sourceFile": "ECFC-1.0.0-beta.30-release-beta30-21652c2-20261128-123003.apk",
   "releaseNotes": [
-    "修复点击开启通知后不弹出系统授权窗口",
-    "通知设置新增系统状态页并可直接跳转系统设置",
-    "系统授权后才注册推送令牌，未配置凭据时如实提示",
-    "保留私信会话实时同步与断线增量补齐",
-    "保留活跃症四栏目滑动与底部导航行为",
-    "Beta.29 内测版本"
+    "后台管理新增日常管理，授权管理员可查看漏签并补签",
+    "补签记录支持按用户、被补签日期和来源筛选",
+    "修复顺大师发送匿名留言时的登录提示",
+    "修复顺大师查看匿名留言时的登录提示",
+    "顺大师抓捕候选显示头像，缺失时使用默认头像",
+    "Beta.30 内测版本"
   ],
   "rollback": {
-    "versionCode": 41,
-    "objectKey": "android/releases/ECFC-1.0.0-beta.28-internal-code41-7ed7afc38b526b5dc4162332ac273d83d9f75eac-run45828858309-attempt1.apk",
-    "sha256": "6C0F48767C827D75FD4EDB505FCE69D89ABC718294F7EF3267BE312FB7EFD09C",
-    "size": 184977406
+    "versionCode": 42,
+    "objectKey": "android/releases/ECFC-1.0.0-beta.29-internal-code42-172b28ca77dad06bcc3078517c14fa7bce440575-run45866500007-attempt1.apk",
+    "sha256": "71D83FBACB035C425CE365343D97455131E2E4742476B1E450E93DF6E76F0117",
+    "size": 184995062
   }
 }
