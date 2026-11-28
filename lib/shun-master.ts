@@ -980,7 +980,9 @@ export async function shunItemBox(userId: string) {
     await lockShunItemUsers(tx, [userId])
     const active = await tx.shunItemConfigVersion.findFirst({
       orderBy: { version: 'desc' },
-      include: { definitions: { select: { code: true, name: true, description: true, icon: true, rarity: true, enabled: true } } },
+      // weight 是配置校验的必填项：漏选会让 validateShunItemDraft 返回 null，
+      // 进而把整个百宝箱判成 disabled，因此必须一起取回。
+      include: { definitions: { select: { code: true, name: true, description: true, icon: true, rarity: true, enabled: true, weight: true } } },
     })
     if (!active?.enabled) return { enabled: false }
     const draft = validateShunItemDraft(active)
