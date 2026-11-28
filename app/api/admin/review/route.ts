@@ -14,6 +14,7 @@ import { livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 import { getForumBoardDisplayName, mergeForumBoardOptions } from '@/lib/boards'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { postContentPlainText } from '@/lib/share-metadata'
+import { validateRichPostContent } from '@/lib/rich-text'
 import { loadPostModerationHistoryByPostIds } from '@/lib/post-moderation-history'
 import { withReviewTargetHistory } from '@/lib/review-target-history'
 import { prisma } from '@/lib/prisma'
@@ -259,6 +260,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
           : [{ id: row.boardId, name: getForumBoardDisplayName(row.Board), slug: row.Board.slug }, ...boardOptions],
       },
       summary: summary(postContentPlainText(row.content, row.richContent) || row.summary), body: postContentPlainText(row.content, row.richContent) || row.summary || '', category: getForumBoardDisplayName(row.Board) || null, relatedEntity: '社区帖子',
+      richContent: validatedReviewDocument(row.richContent),
       reviewer: row.ReviewedBy ? author({ id: row.ReviewedBy.id, uid: row.ReviewedBy.uid, nickname: row.ReviewedBy.nickname }) : null, reviewedAt: asIso(row.reviewedAt), rejectReason: row.rejectionReason,
     }))
   }
@@ -341,6 +343,12 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
     createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus, cover: publicImageUrl(row.imageUrl), media: reviewMedia(`${row.id}:image`, row.imageUrl, `${row.title}图片`), summary: summary(row.content), category: row.type, relatedEntity: getTodayEventDateKey(row.date, row.month, row.day),
     reviewer: row.ReviewedBy ? author({ id: row.ReviewedBy.id, uid: row.ReviewedBy.uid, nickname: row.ReviewedBy.nickname }) : null, reviewedAt: asIso(row.reviewedAt), rejectReason: row.rejectionReason,
   }))
+}
+
+function validatedReviewDocument(value: unknown) {
+  if (value == null) return undefined
+  const result = validateRichPostContent(value)
+  return result.valid ? result.value : undefined
 }
 
 async function countType(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, salonCategory?: SalonCategoryValue) {
