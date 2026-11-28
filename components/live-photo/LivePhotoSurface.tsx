@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { LivePhotoBadge } from '@/components/live-photo/LivePhotoBadge'
 
 /** Only one live photo may play and make sound anywhere on the page. */
 let activePlayback: { token: number; stop: () => void } | null = null
@@ -32,16 +33,21 @@ export function useLivePhotoPlayback(videoUrl?: string | null) {
     if (activePlayback?.token === tokenRef.current) activePlayback = null
   }, [])
 
-  return { playing, muted, play, stop, toggle, setMuted }
-}
+  // A backgrounded tab must not keep a clip (or its sound) running.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') stop()
+    }
+    document.addEventListener('visibilitychange', onHidden)
+    window.addEventListener('pagehide', stop)
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden)
+      window.removeEventListener('pagehide', stop)
+    }
+  }, [stop])
 
-function LiveIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <rect x="2.5" y="6.5" width="14" height="11" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M18.5 10.2l3-2.1v7.8l-3-2.1z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-    </svg>
-  )
+  return { playing, muted, play, stop, toggle, setMuted }
 }
 
 export function LivePhotoPlayback({
@@ -59,19 +65,10 @@ export function LivePhotoPlayback({
   if (!videoUrl) return null
   return (
     <>
-      <button
-        type="button"
-        className={`live-photo-badge ${className}`}
-        aria-label={playing ? '停止播放实况照片' : '播放实况照片'}
-        onClick={(event) => { event.stopPropagation(); onToggle() }}
-      >
-        <LiveIcon />
-        <span>LIVE</span>
-      </button>
+      <LivePhotoBadge playing={playing} onToggle={onToggle} className={className} />
       {playing ? (
         <div className={`live-photo-video-layer${variant === 'viewer' ? ' is-viewer' : ''}`} onClick={(event) => event.stopPropagation()}>
           {/* The video element is created only after an explicit user action. */}
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <video
             src={videoUrl}
             autoPlay
@@ -79,6 +76,8 @@ export function LivePhotoPlayback({
             playsInline
             preload="none"
             onEnded={onStop}
+            // A failed clip falls back to the still cover, and the badge stays
+            // tappable, so the user can try again.
             onError={onStop}
           />
           <button
@@ -87,7 +86,7 @@ export function LivePhotoPlayback({
             aria-label={muted ? '开启实况照片声音' : '关闭实况照片声音'}
             onClick={(event) => { event.stopPropagation(); onMuteToggle() }}
           >
-            {muted ? '🔇 开启声音' : '🔊 关闭声音'}
+            {muted ? '开启声音' : '关闭声音'}
           </button>
         </div>
       ) : null}
@@ -114,11 +113,13 @@ export function LivePhotoSurface({
   onOpen, loading = 'lazy', fetchPriority = 'auto', onError,
 }: LivePhotoSurfaceProps) {
   const playback = useLivePhotoPlayback(videoUrl)
+  const surfaceRef = useRef<HTMLDivElement | null>(null)
   const timerRef = useRef<number | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
   const longPressRef = useRef(false)
   // Click fires after pointerup, so a finished long press must swallow it once.
   const suppressClickRef = useRef(false)
+  const { stop: stopPlayback } = playback
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -129,8 +130,22 @@ export function LivePhotoSurface({
 
   useEffect(() => () => {
     clearTimer()
-    playback.stop()
-  }, [clearTimer, playback.stop])
+    stopPlayback()
+  }, [clearTimer, stopPlayback])
+
+  // Scrolling a playing clip out of view stops it instead of leaving audio
+  // running from an invisible card in the feed.
+  useEffect(() => {
+    const element = surfaceRef.current
+    if (!element || !videoUrl || typeof IntersectionObserver === 'undefined') return undefined
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) stopPlayback()
+      }
+    }, { threshold: 0.15 })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [stopPlayback, videoUrl])
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!videoUrl || event.pointerType === 'mouse') return
@@ -167,6 +182,7 @@ export function LivePhotoSurface({
 
   return (
     <div
+      ref={surfaceRef}
       className={`live-photo-surface ${className}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -181,6 +197,9 @@ export function LivePhotoSurface({
         className={buttonClassName}
         aria-label={alt}
         onClick={(event) => {
+          // Without preventDefault the surrounding card link would still do a
+          // full-page navigation after the handler was stopped.
+          event.preventDefault()
           event.stopPropagation()
           if (suppressClickRef.current) { suppressClickRef.current = false; return }
           onOpen?.()

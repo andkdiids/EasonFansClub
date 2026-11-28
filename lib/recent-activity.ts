@@ -9,6 +9,7 @@ import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { buildPostExpiryWhere } from '@/lib/post-lifecycle'
+import { POST_MEDIA_VISIBLE_TYPES } from '@/lib/post-media-view'
 
 export const RECENT_ACTIVITY_PAGE_SIZE = 20
 export const RECENT_ACTIVITY_MAX_PAGE = 10_000
@@ -89,7 +90,7 @@ const activityPostSelect = {
   },
   Board: { select: { name: true, slug: true } },
   PostMedia: {
-    where: { type: 'IMAGE' as const },
+    where: { type: { in: [...POST_MEDIA_VISIBLE_TYPES] } },
     orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
     take: 9,
     select: { url: true, thumbnail: true },

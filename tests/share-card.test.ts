@@ -249,7 +249,10 @@ test('generator explicitly handles CORS failures by redrawing without remote pix
 test('post card uses first legal image, excludes videos, and lets the renderer provide the no-image background', () => {
   const page = read('app/posts/[postId]/page.tsx')
   assert.match(page, /PostMedia: \{/)
-  assert.match(page, /where: \{ type: 'IMAGE'/)
+  // The share card must not drop a live photo: its url is also the still cover,
+  // so an 'IMAGE'-only filter removed the image entirely.
+  assert.match(page, /where: \{ type: \{ in: \[\.\.\.POST_MEDIA_VISIBLE_TYPES\] \} \}/)
+  assert.doesNotMatch(page, /type: 'VIDEO' as const/)
   assert.match(page, /firstShareCardImageCandidate\(post\.PostMedia\.map/)
   assert.match(page, /firstAbsoluteMetadataImageUrl\(post\.PostMedia\.map/)
   assert.match(page, /metadataImageVariantUrl\(url\)/)

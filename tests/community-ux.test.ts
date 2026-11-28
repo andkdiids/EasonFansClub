@@ -52,7 +52,7 @@ test('帖子多图页面和查看器共用 3 秒自动轮播，交互只临时�
   assert.match(carousel, /isViewerOpen/)
   assert.match(carousel, /onOpenChange=\{handleViewerOpenChange\}/)
   assert.match(carousel, /onIndexChange=\{handleViewerIndexChange\}/)
-  assert.match(postPage, /where: \{ type: 'IMAGE' as const \}/)
+  assert.match(postPage, /where: \{ type: \{ in: \[\.\.\.POST_MEDIA_VISIBLE_TYPES\] \} \}/)
   assert.match(postPage, /hasReplyTarget=\{Boolean\(focusId\)\}/)
   assert.match(detailController, /if \(hasReplyTarget \|\| window\.location\.hash\) return/)
   assert.match(detailController, /window\.scrollTo\(\{ left: 0, top: 0, behavior: 'auto' \}\)/)

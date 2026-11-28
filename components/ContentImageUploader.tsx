@@ -54,11 +54,29 @@ export type UploadDiagnostic = {
   videoContainer: string
   trailerBytes?: number
   motionPhotoClaimed?: boolean
+  /** Any XMP packet at all, even when no motion-photo marker was recognised. */
+  hasXmp?: boolean
+  /** Presence only. The identifier value itself is a pairing token and is
+   * never copied into a report. */
+  appleIdentifier?: boolean
+  missingPairedVideo?: boolean
   requestId: string
   assetId?: string
   assetStatus?: string
   assetStage?: string
   errorCode?: string
+  /** Server-side verdict, filled in once the asset reports READY. */
+  serverPairing?: string | null
+  serverWidth?: number | null
+  serverHeight?: number | null
+  serverDurationMs?: number | null
+  serverVideoCodec?: string | null
+  serverAudioCodec?: string | null
+  serverHasAudio?: boolean | null
+  serverVideoBytes?: number | null
+  serverCoverBytes?: number | null
+  /** What the draft/post payload actually kept for this slot. */
+  mediaValue?: 'live-marker' | 'image-url'
 }
 
 type PendingUpload = {
@@ -164,19 +182,80 @@ function diagnosticStage(diagnostic: UploadDiagnostic | undefined, hasError: boo
   return '状态查询或转码'
 }
 
-function buildDiagnosticReport(item: PendingUpload) {
+/**
+ * `video=unknown` alone proves nothing: a browser can hand back a perfectly
+ * normal JPEG because it stripped the clip, or hand back a motion photo whose
+ * container we still have to parse. These verdicts keep those cases apart, so
+ * a failure is never blamed on the browser without evidence.
+ */
+export type UploadResourceVerdict =
+  | 'LIVE_PHOTO_READY'
+  | 'DYNAMIC_RESOURCE_UNPARSABLE'
+  | 'DYNAMIC_RESOURCE_PROCESSING_FAILED'
+  | 'NO_DYNAMIC_RESOURCE'
+  | 'STATIC_IMAGE'
+  | 'UNSUPPORTED_FILE'
+  | 'PENDING'
+
+const UNPARSABLE_ERROR_CODES = new Set([
+  'MOTION_PHOTO_INVALID',
+  'UNSUPPORTED_VIDEO',
+  'UNSUPPORTED_IMAGE',
+  'INVALID_DIMENSIONS',
+  'DURATION_UNKNOWN',
+])
+
+export function uploadResourceVerdict(diagnostic: UploadDiagnostic | undefined, kind: string): UploadResourceVerdict {
+  if (!diagnostic) return 'PENDING'
+  if (diagnostic.assetStatus === 'READY') return 'LIVE_PHOTO_READY'
+  const code = diagnostic.errorCode || ''
+  if (diagnostic.assetStatus === 'FAILED' || code) {
+    return UNPARSABLE_ERROR_CODES.has(code) ? 'DYNAMIC_RESOURCE_UNPARSABLE' : 'DYNAMIC_RESOURCE_PROCESSING_FAILED'
+  }
+  if (kind === 'live-photo') return 'PENDING'
+  if (kind === 'unsupported') return 'UNSUPPORTED_FILE'
+  // A still that names its paired clip but arrived without one: the browser
+  // kept the photo and dropped the video.
+  if (diagnostic.appleIdentifier || diagnostic.missingPairedVideo) return 'NO_DYNAMIC_RESOURCE'
+  return 'STATIC_IMAGE'
+}
+
+const VERDICT_LABELS: Record<UploadResourceVerdict, string> = {
+  LIVE_PHOTO_READY: 'LIVE_PHOTO_READY（已识别动态资源并转为可播放实况）',
+  DYNAMIC_RESOURCE_UNPARSABLE: 'DYNAMIC_RESOURCE_UNPARSABLE（文件含动态资源，但容器无法解析）',
+  DYNAMIC_RESOURCE_PROCESSING_FAILED: 'DYNAMIC_RESOURCE_PROCESSING_FAILED（已提取，转码或存储失败）',
+  NO_DYNAMIC_RESOURCE: 'NO_DYNAMIC_RESOURCE（照片声明有配对视频，浏览器未提供）',
+  STATIC_IMAGE: 'STATIC_IMAGE（普通静态照片，不涉及动态资源）',
+  UNSUPPORTED_FILE: 'UNSUPPORTED_FILE（既不是可解析图片也不是实况照片）',
+  PENDING: 'PENDING（尚未得到服务端结论）',
+}
+
+function buildDiagnosticReport(item: PendingUpload, completed = false) {
   const diagnostic = item.diagnostic
+  const verdict = uploadResourceVerdict(diagnostic, diagnostic?.kind ?? item.kind)
+  const number = (value: number | null | undefined) => value === null || value === undefined ? '-' : String(value)
+  const liveBadge = item.kind !== 'live-photo'
+    ? '不适用'
+    : completed
+      ? '已显示'
+      : item.phase === 'failed' ? '未显示' : '处理中，尚未出现'
   const lines = [
     '[私家E院 实况照片上传诊断]',
     `时间: ${new Date().toISOString()}`,
     `入口: ${diagnostic?.entry ?? '-'}`,
     `浏览器: ${diagnostic?.userAgent ?? '-'}`,
-    `文件: ${diagnostic?.fileType || '(未提供 MIME)'} / ${diagnostic?.fileSize ?? item.file.size} bytes`,
-    `识别: kind=${diagnostic?.kind ?? item.kind} pairing=${diagnostic?.pairing ?? '-'} image=${diagnostic?.imageContainer ?? '-'} video=${diagnostic?.videoContainer ?? '-'} trailer=${diagnostic?.trailerBytes ?? '-'} claimed=${diagnostic?.motionPhotoClaimed ?? false}`,
-    `请求 ID: ${diagnostic?.requestId ?? '-'}`,
+    `原始文件: ${diagnostic?.fileType || '(未提供 MIME)'} / ${number(diagnostic?.fileSize ?? item.file.size)} bytes`,
+    `客户端识别: kind=${diagnostic?.kind ?? item.kind} pairing=${diagnostic?.pairing ?? '-'} image=${diagnostic?.imageContainer ?? '-'} video=${diagnostic?.videoContainer ?? '-'} trailer=${number(diagnostic?.trailerBytes)} claimed=${diagnostic?.motionPhotoClaimed ?? false}`,
+    `运动照片标记: xmp=${diagnostic?.hasXmp ?? false} motionPhoto=${diagnostic?.motionPhotoClaimed ?? false} appleIdentifier=${diagnostic?.appleIdentifier ?? false} missingPairedVideo=${diagnostic?.missingPairedVideo ?? false}`,
+    `服务端判定: pairing=${diagnostic?.serverPairing ?? '-'} size=${number(diagnostic?.serverVideoBytes)} coverSize=${number(diagnostic?.serverCoverBytes)} ${number(diagnostic?.serverWidth)}x${number(diagnostic?.serverHeight)} durationMs=${number(diagnostic?.serverDurationMs)}`,
+    `转码结果: v=${diagnostic?.serverVideoCodec ?? '-'} a=${diagnostic?.serverAudioCodec ?? '-'} hasAudio=${diagnostic?.serverHasAudio ?? '-'}`,
+    `最终类型: ${item.kind === 'live-photo' ? 'LIVE_PHOTO' : 'IMAGE'}（表单内=${diagnostic?.mediaValue ?? '-'}）`,
+    `LIVE 标识: ${liveBadge}`,
+    `请求 ID: ${diagnostic?.requestId || '-'}`,
     `媒体任务: ${diagnostic?.assetId ?? '-'} status=${diagnostic?.assetStatus ?? '-'} stage=${diagnostic?.assetStage ?? '-'} error=${diagnostic?.errorCode ?? '-'}`,
+    `资源判定: ${VERDICT_LABELS[verdict]}`,
+    `失败阶段: ${completed ? '-' : diagnosticStage(diagnostic, item.phase === 'failed')}`,
     `界面提示: ${item.error ?? '-'}`,
-    `失败阶段: ${diagnosticStage(diagnostic, item.phase === 'failed')}`,
   ]
   return lines.join('\n')
 }
@@ -235,6 +314,8 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   const editingImageRef = useRef<EditingImage | null>(null)
   const replacingUrlRef = useRef(replacingUrl)
   const uploadControllersRef = useRef(new Map<string, AbortController>())
+  /** Finished uploads, keyed by the value URL they produced. */
+  const completedUploadsRef = useRef(new Map<string, PendingUpload>())
   const disposedRef = useRef(false)
 
   function getUploadState(): ContentImageUploadState {
@@ -304,6 +385,14 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     const next = pendingUploadsRef.current.filter((current) => current.id !== item.id)
     pendingUploadsRef.current = next
     setPendingUploads(next)
+    // Keep the finished record so an admin can still explain a photo that was
+    // accepted as a plain still instead of a live photo.
+    completedUploadsRef.current.set(url, {
+      ...item,
+      diagnostic: item.diagnostic
+        ? { ...item.diagnostic, mediaValue: item.kind === 'live-photo' ? 'live-marker' : 'image-url' }
+        : undefined,
+    })
     const previous = localUploadedFilesRef.current.get(url)
     if (previous && previous.previewUrl !== item.previewUrl) URL.revokeObjectURL(previous.previewUrl)
     localUploadedFilesRef.current.set(url, { file: item.file, previewUrl: item.previewUrl })
@@ -353,6 +442,28 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     }
   }
 
+  /** One report covering every slot that was ever selected, finished or not. */
+  async function copyAllDiagnostics() {
+    const completed = valueRef.current
+      .map((url) => completedUploadsRef.current.get(url))
+      .filter((item): item is PendingUpload => Boolean(item))
+    const reports = [
+      ...completed.map((item) => buildDiagnosticReport(item, true)),
+      ...pendingUploadsRef.current.map((item) => buildDiagnosticReport(item)),
+    ]
+    if (!reports.length) {
+      setError('还没有可诊断的图片，请先选择图片。')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(reports.join('\n\n'))
+      setDiagnosticCopied('all')
+      window.setTimeout(() => setDiagnosticCopied(''), 2000)
+    } catch {
+      setError('复制失败，请手动选择诊断文本')
+    }
+  }
+
   /** Explicit downgrade chosen by the user; the original file is reused, never
    * a recompressed copy, so the still keeps its full quality. */
   function uploadAsImage(item: PendingUpload) {
@@ -370,7 +481,6 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       liveStage: undefined,
     }
     updatePendingUpload(item.id, next)
-    setCanDiagnose(false)
     void uploadItem(next)
   }
 
@@ -387,7 +497,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     })
     patchDiagnostic(item.id, { requestId, assetId, assetStatus: 'PENDING' })
     updatePendingUpload(item.id, { phase: 'processing', progress: 100, liveStage: '媒体处理中…' })
-    await waitForLivePhotoAsset(assetId, {
+    const asset = (await waitForLivePhotoAsset(assetId, {
       signal: controller.signal,
       onStatus: (status) => {
         patchDiagnostic(item.id, { assetStatus: status })
@@ -396,6 +506,23 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
           liveStage: status === 'READY' ? '处理完成' : '媒体处理中…',
         })
       },
+    })) as Record<string, unknown> | undefined
+    // The server's own verdict is the only trustworthy record of what the clip
+    // really was; keep it in the diagnostics for successful uploads too.
+    const numberOrNull = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null
+    const textOrNull = (value: unknown) => typeof value === 'string' && value ? value : null
+    patchDiagnostic(item.id, {
+      assetStatus: 'READY',
+      serverPairing: textOrNull(asset?.pairing),
+      serverWidth: numberOrNull(asset?.width),
+      serverHeight: numberOrNull(asset?.height),
+      serverDurationMs: numberOrNull(asset?.durationMs),
+      serverVideoCodec: textOrNull(asset?.videoCodec),
+      serverAudioCodec: textOrNull(asset?.audioCodec),
+      serverHasAudio: typeof asset?.hasAudio === 'boolean' ? asset.hasAudio : null,
+      serverVideoBytes: numberOrNull(asset?.size),
+      serverCoverBytes: numberOrNull(asset?.coverSize),
+      mediaValue: 'live-marker',
     })
     return toLivePhotoMarker(assetId)
   }
@@ -454,6 +581,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
           updatePendingUpload(item.id, { phase })
         }, { signal: controller.signal })).url
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
+      patchDiagnostic(item.id, { mediaValue: runItem.kind === 'live-photo' ? 'live-marker' : 'image-url' })
 
       appendUploadedUrl(url)
       const completed = pendingUploadsRef.current.find((current) => current.id === item.id)
@@ -607,6 +735,9 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
           videoContainer: item.videoContainer,
           ...(item.trailerBytes ? { trailerBytes: item.trailerBytes } : {}),
           ...(item.motionPhotoClaimed ? { motionPhotoClaimed: true } : {}),
+          ...(item.hasXmp ? { hasXmp: true } : {}),
+          ...(item.appleIdentifier ? { appleIdentifier: true } : {}),
+          ...(item.missingPairedVideo ? { missingPairedVideo: true } : {}),
           requestId: '',
         },
       }
@@ -618,6 +749,9 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       ? `最多只能添加 ${MAX_CONTENT_IMAGES} 张图片。`
       : '')
     if (detected.summary.missingVideoNotice) setLiveNotice(LIVE_PHOTO_MISSING_VIDEO_NOTICE)
+    // Diagnostics are asked for as soon as a file is selected, so a successful
+    // upload that silently stayed static is still inspectable.
+    void ensureDiagnosticsPermission()
 
     // Each item owns its own status/error. A failed image never aborts the
     // remaining files, so successful uploads stay visible.
@@ -864,7 +998,10 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
                   {/* The still image is always valid, so a failed clip can be
                       posted as a plain photo — but only when the user says so. */}
                   {item.phase === 'failed' && item.kind === 'live-photo' ? <button type="button" onClick={() => uploadAsImage(item)} className="text-amber-700">作为普通图片上传</button> : null}
-                  {item.phase === 'failed' && canDiagnose ? <button type="button" onClick={() => void copyDiagnostics(item)} className="text-slate-500">{diagnosticCopied === item.id ? '已复制' : '复制诊断信息'}</button> : null}
+                  {/* Available for every attempt, not only failures: the silent
+                      "uploaded but stayed a still photo" case is the one that
+                      needs a verdict. */}
+                  {canDiagnose ? <button type="button" onClick={() => void copyDiagnostics(item)} className="text-slate-500">{diagnosticCopied === item.id ? '已复制' : '复制诊断信息'}</button> : null}
                   <button type="button" onClick={() => removePendingUpload(item.id)} className="text-red-600">删除</button>
                 </div>
               </div>
@@ -946,6 +1083,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900" role="status">{liveNotice}</p>
       ) : null}
       {busy ? <p className="text-xs font-bold text-slate-500" role="status">图片处理完成后才能发布帖子。</p> : null}
+      {canDiagnose ? <button type="button" onClick={() => void copyAllDiagnostics()} className="text-xs font-bold text-slate-500 underline underline-offset-2">{diagnosticCopied === 'all' ? '已复制全部诊断' : '复制全部诊断信息'}</button> : null}
       {pendingUploads.some((item) => item.phase === 'failed') ? <p className="text-xs font-bold text-red-600" role="alert">有图片上传失败，请重试或删除失败图片后再发布。</p> : null}
       {editingImage ? <ImageEditor file={editingImage.file} onCancel={() => setEditingImage(null)} onComplete={(editedFile) => editingImage.kind === 'pending' ? completePendingEdit(editingImage.id, editedFile) : void completeUploadedEdit(editingImage.url!, editedFile)} /> : null}
     </div>

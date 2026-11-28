@@ -78,8 +78,11 @@ function movWithIdentifier(identifier: string) {
 }
 
 function jpegWithXmp(xmp = '') {
-  const app1 = concat(asciiBytes(xmp), new Uint8Array(8))
-  return concat(new Uint8Array([0xff, 0xd8, 0xff, 0xe1]), u32(app1.length + 2), app1, new Uint8Array([0xff, 0xd9]))
+  // Real cameras write the Adobe XMP header in APP1 before the packet.
+  const payload = xmp
+    ? concat(asciiBytes('http://ns.adobe.com/xap/1.0/'), new Uint8Array([0]), asciiBytes(xmp), new Uint8Array(8))
+    : new Uint8Array(8)
+  return concat(new Uint8Array([0xff, 0xd8, 0xff, 0xe1]), u32(payload.length + 2), payload, new Uint8Array([0xff, 0xd9]))
 }
 
 function appleStill(identifier: string) {
@@ -327,4 +330,21 @@ test('declared padding is measured with the clip, not as video', () => {
   const extracted = findEmbeddedMotionVideo(file)
   assert.ok(extracted)
   assert.equal(extracted!.length, clip.length)
+})
+
+test('XMP presence is reported without being mistaken for a live photo', () => {
+  // A vendor block we cannot read is not a live photo, but the diagnostic has
+  // to show that the packet was there.
+  const stillOnlyXmp = jpegWithXmp('<x:xmpmeta><rdf:Description GCamera:SpecialType="awaiting" /></x:xmpmeta>')
+  const inspected = inspectSelection({ head: stillOnlyXmp, size: stillOnlyXmp.length, mime: 'image/jpeg' })
+  assert.equal(inspected.kind, 'image')
+  assert.equal(inspected.hasXmp, true)
+
+  const google = inspectSelection({ head: googleMotionPhoto(), size: googleMotionPhoto().length, mime: 'image/jpeg' })
+  assert.equal(google.kind, 'live-photo')
+  assert.equal(google.hasXmp, true)
+
+  const bare = inspectSelection({ head: jpegWithXmp(), size: jpegWithXmp().length, mime: 'image/jpeg' })
+  assert.equal(bare.kind, 'image')
+  assert.equal(bare.hasXmp, false, 'a JPEG without an XMP packet must not claim one')
 })
