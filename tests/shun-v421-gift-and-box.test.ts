@@ -88,11 +88,15 @@ test('顺取结果弹窗两个按钮上下等宽排列', () => {
 
 test('顺取前快捷使用道具只在真正可用时弹出', () => {
   const client = readFileSync('app/shun-master/ShunMasterClient.tsx', 'utf8')
-  assert.match(client, /const takeItems = box\?\.enabled \? box\.items\.filter\(\(item\) => \['EXTRA_SUSPECT', 'TARGET_FRIEND', 'DOUBLE_AMOUNT'\]/)
+  assert.match(client, /const ATTACK_ORDER = \['TARGET_FRIEND', 'DOUBLE_AMOUNT', 'EXTRA_SUSPECT'\]/)
+  assert.match(client, /const takeItems = box\?\.enabled \? box\.items\.filter\(\(item\) => \(ATTACK_ORDER as readonly string\[\]\)\.includes\(item\.code\)/)
   assert.match(client, /function startTake\(\)/)
   assert.match(client, /要使用道具吗？/)
   assert.match(client, /不使用道具/)
-  assert.match(client, /取消装备并普通顺取/)
+  assert.match(client, /选择本次使用的道具/)
+  assert.match(client, /全部取消/)
+  assert.match(client, /可同时选择多种道具，效果将叠加生效。/)
+  assert.match(client, /aria-label="关闭"/)
   // 顺一手按钮必须走 startTake，而不是直接 attempt()。
   assert.match(client, /onClick=\{startTake\}/)
 })

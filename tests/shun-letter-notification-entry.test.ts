@@ -224,7 +224,8 @@ test('匿名信在独立通知事务中写入，且不影响金额/结算/补偿
   assert.match(block, /return shunTransaction\(async \(tx\)/, '通知与信件必须同一事务，避免半成品')
   // 经济逻辑未被触碰
   assert.match(shun, /const rolled = weightedIndex\(config\.probabilities\) \+ 1/, '金额概率规则必须保持')
-  assert.match(shun, /const amount = effect === 'DOUBLE_AMOUNT' \? Math\.min\(rolled \* 2, 14, victimBalance\) : Math\.min\(rolled, victimBalance\)/, '金额上限规则必须保持')
+  assert.match(shun, /const amount = Math\.min\(rolled \* combo\.multiplier, 14, victimBalance\)/, '金额上限规则必须保持')
+  assert.match(read('lib/shun-combo.ts'), /multiplier: set\.has\('DOUBLE_AMOUNT'\) \? 2 : 1/, '碌卡翻倍规则必须保持')
   assert.ok(!/anonymousLetter[\s\S]{0,200}(recovered|compensation|ledger)/.test(block),
     '匿名信不得介入追回、补偿或流水')
 })

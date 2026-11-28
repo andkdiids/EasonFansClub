@@ -142,7 +142,8 @@ test('the admin surface exposes the friend chance and the read-only statistics',
 
 test('the existing game rules are untouched by the new lottery', () => {
   assert.match(service, /const rolled = weightedIndex\(config\.probabilities\) \+ 1/, '金额仍按七档概率抽取')
-  assert.match(service, /const amount = effect === 'DOUBLE_AMOUNT' \? Math\.min\(rolled \* 2, 14, victimBalance\) : Math\.min\(rolled, victimBalance\)/, '金额上限仍受账户余额约束')
+  assert.match(service, /const amount = Math\.min\(rolled \* combo\.multiplier, 14, victimBalance\)/, '金额上限仍受账户余额约束')
+  assert.match(readFileSync('lib/shun-combo.ts', 'utf8'), /multiplier: set\.has\('DOUBLE_AMOUNT'\) \? 2 : 1/, '碌卡仍为两倍')
   assert.match(service, /if \(played\.length >= config\.attempts \+ \(itemDaily\?\.extraAttemptsGranted \?\? 0\)\) \{\s*throw new ShunError\('LIMIT'/, '每日次数不变')
   assert.match(service, /hitsByUser\]\.filter\(\(\[, count\]\) => count >= config\.victimCap\)/, '每日被顺上限不变')
   assert.match(service, /goldenUntil: new Date\(now\.getTime\(\) \+ config\.goldenMinutes \* 60000\)/, '黄金抓捕期不变')
