@@ -52,7 +52,8 @@ test('random gifting cannot accept a selected friend while directed takes still 
   const route = await readFile('app/api/shun-master/[action]/route.ts', 'utf8')
   assert.match(route, /Object\.keys\(body\)\.some\(\(key\) => key !== 'requestId'\)/)
   assert.match(route, /sendShunItemGift\(guard\.user\.id, body\.requestId\)/)
-  assert.match(route, /shunAttempt\(guard\.user\.id, body\.requestId, undefined, body\.friendId\)/)
+  assert.match(route, /shunAttempt\(guard\.user\.id, body\.requestId, undefined, \{/)
+  assert.match(route, /friendId: body\.friendId \|\| undefined/)
   const box = await readFile('app/shun-master/ShunItemBox.tsx', 'utf8')
   assert.match(box, /onUse\('gift'\)/)
   // V4.2.1 改为双向赠礼结果面板：送出与回礼同时展示。
