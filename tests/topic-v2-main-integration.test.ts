@@ -131,7 +131,7 @@ test('main production diagnostic workflows and scripts remain unchanged', () => 
   const reviewedStaging = source('.github/workflows/publish-android-rc11.yml')
   assert.equal(createHash('sha256').update(reviewedStaging.replace(/\r\n/g, '\n')).digest('hex'), 'a278a0b7fa56fbc035fd0abb2a50cab75d442afc1d8342bfa04cf3ca5b0cd74a', 'reviewed Android staging workflow must not change without updating this guard')
   const reviewedMetadata = source('.github/workflows/configure-android-version.yml')
-  assert.equal(createHash('sha256').update(reviewedMetadata.replace(/\r\n/g, '\n')).digest('hex'), 'b911b66cb391ae1f62c84b5cac23aa1a75d83f5fe67346c78f68c8e5dbf98ce4', 'reviewed Android metadata workflow must not change without updating this guard')
+  assert.equal(createHash('sha256').update(reviewedMetadata.replace(/\r\n/g, '\n')).digest('hex'), 'a721af3a4ca92bed02dc5067cfd9c4d0ce9aa0a870a8af21ffbc8561645617c8', 'reviewed Android metadata workflow must not change without updating this guard')
 })
 
 test('reviewed RC14 diagnostics retain exact main identity and read-only production checks', () => {

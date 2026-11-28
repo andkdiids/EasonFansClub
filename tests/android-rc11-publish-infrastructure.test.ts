@@ -1467,6 +1467,7 @@ test('Beta30 protects the previous release and verifies the immutable live APK',
 
 test('Beta31 protects the previous release and verifies the immutable live APK', () => {
   const workflow = read('.github/workflows/configure-android-version.yml')
+  assert.match(workflow, /versionBody\.versionName === \(expectedCode === '44' \? '1\.0\.0-beta\.31'/)
   assert.match(workflow, /id: beta31-baseline/)
   assert.match(workflow, /versionCode == 43/)
   assert.match(workflow, /CODE43_ROLLBACK_SOURCE_VERIFIED=YES/)
