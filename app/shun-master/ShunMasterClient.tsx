@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { comboEffectLines } from '@/lib/shun-combo'
 import { ShunMasterArt } from '@/components/ShunMasterArt'
 import { ShunMasterLogo } from '@/components/ShunMasterLogo'
 import { AnonymousLetter, type AnonymousLetterData } from '@/components/shun-master/AnonymousLetter'
@@ -23,9 +24,10 @@ type Round = { id: string; amount: number; recovered: number; result: 'SUCCESS' 
   /** Platform bonus granted on a successful capture (0 when the roll lost). */
   bonusAwarded?: number
   /** Capturer side: this capture already carries a delivered counter note. */
-  hasCaptureLetter?: boolean; itemOutcomes?: { code: string; amount: number }[] }
+  hasCaptureLetter?: boolean; itemOutcomes?: { code: string; amount: number }[]; usedItems?: { code: string; name: string }[] }
 type OpenHours = { openHoursEnabled: boolean; openTime: string; closeTime: string; label: string; open: boolean; nextOpenAt: string | null }
 type Status = { enabled: boolean; optedOut: boolean; balance: number; remaining: number; received: number; attempts: number; victimCap: number; goldenMinutes: number
+  targetFriendVictimCap?: number; totalVictimCap?: number
   /** V6: the daily window exactly as the server judged it for `serverNow`. */
   openHours?: OpenHours
   serverNow: string }
@@ -72,6 +74,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   const [delivery, setDelivery] = useState<GiftDelivery>()
   const boxRequests = useRef(new Map<string, string>())
   const targetRequest = useRef<string | undefined>(undefined)
+  const attemptItems = useRef<string[] | undefined>(undefined)
   const [side, setSide] = useState<Side>(initialSide)
   const [range, setRange] = useState('all')
   const [dateKey, setDateKey] = useState('')
@@ -113,6 +116,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   // user sees nothing, which was the reported "no feedback" bug.
   const [pendingFocus, setPendingFocus] = useState<string[] | null>(null)
   const lock = useRef(false)
+  const slowNotice = useRef<number | undefined>(undefined)
+  const slowNotice2 = useRef<number | undefined>(undefined)
   const requestId = useRef<string | null>(null)
   const sequence = useRef(0)
   const dialog = useRef<HTMLDialogElement>(null)
@@ -318,77 +323,109 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   }
   const usableItem = (code: string) => box?.enabled && box.items.some((item) => item.code === code && item.enabled && item.available > 0)
 
-  // V4.2.1 顺取前快捷使用道具：只有本次真的用得上、且当前持有的顺取类道具才弹选择。
-  const takeItems = box?.enabled ? box.items.filter((item) => ['EXTRA_SUSPECT', 'TARGET_FRIEND', 'DOUBLE_AMOUNT'].includes(item.code)
+  // V4.2.4 顺取前道具选择：三种攻击类道具可同时勾选，效果叠加。
+  const ATTACK_ORDER = ['TARGET_FRIEND', 'DOUBLE_AMOUNT', 'EXTRA_SUSPECT'] as const
+  type TargetFriend = { id: string; uid: number; nickname: string; displayName: string; remark: string | null; avatarUrl: string | null }
+  const takeItems = box?.enabled ? box.items.filter((item) => (ATTACK_ORDER as readonly string[]).includes(item.code)
     && item.enabled && item.available > 0) : []
-  const pendingTakeItem = box?.enabled ? box.items.find((item) => item.pending > 0) : undefined
+  const pendingAttack = box?.enabled ? box.items.filter((item) => (ATTACK_ORDER as readonly string[]).includes(item.code) && item.pending > 0) : []
   const [pickOpen, setPickOpen] = useState(false)
   const [pickMode, setPickMode] = useState<'choose' | 'items' | 'friends'>('choose')
-  const [pickFriends, setPickFriends] = useState<{ id: string; displayName: string; available: boolean }[]>()
+  const [selectedCodes, setSelectedCodes] = useState<string[]>([])
+  const [pickFriends, setPickFriends] = useState<TargetFriend[]>()
+  const [friendQuery, setFriendQuery] = useState('')
+  const [friendCursor, setFriendCursor] = useState<string | null>(null)
+  const [friendTotal, setFriendTotal] = useState(0)
+  const [friendLoading, setFriendLoading] = useState(false)
+  const [friendSelected, setFriendSelected] = useState<string>()
+  const friendRequest = useRef(0)
   const [pickError, setPickError] = useState('')
   const [extraConfirm, setExtraConfirm] = useState(false)
 
+  const previewLines = useMemo(() => comboEffectLines(selectedCodes.filter((code) =>
+    (ATTACK_ORDER as readonly string[]).includes(code)) as Array<'TARGET_FRIEND' | 'DOUBLE_AMOUNT' | 'EXTRA_SUSPECT'>), [selectedCodes])
+  const selectedName = (code: string) => (box?.enabled ? box.items.find((item) => item.code === code)?.name : undefined)
+    ?? ({ TARGET_FRIEND: '任我顺', DOUBLE_AMOUNT: '碌卡', EXTRA_SUSPECT: '十面埋伏' } as Record<string, string>)[code] ?? code
+
   function startTake() {
-    if (pendingTakeItem || takeItems.length) {
-      setPickError('')
-      setPickMode('choose')
-      setPickFriends(undefined)
-      setPickOpen(true)
-      void loadItems()
-      return
-    }
-    void attempt()
-  }
-
-  async function loadPickFriends() {
+    if (busy || !status?.remaining || !openNow) return
     setPickError('')
+    setSelectedCodes(pendingAttack.map((item) => item.code))
+    setFriendQuery('')
+    setFriendCursor(null)
+    setFriendTotal(0)
+    setFriendSelected(undefined)
     setPickFriends(undefined)
+    // 没有可用攻击道具（也没有待生效道具）时直接普通顺取，不弹选择窗。
+    if (!takeItems.length && !pendingAttack.length) { void attempt(undefined, []); return }
+    setPickMode('choose')
+    setPickOpen(true)
+    void loadItems()
+  }
+
+  async function loadPickFriends(sequence: number, append: boolean) {
+    setPickError('')
+    setFriendLoading(true)
+    const query = new URLSearchParams({ q: friendQuery.trim() })
+    if (append && friendCursor) query.set('cursor', friendCursor)
     try {
-      const [directory, eligibility] = await Promise.all([
-        fetch('/api/friends/list?directory=1', { cache: 'no-store' }),
-        fetch('/api/shun-master/target-friends', { cache: 'no-store' }),
-      ])
-      if (!directory.ok || !eligibility.ok) throw new Error()
-      const data: { friends: { id: string; displayName: string }[] } = await directory.json()
-      const { eligibleIds }: { eligibleIds: string[] } = await eligibility.json()
-      const eligible = new Set(eligibleIds)
-      setPickFriends(data.friends.map((friend) => ({ ...friend, available: eligible.has(friend.id) })))
+      const data = await api<{ friends: TargetFriend[]; total: number; nextCursor: string | null }>('target-friends?' + query)
+      if (sequence !== friendRequest.current) return
+      setPickFriends((previous) => append ? [...(previous || []), ...data.friends] : data.friends)
+      setFriendTotal(data.total)
+      setFriendCursor(data.nextCursor)
     } catch {
-      setPickError('无法加载通讯录，请重试。')
+      if (sequence === friendRequest.current) setPickError('无法加载可顺取好友，请重试。')
+    } finally {
+      if (sequence === friendRequest.current) setFriendLoading(false)
     }
   }
 
-  /** 选择道具后直接开始本次顺取，不需要回主页面再点一次顺一手。 */
-  async function pickTakeItem(code: string) {
-    if (code === 'TARGET_FRIEND') {
+  // 200–300ms 防抖；序号保证旧请求不会覆盖新搜索结果。
+  useEffect(() => {
+    if (!pickOpen || pickMode !== 'friends') return
+    const sequence = ++friendRequest.current
+    setFriendLoading(true)
+    const timer = window.setTimeout(() => { void loadPickFriends(sequence, false) }, 250)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [friendQuery, pickOpen, pickMode])
+
+  function closePick() {
+    setPickOpen(false)
+    setSelectedCodes([])
+    setFriendSelected(undefined)
+  }
+
+  async function cancelPending(code: string) {
+    await submitBoxItem('pending-item', { code, cancel: true })
+    setSelectedCodes((previous) => previous.filter((item) => item !== code))
+  }
+
+  async function cancelAllPending() {
+    // submitBoxItem owns the request lock; do not wrap these calls in another
+    // perform() or the nested calls would be silently skipped.
+    for (const item of pendingAttack) await cancelPending(item.code)
+  }
+
+  /** 确认道具组合：未选任我顺直接结算；选了任我顺进入服务端筛选后的好友列表。 */
+  function confirmSelection() {
+    const codes = ATTACK_ORDER.filter((code) => selectedCodes.includes(code))
+    if (!codes.length) { closePick(); void attempt(undefined, []); return }
+    if (codes.includes('TARGET_FRIEND')) {
+      setFriendSelected(undefined)
       setPickMode('friends')
-      await loadPickFriends()
       return
     }
-    try {
-      // 切换待生效道具时先释放旧预占，再装备新的。
-      if (pendingTakeItem && pendingTakeItem.code !== code) {
-        await submitBoxItem('pending-item', { code: pendingTakeItem.code, cancel: true })
-      }
-      if (!pendingTakeItem || pendingTakeItem.code !== code) await submitBoxItem('pending-item', { code })
-      setPickOpen(false)
-      await attempt()
-    } catch (pickFailure) {
-      setPickError(pickFailure instanceof Error ? pickFailure.message : '暂时无法使用该道具。')
-      await loadItems()
-    }
+    closePick()
+    void attempt(undefined, [...codes])
   }
 
-  async function cancelPendingAndTake() {
-    if (!pendingTakeItem) { setPickOpen(false); await attempt(); return }
-    try {
-      await submitBoxItem('pending-item', { code: pendingTakeItem.code, cancel: true })
-      setPickOpen(false)
-      await attempt()
-    } catch (pickFailure) {
-      setPickError(pickFailure instanceof Error ? pickFailure.message : '暂时无法取消该道具。')
-      await loadItems()
-    }
+  function confirmFriend() {
+    if (!friendSelected) return
+    const codes = ATTACK_ORDER.filter((code) => selectedCodes.includes(code))
+    closePick()
+    void attempt(friendSelected, [...codes])
   }
 
   function readPending<T>(action: string): T | undefined {
@@ -440,48 +477,59 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
     })
   }
 
-  function attempt(friendId?: string) {
+  function attempt(friendId?: string, items?: string[]) {
     return perform('attempt', async () => {
       setResult(undefined)
       setStep('result')
       setError('')
-      const pending = readPending<{ id: string; friendId?: string }>('attempt')
+      setNotice('')
+      const pending = readPending<{ id: string; friendId?: string; items?: string[] }>('attempt')
       if (!requestId.current && pending) {
         requestId.current = pending.id
         targetRequest.current = pending.friendId
+        attemptItems.current = pending.items
       }
-      if (requestId.current && friendId && friendId !== targetRequest.current) {
+      const nextItems = JSON.stringify(items ?? [])
+      if (requestId.current && (friendId !== targetRequest.current || nextItems !== JSON.stringify(attemptItems.current ?? []))) {
         throw new RequestError('请先重试上一笔顺取。')
       }
       if (!requestId.current) {
         targetRequest.current = friendId
+        attemptItems.current = items ?? []
         requestId.current = crypto.randomUUID()
-        savePending('attempt', { id: requestId.current, friendId })
+        savePending('attempt', { id: requestId.current, friendId, items: attemptItems.current })
       }
+      // The same request id is reused after a timeout, refresh or retry, so a
+      // committed settlement is never repeated with a fresh random draw.
+      slowNotice.current = window.setTimeout(() => setNotice('还在寻找幸运的 EF，请稍候…'), 3000)
+      slowNotice2.current = window.setTimeout(() => setNotice('正在确认顺取结果，请勿重复操作。'), 10000)
       try {
-        const round = await api<Round>('attempt', { requestId: requestId.current, friendId: targetRequest.current })
-        setBusy('animation')
-        const wait = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1600
-        await Promise.all([
-          loadStatus(), loadRecords(), loadItems(),
-          new Promise((resolve) => window.setTimeout(resolve, wait)),
-        ])
+        const round = await api<Round>('attempt', {
+          requestId: requestId.current,
+          friendId: targetRequest.current,
+          items: attemptItems.current ?? [],
+        })
         requestId.current = null
+        attemptItems.current = undefined
         savePending('attempt')
         setMessage('')
         setNotice('')
         setStep('result')
         setResult(round)
+        setBusy('')
+        // Result first: history/inventory refresh is off the critical path.
+        void Promise.all([loadStatus(), loadItems(), loadRecords()])
       } catch (error) {
         if (isRejectedRequest(error)) {
           requestId.current = null
+          attemptItems.current = undefined
           savePending('attempt')
         }
-        // A take refused by the daily window means the page is out of date (e.g.
-        // it was open when the page loaded and closed while it sat there): pull
-        // the authoritative state so the button and the copy flip immediately.
         if (error instanceof RequestError && error.code === 'SHUN_CLOSED') void loadStatus()
         throw error
+      } finally {
+        window.clearTimeout(slowNotice.current)
+        window.clearTimeout(slowNotice2.current)
       }
     })
   }
@@ -513,7 +561,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       lock.current = false
       setBusy('')
     }
-    if (notified && continueTaking) await attempt()
+    if (notified && continueTaking) startTake()
   }
   /** Sends the letter, then plays the delivery animation — only after the server confirms. */
   async function sendLetter() {
@@ -740,7 +788,9 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <strong>让 TA 溜了！</strong>
             <PersonLabel person={caught.person} link />
             <p>{caught.amount} 挂号费未追回</p>
-            <button onClick={() => { setCaught(undefined); setCaptureStep('result') }}>返回记录</button>
+            <div className={styles.stackedActions}>
+              <button type="button" className={styles.wide} onClick={() => { setCaught(undefined); setCaptureStep('result') }}>返回记录</button>
+            </div>
           </> : captureStep === 'delivered' || captureStep === 'expired' ? <>
             <strong>{captureStep === 'delivered' ? '留言已送达！✉️' : '本次通知已发送'}</strong>
             <p className={styles.letterSent}>{captureStep === 'delivered'
@@ -751,7 +801,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
                   already-settled capture note flow still completes. */}
               <button type="button" autoFocus
                 disabled={!!busy || status?.optedOut || !status?.enabled || !status?.remaining || !openNow}
-                onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage(''); void attempt() }}>
+                onClick={() => { setCaught(undefined); setCaptureStep('result'); setCaptureMessage(''); startTake() }}>
                 {status?.optedOut ? '已退出顺大师' : !openNow ? '休息中 💤'
                   : status?.remaining ? '再顺一手' : '今日次数已用完'}
               </button>
@@ -794,7 +844,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
                   {busy === 'capture-notify' ? '发送中…' : '不留言'}
                 </button>
               </>}
-              <button type="button" disabled={!!busy} onClick={closeCaptureResult}>关闭</button>
+              <button type="button" className={caught.hasCaptureLetter ? styles.wide : undefined} disabled={!!busy} onClick={closeCaptureResult}>关闭</button>
             </div>
           </>}
         </div>}
@@ -821,7 +871,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
       </div>
     </header>
     {box?.enabled && <ShunItemBox box={box} open={boxOpen} busy={!!busy} errorMessage={boxError} gifting={busy === 'gift'} delivery={delivery}
-      onClose={() => setBoxOpen(false)} onUse={submitBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId) }} />}
+      onClose={() => setBoxOpen(false)} onUse={submitBoxItem} onTarget={(friendId) => { setBoxOpen(false); void attempt(friendId, [...pendingAttack.map((item) => item.code), 'TARGET_FRIEND']) }} />}
     {error && <p className={styles.alert} role="alert">{error}</p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     <div className={styles.columns}>
@@ -863,7 +913,8 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         <details><summary>玩法说明</summary>
           <h2>顺大师 · 玩法说明</h2>
           <p>顺一手，缘分随天。</p>
-          <p>每天有 {status?.attempts ?? 7} 次「顺一手」的机会，每次随机顺走一位幸运 EF 的 1–7 挂号费，每人每天最多被顺 {status?.victimCap ?? 4} 次。</p>
+          <p>每天有 {status?.attempts ?? 7} 次「顺一手」的机会，每次随机顺走一位幸运 EF 的 1–7 挂号费。每位用户每日最多被普通顺取 {status?.victimCap ?? 4} 次，另可被任我顺顺取 1 次。</p>
+          <p>任我顺、碌卡、十面埋伏可同时使用，效果叠加生效。</p>
           <p>被顺走挂号费后，你会收到站内通知，并获得一次抓捕机会。</p>
           <p>{status?.goldenMinutes ?? 10} 分钟内抓捕：二选一。</p>
           <p>超过 {status?.goldenMinutes ?? 10} 分钟：三选一。</p>
@@ -933,11 +984,11 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           <p className={styles.letterSent}>{step === 'delivered'
             ? 'TA 会在收到挂号费被顺走的同时，读到只有 TA 能看到的这句话。'
             : '普通通知已经送达，无法再补充匿名留言。'}</p>
-          <div className={styles.tabs}>
+          <div className={styles.stackedActions}>
             {status?.remaining && status.enabled && openNow
-              ? <button type="button" disabled={!!busy} onClick={() => void attempt()}>再顺一手</button>
+              ? <button type="button" className={styles.wide} disabled={!!busy} onClick={startTake}>再顺一手</button>
               : <><p>{status?.remaining ? '当前暂不可顺取。' : '今日收工，明天继续！'}</p>
-                <button type="button" onClick={() => { setResult(undefined); setStep('result') }}>完成</button></>}
+                <button type="button" className={styles.wide} onClick={() => { setResult(undefined); setStep('result') }}>完成</button></>}
           </div>
         </> : <>
           <h2 id="shun-result-title">{step === 'write' ? '给 TA 留一句匿名的话' : '顺走啦！'}</h2>
@@ -957,6 +1008,10 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             </div>
           </> : <>
             <strong>+{result.amount} 挂号费</strong>
+            {!!result.usedItems?.length && <div className={styles.usedItems} aria-label="已使用道具">
+              <span>已使用道具</span>
+              {result.usedItems.map((item) => <span key={item.code}>{item.name}</span>)}
+            </div>}
             <p className={styles.letterSent}>要不要给 TA 留一句匿名的话？不留言也可以。</p>
             <div className={styles.stackedActions}>
               <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
@@ -967,57 +1022,102 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
         </>}
       </div>}
     </dialog>
-    {/* V4.2.1 顺取前快捷使用道具：打开/选择/取消都不消耗道具与次数。 */}
+    {/* V4.2.4 顺取前道具选择：多层弹窗均不消耗道具与次数。 */}
     {pickOpen && <div className={styles.optOutOverlay} role="dialog" aria-modal="true" aria-labelledby="shun-pick-title">
-      <div className={styles.optOutCard}>
-        <h2 id="shun-pick-title">要使用道具吗？</h2>
+      <div className={styles.pickCard} data-mode={pickMode}>
+        <header className={styles.pickHeader}>
+          <h2 id="shun-pick-title">{pickMode === 'choose' ? '要使用道具吗？'
+            : pickMode === 'items' ? '选择本次使用的道具' : '任我顺 · 选择好友'}</h2>
+          <button type="button" className={styles.dialogClose} aria-label="关闭" disabled={!!busy} onClick={closePick}>×</button>
+        </header>
         {pickError && <p role="alert">{pickError}</p>}
         {pickMode === 'choose' && <>
-          {pendingTakeItem && <p>当前待生效：<strong>{pendingTakeItem.name}</strong></p>}
-          <p>本次顺取可以使用道具提升收益。</p>
+          <p>选择道具，让这一次顺取更有意思。</p>
           <div className={styles.tabs}>
             <button type="button" className={styles.primary} disabled={!!busy} onClick={() => setPickMode('items')}>使用道具</button>
-            <button type="button" disabled={!!busy} onClick={() => { setPickOpen(false); void attempt() }}>不使用道具</button>
+            <button type="button" disabled={!!busy} onClick={() => { closePick(); void attempt(undefined, []) }}>不使用道具</button>
           </div>
-          {pendingTakeItem && <button type="button" className={styles.optOutLink} disabled={!!busy}
-            onClick={() => void cancelPendingAndTake()}>取消装备并普通顺取</button>}
         </>}
         {pickMode === 'items' && <>
-          {pendingTakeItem && <p>当前待生效：<strong>{pendingTakeItem.name}</strong>
+          <p>可同时选择多种道具，效果将叠加生效。</p>
+          {!!pendingAttack.length && <div className={styles.pendingRow}>
+            <span>待生效：{pendingAttack.map((item) => selectedName(item.code)).join('、')}</span>
             <button type="button" className={styles.optOutLink} disabled={!!busy}
-              onClick={() => { setPickOpen(false); void attempt() }}>使用当前道具顺取</button>
-          </p>}
-          <ul className={styles.pickList}>
-            {takeItems.map((item) => <li key={item.code}>
-              <button type="button" disabled={!!busy} onClick={() => void pickTakeItem(item.code)}>
-                <strong>{item.name} ×{item.available}</strong>
-                <span>{item.description}</span>
-              </button>
-            </li>)}
+              onClick={() => void cancelAllPending()}>全部取消</button>
+          </div>}
+          <ul className={styles.multiItems}>
+            {takeItems.map((item) => {
+              const checked = selectedCodes.includes(item.code)
+              return <li key={item.code}>
+                <button type="button" aria-pressed={checked} className={checked ? styles.itemSelected : undefined}
+                  disabled={!!busy || item.available < 1} onClick={() => setSelectedCodes((previous) =>
+                    checked ? previous.filter((code) => code !== item.code) : [...previous, item.code])}>
+                  <span className={styles.multiIcon} aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <path d={item.icon} />
+                    </svg>
+                  </span>
+                  <span className={styles.multiBody}>
+                    <strong>{item.name} <em>×{item.available}</em></strong>
+                    <small>{item.rarity} · {item.description}</small>
+                  </span>
+                  <span className={styles.multiCheck} aria-hidden="true">{checked ? '✓' : ''}</span>
+                </button>
+              </li>
+            })}
           </ul>
           {!takeItems.length && <p>当前没有可用于本次顺取的道具。</p>}
-          <div className={styles.tabs}>
-            <button type="button" onClick={() => setPickMode('choose')}>返回</button>
-            <button type="button" onClick={() => setPickOpen(false)}>关闭</button>
+          <div className={styles.effectPreview}>
+            <strong>本次顺取效果</strong>
+            {previewLines.length ? previewLines.map((line) => <span key={line}>{line}</span>)
+              : <span>普通顺取，不使用道具。</span>}
+            <small>已选择{selectedCodes.length}种道具</small>
+          </div>
+          <div className={styles.pickFooter}>
+            <button type="button" disabled={!!busy} onClick={() => setPickMode('choose')}>返回</button>
+            <button type="button" className={styles.primary} disabled={!!busy || !selectedCodes.length} onClick={confirmSelection}>
+              {selectedCodes.includes('TARGET_FRIEND') ? '选择好友' : '确认使用并顺取'}
+            </button>
           </div>
         </>}
         {pickMode === 'friends' && <>
-          <p>选择一位通讯录好友，确认后直接开始本次顺取。</p>
-          {pickFriends?.length === 0 && <p>通讯录暂无好友。</p>}
-          <ul className={styles.itemFriends}>{pickFriends?.map((friend) => <li key={friend.id}>
-            <button type="button" disabled={!!busy || !friend.available}
-              onClick={() => { setPickOpen(false); void attempt(friend.id) }}>
-              {friend.displayName}{friend.available ? '' : ' · 暂不可顺取'}
-            </button>
-          </li>)}</ul>
-          <div className={styles.tabs}>
-            <button type="button" onClick={() => setPickMode('items')}>返回</button>
-            <button type="button" onClick={() => setPickOpen(false)}>关闭</button>
+          <p>仅显示当前可顺取的好友。未出现的好友可能已达到今日被顺取上限。</p>
+          {selectedCodes.length > 1 && <div className={styles.comboSummary}>
+            已选道具：{selectedCodes.map((code) => selectedName(code)).join('、')}
+          </div>}
+          <input className={styles.friendSearch} aria-label="搜索好友" value={friendQuery}
+            placeholder="搜索昵称、UID、好友ID或备注" onChange={(event) => setFriendQuery(event.target.value)} />
+          <ul className={styles.friendList}>
+            {pickFriends?.map((friend) => {
+              const avatar = publicImageUrl(friend.avatarUrl)
+              const active = friendSelected === friend.id
+              return <li key={friend.id}>
+                <button type="button" aria-pressed={active} className={active ? styles.friendActive : undefined}
+                  onClick={() => setFriendSelected(friend.id)}>
+                  {avatar
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={avatar} alt="" width={36} height={36} />
+                    : <span className={styles.friendAvatar} aria-hidden="true">EF</span>}
+                  <span className={styles.friendMeta}>
+                    <strong>{friend.displayName}</strong>
+                    <small>UID {formatUid(friend.uid)}{friend.remark ? ` · ${friend.remark}` : ''}</small>
+                  </span>
+                  <span className={styles.friendCheck} aria-hidden="true">{active ? '✓' : ''}</span>
+                </button>
+              </li>
+            })}
+          </ul>
+          {friendLoading && <p role="status">好友加载中…</p>}
+          {pickFriends && !pickFriends.length && !friendLoading && <p role="status">
+            {friendQuery ? '没有找到符合条件的好友。' : '暂时没有可顺取的好友，稍后再来看看吧。'}
+          </p>}
+          {friendCursor && !friendLoading && <button type="button" disabled={!!busy}
+            onClick={() => void loadPickFriends(friendRequest.current, true)}>加载更多（共 {friendTotal} 位）</button>}
+          <div className={styles.pickFooter}>
+            <button type="button" disabled={!!busy} onClick={() => setPickMode('items')}>返回</button>
+            <button type="button" className={styles.primary} disabled={!!busy || !friendSelected} onClick={confirmFriend}>确认顺取</button>
           </div>
         </>}
-        {pickMode === 'choose' && <div className={styles.tabs}>
-          <button type="button" onClick={() => setPickOpen(false)}>关闭</button>
-        </div>}
       </div>
     </div>}
     {step === 'animate' && <SendAnonymousLetter message={message.trim()} onComplete={() => {

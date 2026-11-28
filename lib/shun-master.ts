@@ -14,6 +14,8 @@ import { shunClosedMessage, shunOpenHoursState } from './shun-open-hours'
 import { defaultShunItemRules, shunItemsFeatureEnabled, validateShunItemDraft } from './shun-item-config'
 import { drawShunItem, SHUN_GIFT_WEIGHTS, SHUN_ITEM_CATALOG } from './shun-item-rules'
 import { lockShunItemUsers, postShunItemMovement, ShunItemInventoryError } from './shun-item-inventory'
+import { normalizeAttackCodes, resolveShunCombo, SHUN_ATTACK_CODES, type ShunAttackCode, type ShunCombo } from './shun-combo'
+import { matchesTargetFriend } from './shun-friend-search'
 
 // Re-exported for callers that historically imported it from the service.
 export { shunPerson } from './shun-person'
@@ -265,6 +267,36 @@ export async function shunTransaction<T>(callback: (tx: Tx) => Promise<T>) {
   }
 }
 
+/**
+ * V4.2.4 quota view for a set of potential victims.
+ *
+ * `victimCap` applies to ordinary takes only; one whole-site 任我顺 take is
+ * tracked separately per victim. Rounds whose source cannot be proven (old
+ * rows without an item-effect row) stay in the ordinary bucket: conservative
+ * counting can never release extra quota on launch day.
+ */
+async function receiveQuotas(tx: Pick<Tx, 'shunMasterRound' | 'shunItemRoundEffect'>, day: string, ids: string[]) {
+  if (!ids.length) return { normal: new Map<string, number>(), targetUsed: new Set<string>() }
+  const [rounds, targetEffects] = await Promise.all([
+    tx.shunMasterRound.findMany({ where: { day, victimId: { in: ids } }, select: { id: true, victimId: true } }),
+    tx.shunItemRoundEffect.findMany({
+      where: { code: 'TARGET_FRIEND', round: { day, victimId: { in: ids } } },
+      select: { roundId: true },
+    }),
+  ])
+  const targetRounds = new Set(targetEffects.map((effect) => effect.roundId))
+  const normal = new Map<string, number>()
+  const targetUsed = new Set<string>()
+  for (const round of rounds) {
+    if (targetRounds.has(round.id)) {
+      targetUsed.add(round.victimId)
+    } else {
+      normal.set(round.victimId, (normal.get(round.victimId) ?? 0) + 1)
+    }
+  }
+  return { normal, targetUsed }
+}
+
 async function lockAccounts(tx: Tx, ids: string[]) {
   const accounts = await tx.$queryRaw<Array<{ id: string; points: number }>>`
     SELECT id, points FROM User WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`
@@ -300,13 +332,19 @@ function notify(tx: Tx, id: string, recipientId: string, title: string, content:
 }
 async function present(tx: Tx, round: Round, side: 'out' | 'in', hasLetter = false, hasCaptureLetter = false) {
   const visible = side === 'out' || round.result !== null
-  const outcomes = round.result && shunItemsFeatureEnabled() ? await tx.shunItemRoundEffect.findMany({
-    where: { roundId: round.id, code: { in: ['RETRY_CAPTURE', 'REVENGE'] } },
+  const effects = shunItemsFeatureEnabled() ? await tx.shunItemRoundEffect.findMany({
+    where: { roundId: round.id },
     select: { code: true, amount: true },
   }) : []
+  const outcomes = round.result ? effects.filter((effect) => ['RETRY_CAPTURE', 'REVENGE'].includes(effect.code)) : []
+  // Attack effects are intentionally visible on both sides: they describe what
+  // happened, never who did it. The actor's identity stays anonymous.
+  const attackCodes = effects.filter((effect) => (SHUN_ATTACK_CODES as readonly string[]).includes(effect.code))
+    .map((effect) => effect.code)
   return {
     id: round.id, amount: round.amount, recovered: round.recovered, result: round.result,
     createdAt: round.createdAt, goldenUntil: round.goldenUntil, canCapture: [3, 4].includes((round.candidates as string[]).length),
+    usedItems: attackCodes.map((code) => ({ code, name: SHUN_ITEM_CATALOG[code as ShunAttackCode].name })),
     // The platform bonus is part of the capturer's own settlement view. It is
     // never shown to anybody else and never leaks into the caught player's copy.
     bonusAwarded: round.bonusAwarded,
@@ -340,6 +378,8 @@ export async function shunStatus(userId: string) {
     balance: account.points,
     remaining: Math.max(0, config.attempts + (itemDaily?.extraAttemptsGranted ?? 0) - attempts), received: received + revengesReceived, attempts: config.attempts,
     victimCap: config.victimCap, goldenMinutes: config.goldenMinutes,
+    // V4.2.4: the 任我顺 allowance is per victim and shared by the whole site.
+    targetFriendVictimCap: 1, totalVictimCap: config.victimCap + 1,
     // The page renders the closed state and its copy from this snapshot alone,
     // so a window changed in the admin panel shows up without a redeploy.
     openHours: shunOpenHoursState(config, serverNow),
@@ -417,9 +457,34 @@ async function selectDecoys(tx: Tx, input: {
  * the instant the qualification checks actually run. Tests inject a frozen
  * clock here instead of relying on the machine's real time.
  */
-export async function shunAttempt(actorId: string, requestId: string, clock: () => Date = () => new Date(), targetFriendId?: string) {
+export type ShunAttemptOptions = { friendId?: string; items?: readonly ShunAttackCode[] }
+
+/**
+ * `optionsOrFriend` keeps the old four-string-argument callers working. New
+ * clients pass `{ friendId, items }`; an explicit `items` array (including the
+ * empty one) means "use exactly this combination" and never falls back to a
+ * stale pending selection.
+ */
+export async function shunAttempt(actorId: string, requestId: string, clock: () => Date = () => new Date(), optionsOrFriend?: string | ShunAttemptOptions) {
+  const legacyFriendId = typeof optionsOrFriend === 'string' ? optionsOrFriend : undefined
+  const options = typeof optionsOrFriend === 'string' ? undefined : optionsOrFriend
+  const targetFriendId = options?.friendId ?? legacyFriendId
+  const explicitItems = options?.items !== undefined
+  const requestedCodes = explicitItems ? normalizeAttackCodes(options.items) : targetFriendId ? ['TARGET_FRIEND' as const] : undefined
+  if (explicitItems && !requestedCodes) throw new ShunError('COMBO_INVALID', '道具组合无效，请重新选择。')
+  if (requestedCodes && targetFriendId && !requestedCodes.includes('TARGET_FRIEND')) {
+    throw new ShunError('COMBO_INVALID', '指定好友需要选择任我顺。')
+  }
+  if (requestedCodes && !targetFriendId && requestedCodes.includes('TARGET_FRIEND')) {
+    throw new ShunError('COMBO_INVALID', '任我顺需要先选择一位好友。')
+  }
   const now = clock()
   const day = shunDay(now)
+  // V4.2.4 latency trace: stage offsets only, no user id, balance or random
+  // result. The request id is the same one the client keeps for retries.
+  const traceStarted = Date.now()
+  const trace: Record<string, number> = {}
+  const mark = (stage: string) => { trace[stage] = Date.now() - traceStarted }
   // Captured for the post-commit badge refresh of both sides of the transfer.
   let victimId: string | null = null
   const rangeStart = new Date(`${shunDay(new Date(now.getTime() - 6 * 86_400_000))}T00:00:00+08:00`)
@@ -430,15 +495,28 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     loadTargetPopulation(rangeStart, day, now),
     loadFriendIds(actorId),
   ])
+  mark('population+friends')
   const result = await shunTransaction(async (tx) => {
     const { config } = await settings(tx)
+    mark('settings')
     const previous = await tx.shunMasterRound.findUnique({ where: { actorId_requestId: { actorId, requestId } } })
     // A replay of a completed request must never take a second fee, and must
     // never reopen the letter decision either.
-    if (previous && targetFriendId && (previous.victimId !== targetFriendId || !await tx.shunItemRoundEffect.findUnique({
-      where: { roundId_code: { roundId: previous.id, code: 'TARGET_FRIEND' } },
-    }))) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
-    if (previous) return present(tx, previous, 'out')
+    if (previous) {
+      if (targetFriendId && previous.victimId !== targetFriendId) {
+        throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
+      }
+      if (requestedCodes && shunItemsFeatureEnabled()) {
+        const persisted = (await tx.shunItemRoundEffect.findMany({
+          where: { roundId: previous.id, code: { in: [...SHUN_ATTACK_CODES] } }, select: { code: true },
+        })).map((effect) => effect.code).sort((a, b) => SHUN_ATTACK_CODES.indexOf(a) - SHUN_ATTACK_CODES.indexOf(b))
+        const canonical = [...requestedCodes].sort((a, b) => SHUN_ATTACK_CODES.indexOf(a) - SHUN_ATTACK_CODES.indexOf(b))
+        if (persisted.length !== canonical.length || canonical.some((code, index) => persisted[index] !== code)) {
+          throw new ShunError('REQUEST_CONFLICT', '同一请求使用了不同的道具组合，请重试。')
+        }
+      }
+      return present(tx, previous, 'out')
+    }
     if (targetFriendId && !shunItemsFeatureEnabled()) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
     if (!config.enabled) throw new ShunError('DISABLED', '顺大师暂未开放。')
     // Authoritative opening-hours gate. Re-read inside the transaction (not the
@@ -467,17 +545,20 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     }
     const blocks = await tx.block.findMany({ where: { OR: [{ blockerId: actorId }, { blockedId: actorId }] },
       select: { blockerId: true, blockedId: true } })
-    const capped = await tx.shunMasterRound.groupBy({ by: ['victimId'], where: { day }, _count: { _all: true } })
-    const hitsByUser = new Map(capped.map((row) => [row.victimId, row._count._all]))
+    const quotaIds = [...new Set([...population.map((target) => target.id), ...played.map((round) => round.victimId)])]
+    const quotas = await receiveQuotas(tx, day, quotaIds)
+    mark('quotas+blocks')
+    const hitsByUser = quotas.normal
     if (shunItemsFeatureEnabled()) {
       const revenges = await tx.shunItemRoundEffect.findMany({
         where: revengeReceivedWhere(day), select: { round: { select: { actorId: true } } },
       })
       for (const { round } of revenges) hitsByUser.set(round.actorId, (hitsByUser.get(round.actorId) ?? 0) + 1)
     }
-    const excluded = new Set([actorId, ...played.map((round) => round.victimId),
-      ...[...hitsByUser].filter(([, count]) => count >= config.victimCap).map(([id]) => id),
+    const baseExcluded = new Set([actorId, ...played.map((round) => round.victimId),
       ...blocks.map((block) => block.blockerId === actorId ? block.blockedId : block.blockerId)])
+    const excluded = new Set([...baseExcluded,
+      ...[...hitsByUser].filter(([, count]) => count >= config.victimCap).map(([id]) => id)])
     const linked = [
       ...(actor.email && actor.emailVerifiedAt ? [{ email: actor.email, emailVerifiedAt: { not: null } }] : []),
       ...(actor.phone && actor.phoneVerifiedAt ? [{ phone: actor.phone, phoneVerifiedAt: { not: null } }] : []),
@@ -489,13 +570,18 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     // The population and its activity tiers were read before the transaction;
     // only the per-actor exclusions and the victim verification stay serialised.
     const eligibleTargets = population.filter((target) => !targetExclusions.has(target.id))
-    const targeted = targetFriendId ? eligibleTargets.find((target) => target.id === targetFriendId && friendIds.has(target.id)) : undefined
-    if (targetFriendId && !targeted) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
-    if (!eligibleTargets.length) {
+    // 任我顺 uses its own whole-site allowance: a friend at the ordinary cap is
+    // still eligible, but only until the single shared 任我顺 slot is taken.
+    const targeted = targetFriendId ? population.find((target) => target.id === targetFriendId
+      && friendIds.has(target.id) && !baseExcluded.has(target.id) && !relatedAccounts.has(target.id)) : undefined
+    if (targetFriendId && (!targeted || quotas.targetUsed.has(targetFriendId))) {
+      throw new ShunError('FRIEND_UNAVAILABLE', '这位好友今天暂时不能再顺取啦，换一位好友试试吧。')
+    }
+    if (!eligibleTargets.length && !targeted) {
       const funded = await tx.user.count({ where: { ...transactionAccount, points: { gt: 0 } } })
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '没有符合条件的顺取目标', source: 'WEB', operatorType: 'USER',
-        metadata: { funded, capped: capped.filter(row => row._count._all >= config.victimCap).length,
+        metadata: { funded, capped: [...hitsByUser].filter(([, count]) => count >= config.victimCap).length,
           blocked: blocks.length, linked: relatedAccounts.length, previouslyMatched: played.length } } })
       return null
     }
@@ -522,6 +608,7 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       return null
     }
     const accounts = await lockAccounts(tx, [actorId, victim.id])
+    mark('account-locks')
     victimId = victim.id
     const actorBalance = accounts.get(actorId)
     const victimBalance = accounts.get(victim.id)
@@ -529,6 +616,21 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
       || await tx.user.count({ where: { ...transactionAccount, id: { in: [actorId, victim.id] } } }) !== 2) {
       if (targeted) throw new ShunError('FRIEND_UNAVAILABLE', '暂不可顺取。')
       throw new ShunError('BALANCE', '账户状态或结算日期已变化，顺取次数未扣除。')
+    }
+    // Re-check quotas while the victim row is locked: two 任我顺 requests from
+    // different actors can both pass the pre-lock read above, but only the
+    // first one may consume the single whole-site allowance.
+    const quotaNow = await receiveQuotas(tx, day, [victim.id])
+    if (targeted && quotaNow.targetUsed.has(victim.id)) {
+      throw new ShunError('FRIEND_UNAVAILABLE', '这位好友今天暂时不能再顺取啦，换一位好友试试吧。')
+    }
+    if (!targeted && shunItemsFeatureEnabled()) {
+      const revengeHits = await tx.shunItemRoundEffect.count({
+        where: revengeReceivedWhere(day, victim.id),
+      })
+      if ((quotaNow.normal.get(victim.id) ?? 0) + revengeHits >= config.victimCap) {
+        throw new ShunError('NO_TARGET', '这位好友今天的普通被顺取次数已用完，今日次数不会扣除。')
+      }
     }
     if (targeted) {
       const [userAId, userBId] = [actorId, victim.id].sort()
@@ -542,26 +644,46 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     }
     const rolled = weightedIndex(config.probabilities) + 1
     const pending = shunItemsFeatureEnabled() ? await currentShunPending(tx, actorId, day) : null
-    if (targeted && pending) throw new ShunError('ITEM_PENDING', '请先取消待生效道具。')
-    const itemCode = targeted ? 'TARGET_FRIEND' : pending?.code
-    const activeItems = itemCode && await tx.shunItemConfigVersion.findFirst({
-      orderBy: { version: 'desc' }, include: { definitions: { where: { code: itemCode, enabled: true } } },
-    })
-    const effect = activeItems && activeItems.enabled && activeItems.definitions.length ? itemCode : null
-    if (targeted) {
-      const inventory = await tx.shunItemInventory.findUnique({ where: { userId_code: { userId: actorId, code: 'TARGET_FRIEND' } } })
-      if (!effect || !inventory?.available) throw new ShunError('ITEM_STOCK', '任我顺暂不可使用。')
+    if (targeted && pending && !explicitItems) throw new ShunError('ITEM_PENDING', '请先取消待生效道具。')
+    // Explicit combinations are authoritative. Legacy callers (old clients,
+    // old box flow) keep the single pending / implicit 任我顺 behaviour.
+    const codes: ShunAttackCode[] = requestedCodes ? [...requestedCodes]
+      : targeted ? ['TARGET_FRIEND']
+        : pending && (SHUN_ATTACK_CODES as readonly string[]).includes(pending.code) ? [pending.code as ShunAttackCode]
+          : []
+    if (codes.length && !shunItemsFeatureEnabled()) throw new ShunError('DISABLED', '顺大师道具暂未开放。', 404)
+    const combo: ShunCombo = resolveShunCombo(codes)
+    const activeItems = codes.length ? await tx.shunItemConfigVersion.findFirst({
+      orderBy: { version: 'desc' }, include: { definitions: { where: { code: { in: codes }, enabled: true } } },
+    }) : null
+    const enabledCodes = activeItems?.enabled ? activeItems.definitions.map((definition) => definition.code as ShunAttackCode) : []
+    const unavailable = codes.filter((code) => !enabledCodes.includes(code))
+    if (unavailable.length) throw new ShunError('ITEM_STOCK', `${SHUN_ITEM_CATALOG[unavailable[0]].name}暂不可使用，请重新选择。`)
+    const inventories = codes.length
+      ? await tx.shunItemInventory.findMany({ where: { userId: actorId, code: { in: codes } } })
+      : []
+    for (const code of codes) {
+      const balance = inventories.find((row) => row.code === code)
+      const reserved = pending?.code === code ? (balance?.pending ?? 0) : 0
+      if ((balance?.available ?? 0) + reserved < 1) {
+        throw new ShunError('ITEM_STOCK', `${SHUN_ITEM_CATALOG[code].name}库存不足，请重新选择。`)
+      }
     }
-    const additionalSuspect = effect === 'EXTRA_SUSPECT'
-    const amount = effect === 'DOUBLE_AMOUNT' ? Math.min(rolled * 2, 14, victimBalance) : Math.min(rolled, victimBalance)
+    // An explicitly empty or different combination must not silently use an
+    // older box reservation. Release it in the same transaction as the take.
+    if (pending && !codes.includes(pending.code as ShunAttackCode)) {
+      await releaseShunPending(tx, pending, day, `expire:${pending.reservationId}`)
+    }
+    const amount = Math.min(rolled * combo.multiplier, 14, victimBalance)
     // Decoys are chosen from the victim's friends first, then from recently
     // active accounts, always preferring the same public look as the real actor
     // so the true answer cannot be spotted by avatar or activity alone.
     const selectedDecoys = await selectDecoys(tx, {
       actorId, victimId: victim.id, actorHasAvatar: !!actor.avatarUrl,
-      actorTier: recencyTier(actor.lastActiveAt), count: additionalSuspect ? 3 : 2,
+      actorTier: recencyTier(actor.lastActiveAt), count: combo.decoyCount,
     })
-    if (selectedDecoys.length !== (additionalSuspect ? 3 : 2)) {
+    mark('decoys')
+    if (selectedDecoys.length !== combo.decoyCount) {
       await tx.userOperationLog.create({ data: { userId: actorId, category: 'SHUN_MASTER', action: 'NO_TARGET',
         summary: '候选不足，未扣除挂号费', source: 'WEB', operatorType: 'USER', metadata: { reason: 'INSUFFICIENT_DECOYS' } } })
       return null
@@ -584,12 +706,18 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     await tx.shunMasterSettings.update({ where: { id: 1 }, data: { reserved: { increment: amount } } })
     await ledger(tx, round.id, actorId, actorBalance, amount, 'take')
     await ledger(tx, round.id, victim.id, victimBalance, -amount, 'take')
-    if (effect && activeItems) {
-      const { entry } = await postShunItemMovement(tx, {
-        userId: actorId, code: effect, type: 'USED', requestKey: `round:${round.id}`, day, configVersion: activeItems.version,
-      }, { consumePending: !!pending })
-      if (pending) await tx.shunItemPending.delete({ where: { userId: actorId } })
-      await tx.shunItemRoundEffect.create({ data: { roundId: round.id, code: effect, entryId: entry.id, amount } })
+    if (activeItems) {
+      const usedPending = pending?.code && codes.includes(pending.code as ShunAttackCode)
+      for (const code of codes) {
+        const consumePending = pending?.code === code
+        const { entry } = await postShunItemMovement(tx, {
+          userId: actorId, code, type: 'USED',
+          requestKey: codes.length === 1 ? `round:${round.id}` : `round:${round.id}:${code}`,
+          day, configVersion: activeItems.version,
+        }, { consumePending })
+        await tx.shunItemRoundEffect.create({ data: { roundId: round.id, code, entryId: entry.id, amount } })
+      }
+      if (usedPending && pending) await tx.shunItemPending.delete({ where: { userId: actorId } })
     }
     if (itemDaily && played.length >= config.attempts && itemDaily.extraAttemptsUsed < itemDaily.extraAttemptsGranted) {
       await tx.shunItemDaily.update({
@@ -600,6 +728,8 @@ export async function shunAttempt(actorId: string, requestId: string, clock: () 
     return present(tx, round, 'out')
   })
   if (!result) throw new ShunError('NO_TARGET', '暂时没有可顺取的 EF，今日次数不会扣除。')
+  mark('settled')
+  console.info('[shun-latency]', { requestId, stages: trace, items: requestedCodes?.length ?? 0 })
   // Best effort, after commit: the take moved cumulative progress for both
   // accounts. A failed refresh never fails a settled transfer.
   for (const account of [actorId, victimId]) {
@@ -1503,42 +1633,60 @@ export async function recentShunItemDrop(userId: string) {
   } : null }
 }
 
-export async function shunTargetFriends(actorId: string) {
-  if (!shunItemsFeatureEnabled()) return { eligibleIds: [] }
+export async function shunTargetFriends(actorId: string, options: { q?: string; cursor?: string; limit?: number } = {}) {
+  const empty = { eligibleIds: [] as string[], friends: [] as Array<{
+    id: string; uid: number; nickname: string; displayName: string; remark: string | null; avatarUrl: string | null
+  }>, total: 0, nextCursor: null as string | null }
+  if (!shunItemsFeatureEnabled()) return empty
   const day = shunDay(new Date())
-  const [friends, actor, draft, previous, blocks] = await Promise.all([
+  const [friends, actor, previous, blocks] = await Promise.all([
     loadFriendIds(actorId),
     prisma.user.findFirst({
       where: { ...transactionAccount, id: actorId },
       select: { email: true, emailVerifiedAt: true, phone: true, phoneVerifiedAt: true },
     }),
-    prisma.shunMasterSettings.findUnique({ where: { id: 1 }, select: { config: true } }),
     prisma.shunMasterRound.findMany({ where: { actorId, day }, select: { victimId: true } }),
     prisma.block.findMany({
       where: { OR: [{ blockerId: actorId }, { blockedId: actorId }] },
       select: { blockerId: true, blockedId: true },
     }),
   ])
-  if (!actor || !friends.size) return { eligibleIds: [] }
-  const config = validateShunConfig(draft?.config) ?? defaultShunConfig
+  if (!actor || !friends.size) return empty
   const excluded = new Set([actorId, ...previous.map(({ victimId }) => victimId),
     ...blocks.map(({ blockerId, blockedId }) => blockerId === actorId ? blockedId : blockerId)])
   const ids = [...friends].filter((id) => !excluded.has(id))
-  if (!ids.length) return { eligibleIds: [] }
+  if (!ids.length) return empty
   const linked: Prisma.UserWhereInput[] = [
     ...(actor.email && actor.emailVerifiedAt ? [{ email: actor.email, emailVerifiedAt: { not: null } }] : []),
     ...(actor.phone && actor.phoneVerifiedAt ? [{ phone: actor.phone, phoneVerifiedAt: { not: null } }] : []),
   ]
-  const [eligibleFriends, taken, revenges] = await Promise.all([
-    prisma.user.findMany({ where: { ...transactionAccount, id: { in: ids }, points: { gt: 0 }, NOT: linked }, select: { id: true } }),
-    prisma.shunMasterRound.groupBy({ by: ['victimId'], where: { day, victimId: { in: ids } }, _count: { _all: true } }),
-    prisma.shunItemRoundEffect.findMany({
-      where: { ...revengeReceivedWhere(day), round: { actorId: { in: ids } } },
-      select: { round: { select: { actorId: true } } },
+  const [eligibleFriends, quotas, remarks] = await Promise.all([
+    prisma.user.findMany({
+      where: { ...transactionAccount, id: { in: ids }, points: { gt: 0 }, NOT: linked },
+      select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { displayName: true } } },
+      orderBy: [{ uid: 'asc' }, { id: 'asc' }],
     }),
+    receiveQuotas(prisma, day, ids),
+    prisma.friendRemark.findMany({ where: { ownerId: actorId, friendId: { in: ids } }, select: { friendId: true, remark: true } }),
   ])
-  const received = new Map(taken.map(({ victimId, _count }) => [victimId, _count._all]))
-  for (const { round } of revenges) received.set(round.actorId, (received.get(round.actorId) ?? 0) + 1)
-  // A UI hint only. shunAttempt repeats all eligibility checks under locks.
-  return { eligibleIds: eligibleFriends.filter(({ id }) => (received.get(id) ?? 0) < config.victimCap).map(({ id }) => id) }
+  // Only the viewer's own aliases are read; nothing from another user's
+  // address book can reach this list.
+  const remarkMap = new Map(remarks.map((row) => [row.friendId, row.remark]))
+  const all = eligibleFriends
+    // A friend with the ordinary quota full is still eligible for 任我顺:
+    // only the one shared 任我顺 slot can remove them from this list.
+    .filter((user) => !quotas.targetUsed.has(user.id))
+    .map((user) => ({
+      id: user.id, uid: user.uid, nickname: user.nickname,
+      displayName: remarkMap.get(user.id) || user.Profile?.displayName || user.nickname,
+      remark: remarkMap.get(user.id) ?? null, avatarUrl: user.avatarUrl,
+    }))
+  const matched = all.filter((friend) => matchesTargetFriend(friend, options.q ?? ''))
+  const offsetRaw = options.cursor === undefined ? 0 : Number(options.cursor)
+  const offset = Number.isSafeInteger(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0
+  const limit = Math.min(50, Math.max(1, Number.isSafeInteger(options.limit) ? options.limit! : 30))
+  const page = matched.slice(offset, offset + limit)
+  const next = offset + limit < matched.length ? String(offset + limit) : null
+  // A UI hint only. shunAttempt repeats every check under locks.
+  return { eligibleIds: all.map((friend) => friend.id), friends: page, total: matched.length, nextCursor: next }
 }

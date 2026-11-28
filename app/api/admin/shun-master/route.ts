@@ -94,6 +94,41 @@ export async function GET(request: Request) {
     bonusTotal: bonusAggregate._sum.bonusAwarded ?? 0,
     recoveredTotal: bonusAggregate._sum.recovered ?? 0,
   }
+  // V4.2.4: attack combinations are counted from the persisted effect rows, one
+  // amount per round, so a three-item take never inflates the settlement total.
+  const attackEffects = await prisma.shunItemRoundEffect.findMany({
+    where: { round: { day }, code: { in: ['TARGET_FRIEND', 'DOUBLE_AMOUNT', 'EXTRA_SUSPECT'] } },
+    select: { roundId: true, code: true },
+  })
+  const dayStart = new Date(`${day}T00:00:00+08:00`)
+  const failureLogs = await prisma.userOperationLog.findMany({
+    where: { category: 'SHUN_MASTER', action: 'NO_TARGET', occurredAt: { gte: dayStart, lt: new Date(dayStart.getTime() + 86_400_000) } },
+    select: { metadata: true }, take: 1000,
+  })
+  const failureReasons: Record<string, number> = {}
+  for (const log of failureLogs) {
+    const metadata = log.metadata
+    const reason = metadata && typeof metadata === 'object' && !Array.isArray(metadata) && 'reason' in metadata
+      ? String((metadata as Record<string, unknown>).reason) : 'UNSPECIFIED'
+    failureReasons[reason] = (failureReasons[reason] ?? 0) + 1
+  }
+  const byRound = new Map<string, string[]>()
+  for (const effect of attackEffects) byRound.set(effect.roundId, [...(byRound.get(effect.roundId) ?? []), effect.code])
+  const combinationCounts = new Map<string, number>()
+  for (const codes of byRound.values()) {
+    const key = [...codes].sort().join('+') || 'NONE'
+    combinationCounts.set(key, (combinationCounts.get(key) ?? 0) + 1)
+  }
+  const comboStats = {
+    day,
+    singleItem: [...byRound.values()].filter((codes) => codes.length === 1).length,
+    multiItem: [...byRound.values()].filter((codes) => codes.length > 1).length,
+    byCombination: [...combinationCounts].map(([combination, count]) => ({ combination, count })),
+    consumed: Object.fromEntries(['TARGET_FRIEND', 'DOUBLE_AMOUNT', 'EXTRA_SUSPECT']
+      .map((code) => [code, attackEffects.filter((effect) => effect.code === code).length])),
+    targetFriendQuotaUsed: attackEffects.filter((effect) => effect.code === 'TARGET_FRIEND').length,
+    failureReasons,
+  }
   // One instant for both fields: the panel must never show a window state and a
   // clock that disagree.
   const requestedAt = new Date()
@@ -103,7 +138,7 @@ export async function GET(request: Request) {
     openHoursNow: shunOpenHoursState(config, requestedAt), serverNow: requestedAt.toISOString(),
     records: records.slice(0, 50), hasMore: records.length > 50, amounts, totals, activePlayers: actors.length, audit, abuse,
     outstanding: { count: Number(outstanding.count), oldest: outstanding.oldest }, candidatePool, refusalAudit,
-    matchStats, notifyStats, bonusStats })
+    matchStats, notifyStats, bonusStats, comboStats })
 }
 
 export async function PATCH(request: Request) {

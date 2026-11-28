@@ -30,6 +30,8 @@ type Summary = {
   notifyStats: { day: string; pending: number; plain: number; letter: number; auto: number; retryAttempts: number }
   // V5: cumulative recovery-bonus audit (admin-only).
   bonusStats: { recoveredCount: number; bonusCount: number; bonusRate: number; bonusTotal: number; recoveredTotal: number }
+  comboStats: { day: string; singleItem: number; multiItem: number; targetFriendQuotaUsed: number
+    byCombination: { combination: string; count: number }[]; consumed: Record<string, number>; failureReasons: Record<string, number> }
   // V6: the daily window as the server judges it right now.
   openHoursNow: { openHoursEnabled: boolean; openTime: string; closeTime: string; label: string
     open: boolean; nextOpenAt: string | null }
@@ -37,7 +39,7 @@ type Summary = {
 }
 const refusalLabels = { LEAVE: '旧版明确退出', PROTECT: '旧版开启保护', UNPROTECT: '旧版关闭保护', REJOIN: '旧版重新参与' }
 const integerFields = [
-  ['attempts', '每日顺取次数'], ['victimCap', '每日被顺上限'], ['goldenMinutes', '黄金抓捕分钟'],
+  ['attempts', '每日顺取次数'], ['victimCap', '每日普通被顺取上限'], ['goldenMinutes', '黄金抓捕分钟'],
 ] as const
 
 export function ShunMasterAdmin() {
@@ -144,6 +146,9 @@ export function ShunMasterAdmin() {
         <input className="w-28 max-w-full border p-2" type="number" min={1} step={1} required value={config[key]}
           onChange={(event) => setConfig({ ...config, [key]: Number(event.target.value) })} />
       </label>)}
+        <p className="col-span-full text-sm text-[var(--foreground-muted)]">
+          任我顺专属被顺取上限固定为 1（全站共享）；每日被顺取总上限由普通上限 + 1 自动得出，当前为 {config.victimCap + 1}。
+        </p>
         {/* 后台隐藏机制：只改目标池优先级，不改任何顺取规则 */}
         <label className="flex min-w-0 flex-wrap items-center justify-between gap-2">好友命中概率（%）
           <input className="w-28 max-w-full border p-2" aria-label="好友命中概率" type="number" min={0} max={100} step={1} required
@@ -209,6 +214,16 @@ export function ShunMasterAdmin() {
           <li>累计原额追回挂号费 {data.bonusStats.recoveredTotal}</li>
         </ul>
         <p className="text-sm text-[var(--foreground-muted)]">额外奖励单独计入「顺大师 · 额外奖励」流水，不占用准备金、不扣被抓到用户余额，也不计入勋章「累计成功追回」进度。</p>
+      </details>
+      <details open><summary>组合道具统计 · {data.comboStats.day}</summary>
+        <ul>
+          <li>单道具顺取 {data.comboStats.singleItem} 笔 · 多道具组合 {data.comboStats.multiItem} 笔</li>
+          <li>任我顺专属额度已使用 {data.comboStats.targetFriendQuotaUsed} 次</li>
+          {(data.comboStats.byCombination ?? []).map((row) => <li key={row.combination}>{row.combination} · {row.count} 笔</li>)}
+          <li>道具消耗：任我顺 {data.comboStats.consumed?.TARGET_FRIEND ?? 0} · 碌卡 {data.comboStats.consumed?.DOUBLE_AMOUNT ?? 0} · 十面埋伏 {data.comboStats.consumed?.EXTRA_SUSPECT ?? 0}</li>
+          <li>组合失败原因：{Object.entries(data.comboStats.failureReasons ?? {}).map(([reason, count]) => `${reason} ${count}`).join(' · ') || '无'}</li>
+        </ul>
+        <p className="text-sm text-[var(--foreground-muted)]">组合笔数按顺取记录去重；同一笔三道具只计入一次金额结算。</p>
       </details>
       <details open><summary>匹配来源与活跃度命中分布 · {data.matchStats.day}</summary>
         <p>好友池命中 {data.matchStats.friendHits} 笔 / 全部 {data.matchStats.total} 笔 · 实际好友命中比例 {data.matchStats.friendRate}%</p>

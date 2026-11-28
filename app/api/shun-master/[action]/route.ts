@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { shunTargetFriends, recentShunItemDrop, setShunItemPending, sendShunItemGift, shunItemBox, shunItemHistory, ShunError, shunAttempt, shunPermanentOptOut, shunRecords, shunStatus, applyShunExtraAttempt } from '@/lib/shun-master'
+import { normalizeAttackCodes } from '@/lib/shun-combo'
 import { RegistrationFeeHistoryQueryError } from '@/lib/registration-fee'
 
 export const dynamic = 'force-dynamic'
@@ -33,7 +34,15 @@ export async function GET(request: Request, { params }: Context) {
       const limited = await enforceApiRateLimit(request, guard.user.id, {
         endpoint: 'shun-master:target-friends', user: { limit: 20, windowSeconds: 60 }, ip: { limit: 120, windowSeconds: 60 },
       })
-      return limited ?? json(await shunTargetFriends(guard.user.id))
+      if (limited) return limited
+      const query = new URL(request.url).searchParams
+      const q = (query.get('q') ?? '').trim().slice(0, 50)
+      const cursor = query.get('cursor') ?? undefined
+      const limitRaw = query.get('limit')
+      const limit = limitRaw === null ? undefined : Number(limitRaw)
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 50)) return json({ message: '分页参数无效。' }, 400)
+      if (cursor && !/^\d{1,6}$/.test(cursor)) return json({ message: '分页参数无效。' }, 400)
+      return json(await shunTargetFriends(guard.user.id, { q, cursor, limit }))
     }
     if (action === 'items') return json(await shunItemBox(guard.user.id))
     if (action === 'item-history') {
@@ -110,8 +119,12 @@ export async function POST(request: Request, { params }: Context) {
       if (body.friendId !== undefined && (typeof body.friendId !== 'string' || !/^[a-z0-9]{1,40}$/.test(body.friendId))) {
         return json({ message: '请求参数无效。' }, 400)
       }
-      if (body.friendId) return json(await shunAttempt(guard.user.id, body.requestId, undefined, body.friendId))
-      return json(await shunAttempt(guard.user.id, body.requestId))
+      const hasItems = Object.prototype.hasOwnProperty.call(body, 'items')
+      if (hasItems && !normalizeAttackCodes(body.items)) return json({ message: '道具组合无效，请重新选择。' }, 400)
+      return json(await shunAttempt(guard.user.id, body.requestId, undefined, {
+        friendId: body.friendId || undefined,
+        items: hasItems ? body.items : undefined,
+      }))
     }
     return json({ message: '请求参数无效。' }, 400)
   } catch (error) { return handleShunError(error) }
