@@ -227,10 +227,13 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
     }] : []),
   ]
 
+  // 关闭态只保留 <dialog> 骨架，内容整体不挂载：既保证不可见、不可交互，
+  // 也不会出现第二个实例或上一次的残留结果。
   return <dialog ref={dialog} className={styles.itemBox} aria-labelledby="shun-item-title" onCancel={(event) => {
     event.preventDefault()
     onClose()
   }}>
+    {!open ? null : <>
     <div className={styles.itemBoxHeader}>
       <h2 id="shun-item-title">百宝箱 · {box.total}</h2>
       <button type="button" onClick={onClose}>关闭</button>
@@ -382,5 +385,6 @@ export function ShunItemBox({ box, open, onClose, busy, errorMessage, gifting, d
         }}>{friend.displayName}{friend.available ? '' : ' · 暂不可顺取'}</button>
       </li>)}</ul>
     </section>}
+    </>}
   </dialog>
 }

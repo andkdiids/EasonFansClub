@@ -103,3 +103,23 @@ test('历史记录接口校验筛选与分页参数', () => {
   assert.match(route, /筛选条件无效/)
   assert.match(route, /分页参数无效/)
 })
+
+// V4.2.2 生产故障回归：V4.2.1 给 .itemBox 加了 display:flex，作者样式优先级
+// 高于浏览器对 dialog:not([open]) 的 display:none，导致未点击入口时百宝箱
+// 整块内容留在页面流里（无遮罩、与主页面重叠、被按钮遮挡）。
+test('百宝箱关闭态隐藏由 dialog 契约保证，不靠 z-index 掩盖', () => {
+  const css = readFileSync('app/shun-master/shun.module.css', 'utf8')
+  assert.match(css, /\.itemBox:not\(\[open\]\)\{display:none\}/, '关闭态必须显式 display:none')
+  assert.match(css, /\.itemBox\[open\]\{display:flex;flex-direction:column\}/, '分栏布局只能在打开态生效')
+  const base = css.match(/^\.itemBox\{[^}]*\}/m)?.[0] ?? ''
+  assert.ok(base, '必须存在 .itemBox 基础声明')
+  assert.equal(/display\s*:/.test(base), false, '基础 .itemBox 不得声明 display，否则会再次覆盖 dialog 默认隐藏')
+})
+
+test('百宝箱只在打开时挂载内容，关闭即整体卸载', () => {
+  const box = readFileSync('app/shun-master/ShunItemBox.tsx', 'utf8')
+  assert.match(box, /\{!open \? null : <>\s*\n\s*<div className=\{styles\.itemBoxHeader\}>/, '内容必须由 open 控制挂载')
+  const openGuard = box.indexOf('{!open ? null : <>')
+  const headerIndex = box.indexOf('styles.itemBoxHeader')
+  assert.ok(openGuard > 0 && openGuard < headerIndex, '挂载守卫必须包裹全部内容')
+})

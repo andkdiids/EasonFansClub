@@ -108,7 +108,12 @@
 .closed .hours{font-variant-numeric:tabular-nums;color:#7b2233}
 
 .itemToggle{margin-inline-start:auto}
-.itemBox{box-sizing:border-box;display:flex;flex-direction:column;width:min(680px,calc(100vw - 16px));max-height:85dvh;padding:0;border:1px solid #9b7952;border-radius:14px;background:var(--background,#f9f4ec);color:var(--foreground,#171717);overflow:hidden}
+/* 关闭态必须先于布局声明：作者样式里的 display 会覆盖浏览器对
+   dialog:not([open]) 的 display:none，未点击入口时整块内容会留在页面流里。 */
+.itemBox:not([open]){display:none}
+.itemBox{box-sizing:border-box;width:min(680px,calc(100vw - 16px));max-height:85dvh;padding:0;border:1px solid #9b7952;border-radius:14px;background:var(--background,#f9f4ec);color:var(--foreground,#171717);overflow:hidden}
+/* 分栏布局只在真正打开时生效，关闭态不可能再继承 flex 显示。 */
+.itemBox[open]{display:flex;flex-direction:column}
 .itemBox::backdrop{background:#16120cb3}
 .itemBoxHeader{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px clamp(12px,3vw,18px) 6px}
 .itemBox h2{font-size:1.05rem;font-weight:700}
