@@ -8,6 +8,7 @@ import { livePhotoIdFromUrl } from '@/lib/live-photo-markers'
 import { buildPostReviewUpdate, canTransitionPostModerationStatus, isPostModerationStatus, POST_REVIEW_PAGE_SIZE, type PostModerationStatus, type PostReviewableStatus } from '@/lib/post-moderation'
 import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds, type PostModerationHistoryRow } from '@/lib/post-moderation-history'
 import { postContentPlainText } from '@/lib/share-metadata'
+import { validateRichPostContent } from '@/lib/rich-text'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { rejectInvalidRequestOrigin, requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
@@ -271,8 +272,10 @@ async function clearApprovalFriendActivity(input: { postId: string; action: Revi
 
 function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[]) {
   const { richContent, ...postWithoutRichContent } = post
+  const rich = richContent == null ? null : validateRichPostContent(richContent)
   return {
     ...postWithoutRichContent,
+    ...(rich?.valid ? { richContent: rich.value } : {}),
     Board: withForumBoardDisplayName(post.Board),
     content: postContentPlainText(post.content, richContent),
     summary: post.summary ? postContentPlainText(post.summary) : post.summary,

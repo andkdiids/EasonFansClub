@@ -112,6 +112,7 @@ export type ReviewPostDetails = {
 }
 
 export type ReviewItem = {
+  richContent?: import('@/lib/rich-text').RichTextContent
   id: string
   sourceType: ReviewSourceType
   sourceId: string
