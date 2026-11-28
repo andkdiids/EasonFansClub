@@ -14,6 +14,10 @@ const queue: string[] = []
 const running = new Set<string>()
 let draining = false
 
+export function activeLivePhotoAssetIds() {
+  return new Set([...running, ...queue])
+}
+
 export function getFfmpegExecutable() {
   return process.env.FFMPEG_PATH?.trim() || ffmpegInstaller.path
 }
@@ -115,6 +119,7 @@ async function transcodeAsset(assetId: string, config: LivePhotoConfig) {
         thumbnailKey,
         videoKey,
         size: video.byteLength,
+        coverSize: cover.byteLength + thumbnail.byteLength,
         width: coverMeta.width ?? null,
         height: coverMeta.height ?? null,
         videoCodec: 'h264',

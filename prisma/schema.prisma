@@ -4403,6 +4403,7 @@ model LivePhotoAsset {
   audioCodec     String?
   hasAudio       Boolean             @default(false)
   size           Int?
+  coverSize      Int?
   widthSource    Int?
   heightSource   Int?
   createdAt      DateTime            @default(now())

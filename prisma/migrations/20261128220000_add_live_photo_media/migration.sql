@@ -22,6 +22,7 @@ CREATE TABLE `LivePhotoAsset` (
     `audioCodec` VARCHAR(64) NULL,
     `hasAudio` BOOLEAN NOT NULL DEFAULT false,
     `size` INTEGER NULL,
+    `coverSize` INTEGER NULL,
     `widthSource` INTEGER NULL,
     `heightSource` INTEGER NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

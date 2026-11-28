@@ -6,7 +6,7 @@ import { isLivePhotoMarker, livePhotoIdFromMarker } from '@/lib/live-photo-marke
 import { probeLivePhotoUpload, type LivePhotoProbeResult } from '@/lib/live-photo-probe'
 import { prisma } from '@/lib/prisma'
 import { deleteLivePhotoObjects, uploadPrivateLivePhotoObject } from '@/lib/live-photo-storage'
-import { enqueueLivePhotoTranscode } from '@/lib/live-photo-transcode'
+import { activeLivePhotoAssetIds, enqueueLivePhotoTranscode } from '@/lib/live-photo-transcode'
 
 export type LivePhotoServiceErrorCode =
   | 'FEATURE_DISABLED'
@@ -228,6 +228,31 @@ export async function cleanupAssetsForDeletedPost(postId: string): Promise<strin
   return cleaned
 }
 
+/** Auditable orphan sweep. Safe to call from a cron job via the admin API:
+ * it skips active transcodes and anything still referenced by a post/draft. */
+export async function cleanupOrphanLivePhotos(maxAgeHours = 24) {
+  const cutoff = new Date(Date.now() - Math.max(1, maxAgeHours) * 3_600_000)
+  const active = activeLivePhotoAssetIds()
+  const assets = await prisma.livePhotoAsset.findMany({
+    where: { updatedAt: { lt: cutoff } },
+    select: { id: true, ownerId: true, status: true, PostMedia: { select: { id: true } } },
+  })
+  const cleaned: string[] = []
+  for (const asset of assets) {
+    if (active.has(asset.id) || asset.PostMedia.length) continue
+    if (await draftReferencesAsset(asset.id, asset.ownerId)) continue
+    try {
+      await deleteLivePhotoAsset(asset.id, asset.ownerId)
+      cleaned.push(asset.id)
+    } catch (error) {
+      if (!(error instanceof LivePhotoServiceError && error.code === 'STILL_REFERENCED')) {
+        console.warn('[live-photo.cleanup]', { assetId: asset.id })
+      }
+    }
+  }
+  return cleaned
+}
+
 export async function listLivePhotoAssets(userId: string, limit = 30) {
   const assets = await prisma.livePhotoAsset.findMany({
     where: { ownerId: userId },
@@ -238,13 +263,16 @@ export async function listLivePhotoAssets(userId: string, limit = 30) {
 }
 
 export async function getLivePhotoStats() {
-  const [total, ready, failed, processing, coverSum, videoSum] = await Promise.all([
+  const orphanBefore = new Date(Date.now() - 24 * 3_600_000)
+  const [total, ready, failed, processing, coverSum, videoSum, orphan, failureGroups] = await Promise.all([
     prisma.livePhotoAsset.count(),
     prisma.livePhotoAsset.count({ where: { status: 'READY' } }),
     prisma.livePhotoAsset.count({ where: { status: 'FAILED' } }),
     prisma.livePhotoAsset.count({ where: { status: { in: ['PENDING', 'PROCESSING'] } } }),
-    prisma.livePhotoAsset.aggregate({ where: { status: 'READY' }, _sum: { width: true } }),
+    prisma.livePhotoAsset.aggregate({ where: { status: 'READY' }, _sum: { coverSize: true } }),
     prisma.livePhotoAsset.aggregate({ where: { status: 'READY' }, _sum: { size: true } }),
+    prisma.livePhotoAsset.count({ where: { updatedAt: { lt: orphanBefore }, PostMedia: { none: {} } } }),
+    prisma.livePhotoAsset.groupBy({ by: ['errorCode'], where: { status: 'FAILED' }, _count: { _all: true } }),
   ])
   return {
     total,
@@ -253,7 +281,13 @@ export async function getLivePhotoStats() {
     processing,
     successRate: total ? Math.round((ready / total) * 1000) / 10 : 0,
     videoBytes: videoSum._sum.size ?? 0,
-    coverPixels: coverSum._sum.width ?? 0,
+    coverBytes: coverSum._sum.coverSize ?? 0,
+    orphanCandidates: orphan,
+    failures: failureGroups
+      .filter((group) => group.errorCode)
+      .map((group) => ({ code: group.errorCode as string, count: group._count._all }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8),
   }
 }
 
