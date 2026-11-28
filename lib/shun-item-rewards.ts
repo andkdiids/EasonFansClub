@@ -147,7 +147,10 @@ async function processRewardEvent(sourceType: string, sourceId: string, userId: 
           where: counter, create: { userId, day, counter: event.kind, count: 1 }, update: { count: { increment: 1 } },
         })
         if (event.dropRoll < drop.chance) {
-          await grant('COMMUNITY_DROP', day, event.itemRoll)
+          // requestKey 带上行为来源，历史记录才能显示「社区互动 · 具体行为」。
+          // 每个用户每天仍只可能拿到一次社区掉落（behaviorGranted 门禁），
+          // 因此 (userId, type, requestKey) 的唯一约束语义不变。
+          await grant('COMMUNITY_DROP', `${day}:${event.kind}`, event.itemRoll)
           await tx.shunItemDaily.update({ where, data: { behaviorGranted: true } })
         }
       }

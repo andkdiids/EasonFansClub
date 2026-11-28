@@ -108,18 +108,81 @@
 .closed .hours{font-variant-numeric:tabular-nums;color:#7b2233}
 
 .itemToggle{margin-inline-start:auto}
-.itemBox{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 24px);padding:clamp(12px,3vw,24px);border:1px solid #9b7952;background:var(--background,#f9f4ec);color:var(--foreground,#171717);overflow:auto}
+.itemBox{box-sizing:border-box;display:flex;flex-direction:column;width:min(680px,calc(100vw - 16px));max-height:85dvh;padding:0;border:1px solid #9b7952;border-radius:14px;background:var(--background,#f9f4ec);color:var(--foreground,#171717);overflow:hidden}
 .itemBox::backdrop{background:#16120cb3}
-.itemBoxHeader{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
-.itemBox h2{font-size:1.3rem;font-weight:700}
-.itemGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,185px),1fr));gap:10px;margin-bottom:20px}
-.itemGrid li{display:grid;align-content:start;gap:6px;border:1px solid #9b7952;padding:12px;overflow-wrap:anywhere}
-.itemGrid svg{color:#c7a776;background:#171411;padding:4px}
-.itemGrid h3{font-weight:700}
-.itemBox button,.itemToggle{border:1px solid currentColor;padding:4px 10px}
+.itemBoxHeader{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px clamp(12px,3vw,18px) 6px}
+.itemBox h2{font-size:1.05rem;font-weight:700}
+.itemTabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:6px clamp(12px,3vw,18px) 8px;border-bottom:1px solid #9b795233}
+.itemTabs button{border:1px solid #9b795266;border-radius:999px;padding:5px 4px;font-size:.84rem;background:transparent;color:inherit}
+.itemTabs button[aria-selected="true"]{border-color:#9b7952;font-weight:700;background:#1714110f}
+.itemFilters{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
+.itemFilters button{border:1px solid #9b795266;border-radius:999px;padding:3px 10px;font-size:.78rem;background:transparent;color:inherit}
+.itemFilters button[class*="itemTabActive"]{border-color:#9b7952;font-weight:700;background:#1714110f}
+.itemBody{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:8px clamp(12px,3vw,18px) clamp(12px,3vw,18px)}
 .itemBox button:disabled{opacity:.55}
-.itemFriends{display:flex;flex-wrap:wrap;gap:6px;margin-block:8px 16px}
-.itemHistory li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;padding:6px 0;border-bottom:1px solid #9b7952}
-.giftDelivery{margin-block:12px;padding:12px;border:1px solid #9b7952}
-.giftDelivery img{width:32px;height:32px;object-fit:cover}
+.itemGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0 0 8px}
+.itemGrid li{display:block;min-width:0}
+.itemCard{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"icon title count" "desc desc desc";gap:3px 8px;width:100%;padding:8px;border:1px solid #9b795266;border-radius:10px;background:transparent;color:inherit;text-align:start}
+.itemIcon{grid-area:icon;display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:#1714110f;color:#8a6a3f}
+.itemTitle{grid-area:title;display:flex;flex-direction:column;gap:1px;min-width:0}
+.itemTitle strong{font-size:.84rem;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.itemTitle em,.itemDetailHead em{font-style:normal;font-size:.68rem}
+.itemCount{grid-area:count;align-self:start;font-size:.78rem;font-weight:700}
+.itemDesc{grid-area:desc;font-size:.7rem;line-height:1.35;opacity:.82;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.itemBadge{position:absolute;inset-inline-end:6px;inset-block-end:6px;padding:1px 5px;border-radius:999px;background:#b8292d14;color:#b8292d;font-size:.62rem}
+.rarityCommon{color:#6b6459}
+.rarityRare{color:#2f6f8f}
+.rarityPrecious{color:#9a6b12}
+.rarityHidden{color:#7a3fa0}
+.itemHint{font-size:.7rem;opacity:.7}
+.itemFootnote{font-size:.74rem;line-height:1.5;opacity:.78;margin:6px 0 0}
+.itemGuide ol{display:grid;gap:6px;margin:0;padding-inline-start:18px}
+.itemGuide li{font-size:.8rem;line-height:1.45}
+.itemGuide li span{display:block;font-size:.72rem;opacity:.72}
+.itemMore{width:100%;margin-top:8px;padding:6px;border:1px solid #9b795266;border-radius:8px;background:transparent;color:inherit;font-size:.8rem}
+.itemDetail,.itemConfirm,.itemSheet{margin-top:10px;padding:10px;border:1px solid #9b7952;border-radius:10px;background:#17141105}
+.itemDetailHead{display:flex;align-items:center;gap:8px}
+.itemDetailHead h3{flex:1 1 auto;font-size:.92rem;font-weight:700}
+.itemDetail p{font-size:.78rem;line-height:1.5;margin:6px 0 0}
+.itemDetailActions{display:grid;gap:6px;margin-top:10px}
+.itemDetailActions button{width:100%;padding:8px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;font-size:.84rem}
+.itemDetailActions button:first-child{background:#171411;color:#f9f4ec;border-color:#171411}
+.itemConfirm h3{font-size:.9rem;font-weight:700;margin-bottom:4px}
+.giftDelivery{margin-top:10px;padding:12px;border:1px solid #9b7952;border-radius:10px;background:#17141105}
+.giftDelivery h3{font-size:.95rem;font-weight:700;margin-bottom:6px}
+.giftReceiver{display:flex;align-items:center;gap:8px;font-size:.84rem}
+.giftReceiver img{width:32px;height:32px;border-radius:50%;object-fit:cover}
+.giftPair{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px}
+.giftPair div{display:grid;gap:2px;padding:8px;border:1px solid #9b795233;border-radius:8px}
+.giftPair small{font-size:.7rem;opacity:.72}
+.giftPair strong{font-size:.86rem}
+.itemFriends{display:flex;flex-wrap:wrap;gap:6px;margin-block:8px 4px}
+.itemFriends button{padding:4px 10px;border:1px solid #9b795266;border-radius:999px;background:transparent;color:inherit;font-size:.8rem}
+.itemHistory{display:grid;gap:0;margin:0}
+.itemHistory li{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 0;border-bottom:1px solid #9b795233;font-size:.8rem}
+.itemHistory li>span:first-child,.itemHistoryTitle{font-weight:600}
+.itemHistoryDetail{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.74rem;opacity:.8}
+.itemHistory time{grid-column:2;font-size:.7rem;opacity:.6;white-space:nowrap}
+@media (min-width:720px){.itemGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:299px){.itemGrid{grid-template-columns:1fr}}
+@media (prefers-color-scheme:dark){.itemDetailActions button:first-child{background:#f9f4ec;color:#171411;border-color:#f9f4ec}}
+
 .itemDot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#b8292d;margin-inline-start:5px;vertical-align:middle}
+
+/* V4.2.1 顺取结果弹窗：两个按钮上下排列、等宽等高、左右边缘对齐。 */
+.stackedActions{display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px}
+.stackedActions button{width:100%;min-height:44px;padding:8px;border:1px solid #9b7c52;background:transparent;color:#171717;font:inherit;text-align:center}
+.stackedActions button:disabled{opacity:.55}
+.stackedActions .primary{background:#171717;color:#f1e7d5;border-color:#171717;font-weight:650}
+@media (prefers-color-scheme:dark){
+  .stackedActions button{color:#f1e7d5}
+  .stackedActions .primary{background:#f1e7d5;color:#171717;border-color:#f1e7d5}
+}
+
+/* V4.2.1 快捷入口与顺取前道具选择。 */
+.quickRow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font-size:.82rem}
+.quickItem{padding:5px 10px;border:1px solid #9b7952;border-radius:999px;background:transparent;color:inherit;font-size:.8rem}
+.pickList{display:grid;gap:8px;margin:10px 0;padding:0;list-style:none}
+.pickList button{display:grid;gap:2px;width:100%;padding:10px;border:1px solid #9b795266;border-radius:10px;background:transparent;color:inherit;text-align:start}
+.pickList strong{font-size:.86rem}
+.pickList span{font-size:.74rem;opacity:.75}

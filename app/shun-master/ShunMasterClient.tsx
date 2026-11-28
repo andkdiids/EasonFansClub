@@ -318,6 +318,79 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
   }
   const usableItem = (code: string) => box?.enabled && box.items.some((item) => item.code === code && item.enabled && item.available > 0)
 
+  // V4.2.1 顺取前快捷使用道具：只有本次真的用得上、且当前持有的顺取类道具才弹选择。
+  const takeItems = box?.enabled ? box.items.filter((item) => ['EXTRA_SUSPECT', 'TARGET_FRIEND', 'DOUBLE_AMOUNT'].includes(item.code)
+    && item.enabled && item.available > 0) : []
+  const pendingTakeItem = box?.enabled ? box.items.find((item) => item.pending > 0) : undefined
+  const [pickOpen, setPickOpen] = useState(false)
+  const [pickMode, setPickMode] = useState<'choose' | 'items' | 'friends'>('choose')
+  const [pickFriends, setPickFriends] = useState<{ id: string; displayName: string; available: boolean }[]>()
+  const [pickError, setPickError] = useState('')
+  const [extraConfirm, setExtraConfirm] = useState(false)
+
+  function startTake() {
+    if (pendingTakeItem || takeItems.length) {
+      setPickError('')
+      setPickMode('choose')
+      setPickFriends(undefined)
+      setPickOpen(true)
+      void loadItems()
+      return
+    }
+    void attempt()
+  }
+
+  async function loadPickFriends() {
+    setPickError('')
+    setPickFriends(undefined)
+    try {
+      const [directory, eligibility] = await Promise.all([
+        fetch('/api/friends/list?directory=1', { cache: 'no-store' }),
+        fetch('/api/shun-master/target-friends', { cache: 'no-store' }),
+      ])
+      if (!directory.ok || !eligibility.ok) throw new Error()
+      const data: { friends: { id: string; displayName: string }[] } = await directory.json()
+      const { eligibleIds }: { eligibleIds: string[] } = await eligibility.json()
+      const eligible = new Set(eligibleIds)
+      setPickFriends(data.friends.map((friend) => ({ ...friend, available: eligible.has(friend.id) })))
+    } catch {
+      setPickError('无法加载通讯录，请重试。')
+    }
+  }
+
+  /** 选择道具后直接开始本次顺取，不需要回主页面再点一次顺一手。 */
+  async function pickTakeItem(code: string) {
+    if (code === 'TARGET_FRIEND') {
+      setPickMode('friends')
+      await loadPickFriends()
+      return
+    }
+    try {
+      // 切换待生效道具时先释放旧预占，再装备新的。
+      if (pendingTakeItem && pendingTakeItem.code !== code) {
+        await submitBoxItem('pending-item', { code: pendingTakeItem.code, cancel: true })
+      }
+      if (!pendingTakeItem || pendingTakeItem.code !== code) await submitBoxItem('pending-item', { code })
+      setPickOpen(false)
+      await attempt()
+    } catch (pickFailure) {
+      setPickError(pickFailure instanceof Error ? pickFailure.message : '暂时无法使用该道具。')
+      await loadItems()
+    }
+  }
+
+  async function cancelPendingAndTake() {
+    if (!pendingTakeItem) { setPickOpen(false); await attempt(); return }
+    try {
+      await submitBoxItem('pending-item', { code: pendingTakeItem.code, cancel: true })
+      setPickOpen(false)
+      await attempt()
+    } catch (pickFailure) {
+      setPickError(pickFailure instanceof Error ? pickFailure.message : '暂时无法取消该道具。')
+      await loadItems()
+    }
+  }
+
   function readPending<T>(action: string): T | undefined {
     if (!sessionUserId) return undefined
     try {
@@ -744,6 +817,16 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
             <div><dt>我的挂号费</dt><dd className={String(status.balance).length >= 8 ? styles.longBalance : undefined}><svg className={styles.coin} data-shun-balance-icon aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="#9b6a2d" strokeWidth="1.7"><circle cx="12" cy="12" r="10" /><path d="M9 12h6m-3-3v6" strokeLinecap="round" /></svg>{status.balance}</dd></div>
             <div><dt>今日剩余</dt><dd>{status.remaining}</dd></div><div><dt>今日被顺</dt><dd>{status.received}</dd></div>
           </dl>
+          {/* V4.2.1 顺手牵羊快捷入口：仅在持有且当天可参与时出现，服务端仍校验每日上限。 */}
+          {!status.optedOut && status.enabled && openNow && usableItem('EXTRA_ATTEMPT') && <div className={styles.quickRow}>
+            {extraConfirm ? <>
+              <span>增加一次今日主动顺取机会？</span>
+              <button type="button" className={styles.quickItem} disabled={!!busy}
+                onClick={() => { void submitBoxItem('extra-attempt').then(() => setExtraConfirm(false)) }}>确认使用</button>
+              <button type="button" disabled={!!busy} onClick={() => setExtraConfirm(false)}>取消</button>
+            </> : <button type="button" className={styles.quickItem} disabled={!!busy}
+              onClick={() => { setError(''); setExtraConfirm(true) }}>顺手牵羊 · 增加 1 次顺取机会</button>}
+          </div>}
           {status.optedOut ? <p className={styles.optedOut} role="status">
             <strong>你已永久退出顺大师</strong>
             <span>今后你不会再被顺取挂号费，也无法继续顺取其他 EF。</span>
@@ -754,7 +837,7 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
               <p>{shunOpenHoursHint(openHours)}</p>
               <p className={styles.hours}>{shunOpenHoursLine(openHours)}</p>
             </section>}
-            <button className={styles.primary} disabled={!!busy || !status.remaining || !openNow} onClick={() => void attempt()}>
+            <button className={styles.primary} disabled={!!busy || !status.remaining || !openNow} onClick={startTake}>
               {busy === 'animation' ? '看看哪个 EF 这么幸运...' : busy === 'attempt' ? '顺取中…'
                 : !openNow ? '休息中 💤' : status.remaining ? '顺一手' : '今日收工，明天继续！'}
             </button>
@@ -858,15 +941,68 @@ export function ShunMasterClient({ focusedRecord, initialSide, initialGuest, aut
           </> : <>
             <strong>+{result.amount} 挂号费</strong>
             <p className={styles.letterSent}>要不要给 TA 留一句匿名的话？不留言也可以。</p>
-            <div className={styles.composeActions}>
+            <div className={styles.stackedActions}>
               <button type="button" className={`${styles.primary} ${styles.wide}`} disabled={!!busy}
                 onClick={() => { setError(''); setStep('write') }}>匿名留言</button>
-              <button type="button" disabled={!!busy} onClick={() => void sendPlain(Boolean(status?.remaining))}>{busy === 'notify' ? '发送中…' : status?.remaining ? '不留言并再顺一手' : '不留言'}</button>
+              <button type="button" className={styles.wide} disabled={!!busy} onClick={() => void sendPlain(Boolean(status?.remaining))}>{busy === 'notify' ? '发送中…' : status?.remaining ? '不留言并再顺一手' : '不留言'}</button>
             </div>
           </>}
         </>}
       </div>}
     </dialog>
+    {/* V4.2.1 顺取前快捷使用道具：打开/选择/取消都不消耗道具与次数。 */}
+    {pickOpen && <div className={styles.optOutOverlay} role="dialog" aria-modal="true" aria-labelledby="shun-pick-title">
+      <div className={styles.optOutCard}>
+        <h2 id="shun-pick-title">要使用道具吗？</h2>
+        {pickError && <p role="alert">{pickError}</p>}
+        {pickMode === 'choose' && <>
+          {pendingTakeItem && <p>当前待生效：<strong>{pendingTakeItem.name}</strong></p>}
+          <p>本次顺取可以使用道具提升收益。</p>
+          <div className={styles.tabs}>
+            <button type="button" className={styles.primary} disabled={!!busy} onClick={() => setPickMode('items')}>使用道具</button>
+            <button type="button" disabled={!!busy} onClick={() => { setPickOpen(false); void attempt() }}>不使用道具</button>
+          </div>
+          {pendingTakeItem && <button type="button" className={styles.optOutLink} disabled={!!busy}
+            onClick={() => void cancelPendingAndTake()}>取消装备并普通顺取</button>}
+        </>}
+        {pickMode === 'items' && <>
+          {pendingTakeItem && <p>当前待生效：<strong>{pendingTakeItem.name}</strong>
+            <button type="button" className={styles.optOutLink} disabled={!!busy}
+              onClick={() => { setPickOpen(false); void attempt() }}>使用当前道具顺取</button>
+          </p>}
+          <ul className={styles.pickList}>
+            {takeItems.map((item) => <li key={item.code}>
+              <button type="button" disabled={!!busy} onClick={() => void pickTakeItem(item.code)}>
+                <strong>{item.name} ×{item.available}</strong>
+                <span>{item.description}</span>
+              </button>
+            </li>)}
+          </ul>
+          {!takeItems.length && <p>当前没有可用于本次顺取的道具。</p>}
+          <div className={styles.tabs}>
+            <button type="button" onClick={() => setPickMode('choose')}>返回</button>
+            <button type="button" onClick={() => setPickOpen(false)}>关闭</button>
+          </div>
+        </>}
+        {pickMode === 'friends' && <>
+          <p>选择一位通讯录好友，确认后直接开始本次顺取。</p>
+          {pickFriends?.length === 0 && <p>通讯录暂无好友。</p>}
+          <ul className={styles.itemFriends}>{pickFriends?.map((friend) => <li key={friend.id}>
+            <button type="button" disabled={!!busy || !friend.available}
+              onClick={() => { setPickOpen(false); void attempt(friend.id) }}>
+              {friend.displayName}{friend.available ? '' : ' · 暂不可顺取'}
+            </button>
+          </li>)}</ul>
+          <div className={styles.tabs}>
+            <button type="button" onClick={() => setPickMode('items')}>返回</button>
+            <button type="button" onClick={() => setPickOpen(false)}>关闭</button>
+          </div>
+        </>}
+        {pickMode === 'choose' && <div className={styles.tabs}>
+          <button type="button" onClick={() => setPickOpen(false)}>关闭</button>
+        </div>}
+      </div>
+    </div>}
     {step === 'animate' && <SendAnonymousLetter message={message.trim()} onComplete={() => {
       // The letter is already stored: the animation only reveals the result.
       setStep('delivered')
