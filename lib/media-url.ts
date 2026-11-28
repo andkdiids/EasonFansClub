@@ -35,22 +35,43 @@ export function buildPublicMediaUrl(key: string) {
 /** Live photo covers/videos are served by our own guarded API, not the CDN. */
 export const LIVE_PHOTO_API_PREFIX = '/api/media/live-photo/'
 
-/**
- * Old mobile clients only know how to render absolute media URLs. Keep the
- * stored value relative but hand them an absolute one when the public app
- * origin is configured. The variable is `NEXT_PUBLIC_*` on purpose so server
- * and client render the exact same string.
- */
-function absoluteAppUrl(path: string) {
-  const base = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, '')
-  if (!base) return path
+const CANONICAL_APP_ORIGIN = 'https://ecfc.fans'
+const LOCAL_APP_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'])
+
+function safeAppOrigin(value?: string | null) {
+  const base = trimValue(value)?.replace(/\/+$/, '')
+  if (!base) return null
   try {
     const parsed = new URL(base)
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return path
-    return `${parsed.origin}${path}`
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    const hostname = parsed.hostname.toLowerCase()
+    // A localhost base is only meaningful on a developer machine; in production
+    // it would hand native clients an unreachable cover URL.
+    if (process.env.NODE_ENV === 'production' && (LOCAL_APP_HOSTS.has(hostname) || hostname.endsWith('.localhost'))) {
+      return null
+    }
+    return parsed.origin
   } catch {
-    return path
+    return null
   }
+}
+
+/**
+ * Old mobile clients only know how to render absolute media URLs, and guarded
+ * live photo covers are served by our own API rather than the CDN, so they
+ * cannot borrow the media gateway's absolute base. Keep the stored value
+ * relative but hand those clients an absolute one.
+ *
+ * `NEXT_PUBLIC_APP_URL` is the documented knob; `APP_URL` is what the share
+ * metadata layer already reads. Production finally falls back to the canonical
+ * origin so a missing env var can never downgrade a live photo cover to a bare
+ * path that a native image loader refuses to resolve.
+ */
+function absoluteAppUrl(path: string) {
+  const origin = safeAppOrigin(process.env.NEXT_PUBLIC_APP_URL)
+    || safeAppOrigin(process.env.APP_URL)
+    || (process.env.NODE_ENV === 'production' ? CANONICAL_APP_ORIGIN : null)
+  return origin ? `${origin}${path}` : path
 }
 
 function parseMediaPublicBaseUrl() {

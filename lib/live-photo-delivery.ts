@@ -5,33 +5,45 @@ import { headPrivateLivePhotoObject, readPrivateLivePhotoObject } from '@/lib/li
 import { isAdminRole, resolveRequestAuth } from '@/lib/security'
 
 export async function deliverLivePhoto(request: Request, assetId: string, kind: 'cover' | 'video') {
+  // These responses leave the middleware's no-store wrapper behind (the two
+  // read paths are opened so approved posts stay cacheable), so every refusal
+  // must opt out of caching itself. A cached 403 would otherwise outlive the
+  // approval that is supposed to make the same URL readable.
+  const refusal = (status: number, code: string, message: string) => NextResponse.json(
+    { code, message },
+    { status, headers: { 'Cache-Control': 'private, no-store, max-age=0' } },
+  )
   const assetIdPattern = /^[a-zA-Z0-9_-]{8,64}$/
   if (!assetIdPattern.test(assetId)) {
-    return NextResponse.json({ code: 'INVALID_REQUEST', message: '媒体标识无效' }, { status: 400 })
+    return refusal(400, 'INVALID_REQUEST', '媒体标识无效')
   }
   const auth = await resolveRequestAuth(request)
   const userId = auth.user?.id ?? null
   const privileged = !!auth.user && isAdminRole(auth.user.role)
   const asset = await canViewLivePhotoAsset(assetId, userId, privileged)
   if (!asset) {
-    return NextResponse.json({ code: 'FORBIDDEN', message: '媒体不可访问' }, { status: 403 })
+    return refusal(403, 'FORBIDDEN', '媒体不可访问')
   }
   const key = kind === 'video' ? asset.videoKey : asset.coverKey
   if (!key) {
-    return NextResponse.json({ code: 'NOT_READY', message: '媒体仍在处理中' }, { status: 404 })
+    return refusal(404, 'NOT_READY', '媒体仍在处理中')
   }
 
   let total = 0
   try {
     total = await headPrivateLivePhotoObject(key)
   } catch {
-    return NextResponse.json({ code: 'NOT_FOUND', message: '媒体资源不存在' }, { status: 404 })
+    return refusal(404, 'NOT_FOUND', '媒体资源不存在')
   }
   const range = resolveByteRange(request.headers.get('range'), total)
   if (!range) {
     return new NextResponse(null, {
       status: 416,
-      headers: { 'Content-Range': `bytes */${total}`, 'Accept-Ranges': 'bytes' },
+      headers: {
+        'Content-Range': `bytes */${total}`,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'private, no-store, max-age=0',
+      },
     })
   }
 
