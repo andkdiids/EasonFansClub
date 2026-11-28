@@ -509,6 +509,9 @@ export type InspectedSelection = {
   /** Set when the still claims a clip but the head does not carry its length;
    * the server still has to extract and verify it. */
   motionPhotoClaimed?: boolean
+  /** An XMP packet exists even when no motion-photo marker was recognised.
+   * Diagnostics only: a vendor block we cannot read is not a live photo. */
+  hasXmp?: boolean
   imageContainer: ImageContainer
   videoContainer: VideoContainer
 }
@@ -564,11 +567,15 @@ export function inspectSelection(input: SelectionBytes): InspectedSelection {
 
   const trailerBytes = motionPhotoTrailer(input, imageContainer)
   if (trailerBytes) {
-    return { kind: 'live-photo', pairing: 'MOTION_PHOTO', trailerBytes, imageContainer, videoContainer }
+    return { kind: 'live-photo', pairing: 'MOTION_PHOTO', trailerBytes, imageContainer, videoContainer, hasXmp: true }
   }
 
+  const xmpText = imageContainer === 'jpeg' ? latin1Text(input.head, MOTION_PHOTO_XMP_BYTES) : ''
+  // The Adobe XMP packet header is the reliable marker; vendor blocks without
+  // it are plain XML and must not be reported as XMP present.
+  const hasXmp = /http:\/\/ns\.adobe\.com\/xap\/1\.0\/|xmpmeta/i.test(xmpText)
   const meta = imageContainer === 'jpeg'
-    ? motionPhotoMetadata(latin1Text(input.head, MOTION_PHOTO_XMP_BYTES))
+    ? motionPhotoMetadata(xmpText)
     : { marker: false }
   if (meta.marker) {
     const declared = meta.paddedLength ?? meta.videoLength
@@ -576,22 +583,22 @@ export function inspectSelection(input: SelectionBytes): InspectedSelection {
     // A length that cannot fit inside the file is a false claim: the photo is
     // provably not a motion photo, so it must not take the live photo path.
     if (declared && knownSize > 0 && declared >= knownSize) {
-      return { kind: 'image', imageContainer, videoContainer }
+      return { kind: 'image', imageContainer, videoContainer, hasXmp }
     }
     // The still says it carries a clip but this 512KB head has no usable
     // length, so only the server can decide. Sending it down the live photo
     // path keeps the original bytes intact; the server extracts the clip or
     // reports a recoverable failure instead of silently flattening the file.
-    return { kind: 'live-photo', pairing: 'MOTION_PHOTO', imageContainer, videoContainer, motionPhotoClaimed: true }
+    return { kind: 'live-photo', pairing: 'MOTION_PHOTO', imageContainer, videoContainer, motionPhotoClaimed: true, hasXmp }
   }
 
   const appleIdentifier = findIdentifier(input.head) ?? findIdentifier(input.tail)
   if (appleIdentifier) {
     // The still claims a paired clip. Until that exact clip shows up in the
     // same selection it is only a normal photo, and it must stay one.
-    return { kind: 'image', imageContainer, videoContainer, appleIdentifier, missingPairedVideo: true }
+    return { kind: 'image', imageContainer, videoContainer, appleIdentifier, missingPairedVideo: true, hasXmp }
   }
-  return { kind: 'image', imageContainer, videoContainer }
+  return { kind: 'image', imageContainer, videoContainer, hasXmp }
 }
 
 /**

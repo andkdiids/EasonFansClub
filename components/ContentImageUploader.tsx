@@ -54,6 +54,8 @@ export type UploadDiagnostic = {
   videoContainer: string
   trailerBytes?: number
   motionPhotoClaimed?: boolean
+  /** Any XMP packet at all, even when no motion-photo marker was recognised. */
+  hasXmp?: boolean
   /** Presence only. The identifier value itself is a pairing token and is
    * never copied into a report. */
   appleIdentifier?: boolean
@@ -244,7 +246,7 @@ function buildDiagnosticReport(item: PendingUpload, completed = false) {
     `浏览器: ${diagnostic?.userAgent ?? '-'}`,
     `原始文件: ${diagnostic?.fileType || '(未提供 MIME)'} / ${number(diagnostic?.fileSize ?? item.file.size)} bytes`,
     `客户端识别: kind=${diagnostic?.kind ?? item.kind} pairing=${diagnostic?.pairing ?? '-'} image=${diagnostic?.imageContainer ?? '-'} video=${diagnostic?.videoContainer ?? '-'} trailer=${number(diagnostic?.trailerBytes)} claimed=${diagnostic?.motionPhotoClaimed ?? false}`,
-    `运动照片标记: motionPhoto=${diagnostic?.motionPhotoClaimed ?? false} appleIdentifier=${diagnostic?.appleIdentifier ?? false} missingPairedVideo=${diagnostic?.missingPairedVideo ?? false}`,
+    `运动照片标记: xmp=${diagnostic?.hasXmp ?? false} motionPhoto=${diagnostic?.motionPhotoClaimed ?? false} appleIdentifier=${diagnostic?.appleIdentifier ?? false} missingPairedVideo=${diagnostic?.missingPairedVideo ?? false}`,
     `服务端判定: pairing=${diagnostic?.serverPairing ?? '-'} size=${number(diagnostic?.serverVideoBytes)} coverSize=${number(diagnostic?.serverCoverBytes)} ${number(diagnostic?.serverWidth)}x${number(diagnostic?.serverHeight)} durationMs=${number(diagnostic?.serverDurationMs)}`,
     `转码结果: v=${diagnostic?.serverVideoCodec ?? '-'} a=${diagnostic?.serverAudioCodec ?? '-'} hasAudio=${diagnostic?.serverHasAudio ?? '-'}`,
     `最终类型: ${item.kind === 'live-photo' ? 'LIVE_PHOTO' : 'IMAGE'}（表单内=${diagnostic?.mediaValue ?? '-'}）`,
@@ -728,6 +730,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
           videoContainer: item.videoContainer,
           ...(item.trailerBytes ? { trailerBytes: item.trailerBytes } : {}),
           ...(item.motionPhotoClaimed ? { motionPhotoClaimed: true } : {}),
+          ...(item.hasXmp ? { hasXmp: true } : {}),
           ...(item.appleIdentifier ? { appleIdentifier: true } : {}),
           ...(item.missingPairedVideo ? { missingPairedVideo: true } : {}),
           requestId: '',
